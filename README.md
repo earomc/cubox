@@ -1,5 +1,5 @@
 # cubox
-A super fast Minecraft seed viewer based on [SteelMC's](github.com/Steel-Foundation/SteelMC/) world generator. Huge thanks to them :)))
+A super fast Minecraft seed viewer based on [SteelMC's](https://github.com/Steel-Foundation/SteelMC/) world generator. Huge thanks to them :)))
 
 # Goals
 This should be at least as fast as cubiomes-viewer and chunkbase. I also want to be able to zoom out INSANELY far so you can see the whole Minecraft world in all its glory at once.
