@@ -8,16 +8,13 @@ use steel_worldgen::biomes::BiomeSourceKind;
 use crate::{cli::cli, tile_renderer::{TileKey, render_tile}};
 
 fn main() {
-    let cmd = cli();
-
-    let matches = cmd.get_matches();
+    let matches = cli().get_matches();
+    
     let seed = *matches.get_one::<u64>("seed").unwrap();
     let tiles_per_side = *matches.get_one::<i32>("tiles").unwrap();
     let tile_size_px = *matches.get_one::<usize>("tile-size").unwrap();
     let scale = *matches.get_one::<u8>("scale").unwrap();
     let sample_height = *matches.get_one::<i32>("sample-height").unwrap();
-
-    let biome_source = BiomeSourceKind::overworld(seed);
 
     let half = tiles_per_side / 2;
     let keys: Vec<TileKey> = (0..tiles_per_side)
@@ -32,6 +29,7 @@ fn main() {
         })
         .collect();
 
+    let biome_source = BiomeSourceKind::overworld(seed);
     let start = Instant::now();
     let tiles: Vec<Vec<u8>> = keys.par_iter().map(|&k| render_tile(&biome_source, k)).collect();
     println!("generated {} tiles in {:?}", tiles.len(), start.elapsed());
