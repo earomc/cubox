@@ -14,13 +14,14 @@ pub struct TileKey {
 }
 
 /// Renders one tile to RGB bytes (TILE * TILE * 3).
+/// perf: instead of setting 3 bytes per pixel, set one byte with a biome id?
 pub fn render_tile(source: &BiomeSourceKind, key: TileKey) -> Vec<u8> {
     let stride = 1i32 << key.scale;
     let origin_x = key.x * key.tile_size_px as i32 * stride;
     let origin_z = key.z * key.tile_size_px as i32 * stride;
 
     let mut sampler = source.chunk_sampler();
-    let mut rgb = vec![0u8; key.tile_size_px * key.tile_size_px * 3];
+    let mut rgb = vec![0u8; key.tile_size_px * key.tile_size_px * 3]; // perf: avoid heap allocation for every tile
 
     for (i, pixel) in rgb.chunks_exact_mut(3).enumerate() {
         // + stride / 2 samples the center of the pixel's area, not its corner
