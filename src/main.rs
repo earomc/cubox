@@ -16,7 +16,7 @@ fn main() {
             println!("launching gui");
             if let Err(err) = crate::gui::run() {
                 log::error!("{err}");
-                std::process::exit(1);
+                return;
             }
         },
         Some(("img", matches)) => {
