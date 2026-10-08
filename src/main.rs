@@ -14,7 +14,10 @@ fn main() {
     match matches.subcommand() {
         Some(("gui", _)) => {
             println!("launching gui");
-            crate::gui::run();
+            if let Err(err) = crate::gui::run() {
+                log::error!("{err}");
+                std::process::exit(1);
+            }
         },
         Some(("img", matches)) => {
             let seed = *matches.get_one::<u64>("seed").unwrap();
