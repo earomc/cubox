@@ -1,13 +1,13 @@
 # cubox
 
-**A super fast Minecraft seed viewer, from single blocks out to the whole world.**
+**A super fast Minecraft seed viewer, from 4×4 block quarts out to the whole world.**
 
 [![CI](https://github.com/earomc/cubox/actions/workflows/ci.yml/badge.svg)](https://github.com/earomc/cubox/actions/workflows/ci.yml)
 [![Latest release](https://img.shields.io/github/v/release/earomc/cubox?sort=semver)](https://github.com/earomc/cubox/releases/latest)
 [![License: AGPL-3.0-or-later](https://img.shields.io/badge/license-AGPL--3.0--or--later-blue)](LICENSE)
 
 <p align="center">
-  <img src="docs/media/zoom.webp" alt="Zooming out from a few hundred blocks to the whole 60 million block world" width="640">
+  <img src="docs/media/zoom.webp" alt="Zooming out from a few hundred blocks to the whole 60 million block world" width="560">
 </p>
 
 cubox draws the biome map of any Minecraft seed using [SteelMC's](https://github.com/Steel-Foundation/SteelMC/)
@@ -19,11 +19,13 @@ cubes/boxes ... so it works in multiple ways I guess ...
 
 ## Features
 
-- **Smooth pan and zoom** from single quarts (4×4 blocks) out to the entire 60 million block world.
+- **Smooth pan and zoom** from quarts, the 4×4 block cells biomes are generated in, out to the entire 60 million
+  block world.
 - **Accurate colors at every zoom level.** Zoomed out, every pixel shows the average color of the area it covers,
   blended in a perceptual color space. Each zoom level is calibrated against the real world, so the map has exactly
   as much contrast as the true view: crisp up close, an honest haze where a pixel covers thousands of biomes.
 - **Overworld, nether and end**, with the height to sample biomes at (sample below the surface to find caves).
+- **Seeds like in Minecraft:** numbers, negative ones too, or any text, turned into the same seed the game uses.
 - **Go to coordinates** and the biome under the cursor.
 - **Fast:** tiles are generated on all cores, centre first, with quick coarse previews while you zoom.
   Work for tiles that leave the screen is cancelled.
@@ -72,6 +74,8 @@ Run `cubox` to open the viewer.
 
 ```sh
 cubox gui 12345 --dimension nether        # open the viewer with a seed and dimension
+cubox gui "my cool world"                 # text seeds work like in Minecraft
+cubox img -4172144997902289642            # negative seeds too
 cubox img 12345 --scale 6 --tiles 8       # render map.png: 8x8 tiles of 128 px, 1 px = 256 blocks
 cubox img 12345 -d end --scale 2 -y 64    # the end, 1 px = 16 blocks
 cubox --help                              # everything else
@@ -120,6 +124,7 @@ changelog section as release notes.
 ## Roadmap
 
 - **Structures:** find villages, strongholds, monuments and other structures, and search the world for them.
+- **Large biomes** worlds, once SteelMC's world generator supports them.
 - **Web version:** cubox renders with wgpu, which also runs in the browser through WebGPU/WebGL.
 - macOS app bundle and code signing, and a Windows build without a console window.
 

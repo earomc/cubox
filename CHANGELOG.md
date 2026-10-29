@@ -14,7 +14,8 @@ First release.
 
 ### Added
 
-- Interactive map: drag to pan, scroll to zoom, from single quarts out to the whole world.
+- Interactive map: drag to pan, scroll to zoom, from quarts (4×4 blocks) out to the whole world.
+- Seeds like in Minecraft: numbers, negative ones too, or any text, hashed like the game does.
 - Accurate colors at every zoom level: pixels average several biome samples in Oklab, and every
   level is calibrated so the map has the contrast of the real area averages. Zoomed far out the
   world fades into its true average color instead of turning into noise.
