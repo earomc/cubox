@@ -1,20 +1,23 @@
 mod biome_colors;
 mod cli;
+mod dimension;
 mod tile_renderer;
 mod gui;
 use rayon::prelude::*;
 use std::time::Instant;
-use steel_worldgen::biomes::BiomeSourceKind;
 
-use crate::{cli::build_cmd, tile_renderer::{TileKey, render_tile}};
+use crate::{cli::build_cmd, dimension::Dimension, tile_renderer::{Shading, TileKey, calibrate, render_tile, world_mean}};
 
 fn main() {
     let mut cmd = build_cmd();
     let matches = cmd.get_matches_mut();
     match matches.subcommand() {
-        Some(("gui", _)) => {
+        Some(("gui", matches)) => {
             println!("launching gui");
-            if let Err(err) = crate::gui::run() {
+            let seed = *matches.get_one::<u64>("seed").unwrap();
+            let dimension = Dimension::from_name(matches.get_one::<String>("dimension").unwrap()).unwrap();
+            let script = matches.get_one::<std::path::PathBuf>("script").cloned();
+            if let Err(err) = crate::gui::run(seed, dimension, script) {
                 log::error!("{err}");
                 return;
             }
@@ -25,6 +28,9 @@ fn main() {
             let tile_size_px = *matches.get_one::<usize>("tile-size").unwrap();
             let scale = *matches.get_one::<u8>("scale").unwrap();
             let sample_height = *matches.get_one::<i32>("sample-height").unwrap();
+            let samples = *matches.get_one::<u8>("samples").unwrap();
+            let dimension = Dimension::from_name(matches.get_one::<String>("dimension").unwrap()).unwrap();
+            let exact = matches.get_flag("exact");
 
             let half = tiles_per_side / 2;
             let keys: Vec<TileKey> = (0..tiles_per_side)
@@ -33,15 +39,19 @@ fn main() {
                         scale,
                         sample_height,
                         tile_size_px,
+                        samples,
                         x: tx - half,
                         z: tz - half,
                     })
                 })
                 .collect();
 
-            let biome_source = BiomeSourceKind::overworld(seed);
+            let biome_source = dimension.biome_source(seed);
             let start = Instant::now();
-            let tiles: Vec<Vec<u8>> = keys.par_iter().map(|&k| render_tile(&biome_source, k)).collect();
+            let mean = world_mean(&biome_source, sample_height);
+            let shading = if exact { Shading::exact(mean) } else { calibrate(&biome_source, keys[0], mean) };
+            let tiles: Vec<Vec<u8>> =
+                keys.par_iter().map(|&k| render_tile(&biome_source, k, &shading, &|| true).unwrap().rgb).collect();
             println!("generated {} tiles in {:?}", tiles.len(), start.elapsed());
 
             // Pixels per side, and how much world each pixel covers.
