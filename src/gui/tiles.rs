@@ -84,7 +84,8 @@ impl World {
         // a plain thread, not a rayon job: workers wait for these results and must not be needed for them
         std::thread::spawn(move || {
             for scale in 0..=MAX_SCALE {
-                for samples in [samples, 1] {
+                // the setting and the one sample cover tiles, once if they are the same
+                for samples in if samples == 1 { vec![1] } else { vec![samples, 1] } {
                     // stop once the world was replaced, e.g. by another seed
                     let Some(world) = weak.upgrade() else { return };
                     let key = TileKey {

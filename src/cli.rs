@@ -72,7 +72,7 @@ pub(crate) fn build_cmd() -> Command {
                     .long("samples")
                     .help("Samples per axis per pixel. The samples are averaged, so zoomed out maps blend biomes instead of aliasing. Cost grows with samples^2")
                     .value_parser(value_parser!(u8).range(1..=16))
-                    .default_value("2")
+                    .default_value("1")
                 )
                 .arg(Arg::new("dimension")
                     .long("dimension")

@@ -239,7 +239,8 @@ impl State {
 
         let biome_source = Arc::new(dimension.biome_source(seed));
         let sample_height = dimension.default_height();
-        let samples = 2;
+        // more samples show more of the real variation far out, but are hard to tell apart and much slower
+        let samples = 1;
         let ui = Ui {
             seed,
             seed_text: seed.to_string(),

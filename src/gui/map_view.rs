@@ -186,7 +186,10 @@ impl MapView {
             // finer ones, which are sharper but might only cover part of it
             if !tile.as_ref().is_some_and(|(_, alpha)| *alpha >= 1.0) {
                 draw_ancestor(&mut out, tiles, now, key, screen);
-                if let Some((tex, _)) = tiles.get(&key.cover(), now) {
+                // with one sample per pixel the tile is its own cover, it must not hide its fade in
+                if key.cover() != key
+                    && let Some((tex, _)) = tiles.get(&key.cover(), now)
+                {
                     out.push(tex, screen, FULL_UV, 1.0);
                 }
                 draw_descendants(&mut out, tiles, now, key, screen, MAX_STAND_IN_DOWN);
