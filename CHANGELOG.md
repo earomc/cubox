@@ -8,7 +8,7 @@ The release workflow publishes the section of a version as its release notes.
 
 ## [Unreleased]
 
-## [0.1.0] - 2026-10-29
+## [0.1.0] - 2026-10-30
 
 First release.
 
