@@ -2,6 +2,7 @@ mod biome_colors;
 mod cli;
 mod dimension;
 mod gui;
+mod seed;
 mod tile_renderer;
 use rayon::prelude::*;
 use std::time::Instant;
@@ -16,13 +17,13 @@ fn main() {
     let matches = build_cmd().get_matches();
     match matches.subcommand() {
         Some(("gui", matches)) => {
-            let seed = *matches.get_one::<u64>("seed").unwrap();
+            let seed = *matches.get_one::<i64>("seed").unwrap();
             let dimension = Dimension::from_name(matches.get_one::<String>("dimension").unwrap()).unwrap();
             let script = matches.get_one::<std::path::PathBuf>("script").cloned();
             run_gui(seed, dimension, script);
         }
         Some(("img", matches)) => {
-            let seed = *matches.get_one::<u64>("seed").unwrap();
+            let seed = *matches.get_one::<i64>("seed").unwrap();
             let tiles_per_side = *matches.get_one::<i32>("tiles").unwrap();
             let tile_size_px = *matches.get_one::<usize>("tile-size").unwrap();
             let scale = *matches.get_one::<u8>("scale").unwrap();
@@ -95,7 +96,7 @@ fn main() {
     }
 }
 
-fn run_gui(seed: u64, dimension: Dimension, script: Option<std::path::PathBuf>) {
+fn run_gui(seed: i64, dimension: Dimension, script: Option<std::path::PathBuf>) {
     if let Err(err) = crate::gui::run(seed, dimension, script) {
         eprintln!("error: {err:#}");
     }

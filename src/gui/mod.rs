@@ -27,10 +27,11 @@ use crate::{
         script::{Command, Script},
         tiles::TileCache,
     },
+    seed::parse_seed,
 };
 
 struct App {
-    seed: u64,
+    seed: i64,
     dimension: Dimension,
     script: Option<Script>,
     state: Option<State>,
@@ -146,7 +147,8 @@ struct State {
 
 /// Everything that is shown in the window.
 struct Ui {
-    seed: u64,
+    seed: i64,
+    /// the seed as typed, a number or any text like in Minecraft
     seed_text: String,
     dimension: Dimension,
     sample_height: i32,
@@ -165,7 +167,7 @@ struct Ui {
 }
 
 impl State {
-    pub async fn new(window: Arc<Window>, seed: u64, dimension: Dimension) -> anyhow::Result<Self> {
+    pub async fn new(window: Arc<Window>, seed: i64, dimension: Dimension) -> anyhow::Result<Self> {
         let size = window.inner_size();
 
         let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
@@ -573,9 +575,9 @@ impl Ui {
         let mut go = false;
         egui::Window::new("cubox").resizable(false).show(root.ctx(), |ui| {
             egui::Grid::new("settings").num_columns(2).show(ui, |ui| {
-                ui.label("Seed");
+                ui.label("Seed").on_hover_text("A number, negative too, or any text like in Minecraft");
                 if ui.text_edit_singleline(&mut self.seed_text).changed()
-                    && let Ok(seed) = self.seed_text.trim().parse::<u64>()
+                    && let Some(seed) = parse_seed(&self.seed_text)
                     && seed != self.seed
                 {
                     self.seed = seed;
@@ -583,6 +585,12 @@ impl Ui {
                     changed = true;
                 }
                 ui.end_row();
+                // text seeds become a number, show which
+                if self.seed_text.trim() != self.seed.to_string() {
+                    ui.label("");
+                    ui.weak(format!("= {}", self.seed));
+                    ui.end_row();
+                }
 
                 ui.label("Dimension");
                 egui::ComboBox::from_id_salt("dimension").selected_text(self.dimension.name()).show_ui(ui, |ui| {
@@ -651,7 +659,7 @@ impl Ui {
     }
 }
 
-pub fn run(seed: u64, dimension: Dimension, script: Option<PathBuf>) -> anyhow::Result<()> {
+pub fn run(seed: i64, dimension: Dimension, script: Option<PathBuf>) -> anyhow::Result<()> {
     env_logger::init();
     let script = script.map(|path| Script::load(&path)).transpose()?;
     let event_loop = EventLoop::new()?;

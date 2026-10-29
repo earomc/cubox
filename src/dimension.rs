@@ -1,5 +1,7 @@
 use steel_worldgen::biomes::BiomeSourceKind;
 
+use crate::seed::generator_seed;
+
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Dimension {
     Overworld,
@@ -22,7 +24,8 @@ impl Dimension {
         Self::ALL.into_iter().find(|d| d.name() == name)
     }
 
-    pub fn biome_source(self, seed: u64) -> BiomeSourceKind {
+    pub fn biome_source(self, seed: i64) -> BiomeSourceKind {
+        let seed = generator_seed(seed);
         match self {
             Dimension::Overworld => BiomeSourceKind::overworld(seed),
             Dimension::Nether => BiomeSourceKind::nether(seed),

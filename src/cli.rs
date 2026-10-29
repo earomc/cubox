@@ -1,4 +1,11 @@
+use crate::seed::parse_seed;
 use clap::{Arg, ArgAction, Command, crate_description, crate_name, crate_version, value_parser};
+
+const SEED_HELP: &str = "Seed like in Minecraft: a number (negative too) or any text";
+
+fn parse_seed_arg(text: &str) -> Result<i64, String> {
+    parse_seed(text).ok_or_else(|| "the seed can't be blank".to_owned())
+}
 
 pub(crate) fn build_cmd() -> Command {
     Command::new(crate_name!())
@@ -8,8 +15,9 @@ pub(crate) fn build_cmd() -> Command {
         .subcommand(
             Command::new("gui").about("Launch the GUI")
                 .arg(Arg::new("seed")
-                    .help("Seed as unsigned 64-bit integer")
-                    .value_parser(value_parser!(u64))
+                    .help(SEED_HELP)
+                    .value_parser(parse_seed_arg)
+                    .allow_hyphen_values(true)
                     .default_value("0")
                 )
                 .arg(Arg::new("dimension")
@@ -28,8 +36,9 @@ pub(crate) fn build_cmd() -> Command {
         .subcommand(
             Command::new("img").about("Create a map image")
                 .arg(Arg::new("seed")
-                    .help("Seed as unsigned 64-bit integer")
-                    .value_parser(value_parser!(u64))
+                    .help(SEED_HELP)
+                    .value_parser(parse_seed_arg)
+                    .allow_hyphen_values(true)
                     .required(true)
                 )
                 .arg(Arg::new("tile-size")
