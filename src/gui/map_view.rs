@@ -98,9 +98,14 @@ impl MapView {
         self.handle_input(ui, rect, &response);
 
         let painter = ui.painter_at(rect);
+        let border = Rect::from_min_max(
+            self.camera.world_to_screen(rect, [-WORLD_BORDER_QUARTS; 2]),
+            self.camera.world_to_screen(rect, [WORLD_BORDER_QUARTS; 2]),
+        );
         let mut out = Quads {
             quads,
             pixels_per_point: ui.pixels_per_point(),
+            clip: border,
         };
 
         let level = self.level(ui.pixels_per_point());
@@ -195,11 +200,6 @@ impl MapView {
             ui.ctx().request_repaint();
         }
 
-        // world border
-        let border = Rect::from_min_max(
-            self.camera.world_to_screen(rect, [-WORLD_BORDER_QUARTS; 2]),
-            self.camera.world_to_screen(rect, [WORLD_BORDER_QUARTS; 2]),
-        );
         painter.rect_stroke(border, 0.0, Stroke::new(1.5, Color32::RED), StrokeKind::Outside);
 
         self.hovered_quart = response.hover_pos().map(|p| {
@@ -244,10 +244,20 @@ const FULL_UV: Rect = Rect {
 struct Quads<'a> {
     quads: &'a mut Vec<Quad>,
     pixels_per_point: f32,
+    /// the world border on screen, tiles don't extend past it
+    clip: Rect,
 }
 
 impl Quads<'_> {
     fn push(&mut self, tex: Rc<TileTexture>, screen: Rect, uv: Rect, alpha: f32) {
+        // cut off what is outside the world, and the same part of the texture
+        let clipped = screen.intersect(self.clip);
+        if !clipped.is_positive() {
+            return;
+        }
+        let to_uv = |p: Pos2| uv.min + (p - screen.min) / screen.size() * uv.size();
+        let (screen, uv) = (clipped, Rect::from_min_max(to_uv(clipped.min), to_uv(clipped.max)));
+
         let px = |p: Pos2| p * self.pixels_per_point;
         let (min, max) = (px(screen.min), px(screen.max));
         self.quads.push(Quad {
