@@ -39,7 +39,7 @@ struct App {
 
 impl ApplicationHandler for App {
     fn resumed(&mut self, event_loop: &winit::event_loop::ActiveEventLoop) {
-        let window_attributes = Window::default_attributes().with_title("cubox");
+        let window_attributes = with_app_name(Window::default_attributes().with_title("cubox"));
         let window = Arc::new(event_loop.create_window(window_attributes).unwrap());
         self.state = Some(pollster::block_on(State::new(window, self.seed, self.dimension)).unwrap())
     }
@@ -56,13 +56,16 @@ impl ApplicationHandler for App {
         };
 
         let response = state.egui_state.on_window_event(&state.window, &event);
-        if response.repaint {
+        // egui asks to repaint after every redraw too, following that would draw forever.
+        // what needs another frame requests it in render
+        if response.repaint && !matches!(event, WindowEvent::RedrawRequested) {
             state.window.request_redraw();
         }
 
         match event {
             WindowEvent::CloseRequested => event_loop.exit(),
             WindowEvent::Resized(size) => state.resize(size.width, size.height),
+            WindowEvent::Occluded(occluded) => state.occluded = occluded,
             WindowEvent::RedrawRequested => {
                 let capture = match &mut self.script {
                     Some(script) => {
@@ -132,6 +135,8 @@ struct State {
     surface: wgpu::Surface<'static>,
     surface_config: wgpu::SurfaceConfiguration,
     is_surface_configured: bool,
+    /// hidden, e.g. minimized. nothing is drawn then: presenting could block until it is visible again
+    occluded: bool,
 
     queue: wgpu::Queue,
 
@@ -268,6 +273,7 @@ impl State {
             egui_renderer,
             map_renderer,
             repaint_at: None,
+            occluded: false,
             ui,
         })
     }
@@ -316,7 +322,7 @@ impl State {
 
     /// Renders a frame, and if `capture` is given also saves it there as png.
     pub fn render(&mut self, capture: Option<&Path>) -> anyhow::Result<()> {
-        if !self.is_surface_configured {
+        if !self.is_surface_configured || self.occluded {
             return Ok(());
         }
 
@@ -415,6 +421,8 @@ impl State {
         if let (Some(readback), Some(path)) = (readback, capture) {
             readback.save(&self.device, self.surface_config.format, path.to_owned())?;
         }
+        // on wayland the next redraw then waits for the compositor, which doesn't ask hidden windows
+        self.window.pre_present_notify();
         self.queue.present(output);
 
         for id in &full_output.textures_delta.free {
@@ -658,6 +666,17 @@ impl Ui {
             root.ctx().request_repaint();
         }
     }
+}
+
+/// Names the app for the desktop. GNOME shows "Unknown" for windows without a name.
+fn with_app_name(attributes: winit::window::WindowAttributes) -> winit::window::WindowAttributes {
+    #[cfg(all(unix, not(target_os = "macos"), not(target_os = "android")))]
+    let attributes = {
+        use winit::platform::{wayland::WindowAttributesExtWayland, x11::WindowAttributesExtX11};
+        let attributes = WindowAttributesExtWayland::with_name(attributes, "cubox", "cubox");
+        WindowAttributesExtX11::with_name(attributes, "cubox", "cubox")
+    };
+    attributes
 }
 
 pub fn run(seed: i64, dimension: Dimension, script: Option<PathBuf>) -> anyhow::Result<()> {

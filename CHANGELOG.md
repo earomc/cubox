@@ -8,6 +8,13 @@ The release workflow publishes the section of a version as its release notes.
 
 ## [Unreleased]
 
+### Fixed
+
+- The window could freeze on Linux ("not responding"): cubox kept drawing frames even when nothing
+  changed, and on Wayland a hidden window could block it. It now only draws when something changes,
+  lets the compositor pace frames and pauses while hidden.
+- The window is named "cubox" on Linux instead of "Unknown".
+
 ## [0.1.0] - 2026-10-30
 
 First release.
