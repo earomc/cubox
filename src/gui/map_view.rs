@@ -73,7 +73,10 @@ pub struct MapView {
 impl MapView {
     pub fn new() -> Self {
         Self {
-            camera: Camera { center: [0.0, 0.0], zoom: 2.0 },
+            camera: Camera {
+                center: [0.0, 0.0],
+                zoom: 2.0,
+            },
             hovered_quart: None,
             level_since: (-1, 0.0),
         }
@@ -83,7 +86,9 @@ impl MapView {
     /// so tiles are scaled by at most 1.41x either way. That needs about as many texels as the
     /// screen has pixels, so no samples are wasted on detail that is shrunk away.
     pub fn level(&self, pixels_per_point: f32) -> i32 {
-        (self.camera.zoom - (pixels_per_point as f64).log2()).round().clamp(0.0, MAX_LEVEL as f64) as i32
+        (self.camera.zoom - (pixels_per_point as f64).log2())
+            .round()
+            .clamp(0.0, MAX_LEVEL as f64) as i32
     }
 
     /// Handles input and fills `quads` with the tiles to draw, back to front.
@@ -93,7 +98,10 @@ impl MapView {
         self.handle_input(ui, rect, &response);
 
         let painter = ui.painter_at(rect);
-        let mut out = Quads { quads, pixels_per_point: ui.pixels_per_point() };
+        let mut out = Quads {
+            quads,
+            pixels_per_point: ui.pixels_per_point(),
+        };
 
         let level = self.level(ui.pixels_per_point());
         let tile_quarts = (TILE_SIZE as f64) * (level as f64).exp2();
@@ -117,7 +125,10 @@ impl MapView {
         let (xs, zs) = (tile_range(min[0], max[0]), tile_range(min[1], max[1]));
 
         // visible tiles, closest to the center of the screen first so they are generated first
-        let center = [self.camera.center[0] / tile_quarts - 0.5, self.camera.center[1] / tile_quarts - 0.5];
+        let center = [
+            self.camera.center[0] / tile_quarts - 0.5,
+            self.camera.center[1] / tile_quarts - 0.5,
+        ];
         let mut visible: Vec<(i32, i32)> = zs.flat_map(|z| xs.clone().map(move |x| (x, z))).collect();
         visible.sort_by(|a, b| {
             let dist = |(x, z): &(i32, i32)| (*x as f64 - center[0]).powi(2) + (*z as f64 - center[1]).powi(2);
@@ -130,15 +141,25 @@ impl MapView {
         }
         let unsettled_for = LEVEL_SETTLE_SECONDS - (now - self.level_since.1);
         if unsettled_for > 0.0 {
-            ui.ctx().request_repaint_after(std::time::Duration::from_secs_f64(unsettled_for));
+            ui.ctx()
+                .request_repaint_after(std::time::Duration::from_secs_f64(unsettled_for));
         }
         // in steps of COVER_LEVELS, so the cover stays the same while the level changes by one and
         // its tiles aren't abandoned half done. by the time the zoom gets there they are finished.
         let cover_level = ((level / COVER_LEVELS + 1) * COVER_LEVELS).min(MAX_LEVEL);
         let mut cover: Vec<TileKey> = Vec::new();
-        for key in keys.iter().filter(|key| !tiles.is_finished(key) && !has_stand_in(tiles, key)) {
+        for key in keys
+            .iter()
+            .filter(|key| !tiles.is_finished(key) && !has_stand_in(tiles, key))
+        {
             let up = cover_level - level;
-            let coarse = TileKey { scale: cover_level as u8, x: key.x >> up, z: key.z >> up, ..*key }.cover();
+            let coarse = TileKey {
+                scale: cover_level as u8,
+                x: key.x >> up,
+                z: key.z >> up,
+                ..*key
+            }
+            .cover();
             if coarse != *key && !cover.contains(&coarse) {
                 cover.push(coarse);
             }
@@ -148,8 +169,12 @@ impl MapView {
         let mut fading = false;
         for key in keys {
             let screen = Rect::from_min_max(
-                self.camera.world_to_screen(rect, [key.x as f64 * tile_quarts, key.z as f64 * tile_quarts]),
-                self.camera.world_to_screen(rect, [(key.x + 1) as f64 * tile_quarts, (key.z + 1) as f64 * tile_quarts]),
+                self.camera
+                    .world_to_screen(rect, [key.x as f64 * tile_quarts, key.z as f64 * tile_quarts]),
+                self.camera.world_to_screen(
+                    rect,
+                    [(key.x + 1) as f64 * tile_quarts, (key.z + 1) as f64 * tile_quarts],
+                ),
             );
             let tile = tiles.get(&key, now);
             // stand ins until the tile is there and has faded in: a coarser tile, and on top of it
@@ -210,7 +235,10 @@ impl MapView {
     }
 }
 
-const FULL_UV: Rect = Rect { min: Pos2::ZERO, max: pos2(1.0, 1.0) };
+const FULL_UV: Rect = Rect {
+    min: Pos2::ZERO,
+    max: pos2(1.0, 1.0),
+};
 
 /// Collects the quads of the map in physical pixels.
 struct Quads<'a> {
@@ -222,7 +250,12 @@ impl Quads<'_> {
     fn push(&mut self, tex: Rc<TileTexture>, screen: Rect, uv: Rect, alpha: f32) {
         let px = |p: Pos2| p * self.pixels_per_point;
         let (min, max) = (px(screen.min), px(screen.max));
-        self.quads.push(Quad { rect: [min.x, min.y, max.x, max.y], uv: [uv.min.x, uv.min.y, uv.max.x, uv.max.y], alpha, tex });
+        self.quads.push(Quad {
+            rect: [min.x, min.y, max.x, max.y],
+            uv: [uv.min.x, uv.min.y, uv.max.x, uv.max.y],
+            alpha,
+            tex,
+        });
     }
 }
 
@@ -245,7 +278,12 @@ fn cached(tiles: &TileCache, key: TileKey) -> Option<TileKey> {
 /// The closest cached coarser tile covering `key`, and how many levels up it is.
 fn ancestor(tiles: &TileCache, key: &TileKey) -> Option<(TileKey, i32)> {
     (1..=MAX_STAND_IN_UP.min(MAX_LEVEL - key.scale as i32)).find_map(|up| {
-        let parent = TileKey { scale: key.scale + up as u8, x: key.x >> up, z: key.z >> up, ..*key };
+        let parent = TileKey {
+            scale: key.scale + up as u8,
+            x: key.x >> up,
+            z: key.z >> up,
+            ..*key
+        };
         cached(tiles, parent).map(|parent| (parent, up))
     })
 }
@@ -257,19 +295,32 @@ fn has_stand_in(tiles: &TileCache, key: &TileKey) -> bool {
         || (1..=MAX_STAND_IN_DOWN.min(key.scale as i32)).any(|down| {
             let n = 1 << down;
             (0..n * n).any(|i| {
-                cached(tiles, TileKey { scale: key.scale - down as u8, x: key.x * n + i % n, z: key.z * n + i / n, ..*key })
-                    .is_some()
+                cached(
+                    tiles,
+                    TileKey {
+                        scale: key.scale - down as u8,
+                        x: key.x * n + i % n,
+                        z: key.z * n + i / n,
+                        ..*key
+                    },
+                )
+                .is_some()
             })
         })
 }
 
 /// Draws the part of the closest cached coarser tile that covers `key`.
 fn draw_ancestor(out: &mut Quads, tiles: &mut TileCache, now: f64, key: TileKey, screen: Rect) {
-    let Some((parent, up)) = ancestor(tiles, &key) else { return };
+    let Some((parent, up)) = ancestor(tiles, &key) else {
+        return;
+    };
     if let Some((tex, _)) = tiles.get(&parent, now) {
         let n = 1 << up;
         let sub = 1.0 / n as f32;
-        let uv = Rect::from_min_size(pos2(key.x.rem_euclid(n) as f32 * sub, key.z.rem_euclid(n) as f32 * sub), vec2(sub, sub));
+        let uv = Rect::from_min_size(
+            pos2(key.x.rem_euclid(n) as f32 * sub, key.z.rem_euclid(n) as f32 * sub),
+            vec2(sub, sub),
+        );
         out.push(tex, screen, uv, 1.0);
     }
 }
@@ -281,7 +332,12 @@ fn draw_descendants(out: &mut Quads, tiles: &mut TileCache, now: f64, key: TileK
     }
     let half = screen.size() / 2.0;
     for (dx, dz) in [(0, 0), (1, 0), (0, 1), (1, 1)] {
-        let child = TileKey { scale: key.scale - 1, x: key.x * 2 + dx, z: key.z * 2 + dz, ..key };
+        let child = TileKey {
+            scale: key.scale - 1,
+            x: key.x * 2 + dx,
+            z: key.z * 2 + dz,
+            ..key
+        };
         let child_screen = Rect::from_min_size(screen.min + vec2(dx as f32 * half.x, dz as f32 * half.y), half);
         match cached(tiles, child).and_then(|child| tiles.get(&child, now)) {
             Some((tex, _)) => out.push(tex, child_screen, FULL_UV, 1.0),

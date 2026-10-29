@@ -56,6 +56,9 @@ struct Queue {
     generation: u64,
 }
 
+/// A level's shading, filled in by whoever needs it first.
+type ShadingCell = OnceLock<Shading>;
+
 /// The world the tiles are generated for.
 struct World {
     source: Arc<BiomeSourceKind>,
@@ -63,7 +66,7 @@ struct World {
     /// average color of the world, computed by the first worker that needs it
     mean: OnceLock<Lab>,
     /// shading per scale and samples setting, each calibrated by the first worker that needs it
-    shadings: Mutex<HashMap<(u8, u8), Arc<OnceLock<Shading>>>>,
+    shadings: Mutex<HashMap<(u8, u8), Arc<ShadingCell>>>,
 }
 
 impl World {
@@ -71,7 +74,12 @@ impl World {
     /// for the one sample cover tiles. Otherwise the first tiles of each level visited would wait
     /// for its calibration, about 0.1s.
     fn new(source: Arc<BiomeSourceKind>, sample_height: i32, samples: u8) -> Arc<Self> {
-        let world = Arc::new(Self { source, sample_height, mean: OnceLock::new(), shadings: Default::default() });
+        let world = Arc::new(Self {
+            source,
+            sample_height,
+            mean: OnceLock::new(),
+            shadings: Default::default(),
+        });
         let weak = Arc::downgrade(&world);
         // a plain thread, not a rayon job: workers wait for these results and must not be needed for them
         std::thread::spawn(move || {
@@ -79,7 +87,14 @@ impl World {
                 for samples in [samples, 1] {
                     // stop once the world was replaced, e.g. by another seed
                     let Some(world) = weak.upgrade() else { return };
-                    let key = TileKey { scale, sample_height, tile_size_px: TILE_SIZE, samples, x: 0, z: 0 };
+                    let key = TileKey {
+                        scale,
+                        sample_height,
+                        tile_size_px: TILE_SIZE,
+                        samples,
+                        x: 0,
+                        z: 0,
+                    };
                     world.shading(key);
                 }
             }
@@ -92,7 +107,13 @@ impl World {
     }
 
     fn shading(&self, key: TileKey) -> Shading {
-        let cell = self.shadings.lock().unwrap().entry((key.scale, key.samples)).or_default().clone();
+        let cell = self
+            .shadings
+            .lock()
+            .unwrap()
+            .entry((key.scale, key.samples))
+            .or_default()
+            .clone();
         *cell.get_or_init(|| calibrate(&self.source, key, self.mean()))
     }
 }
@@ -182,7 +203,11 @@ impl TileCache {
         }
 
         let mut queue = self.shared.queue.lock().unwrap();
-        let Queue { tasks, rank: queue_rank, .. } = &mut *queue;
+        let Queue {
+            tasks,
+            rank: queue_rank,
+            ..
+        } = &mut *queue;
         *queue_rank = rank;
         tasks.retain(|key, _| {
             let keep = queue_rank.contains_key(key);
@@ -257,9 +282,18 @@ impl TileCache {
             self.pending.remove(&done.key);
             let Some(tile) = done.tile else { continue };
             // nearest at the finest level so single quarts stay crisp when zoomed in
-            let texture = Rc::new(renderer.create_tile(device, queue, &tile.rgb, TILE_SIZE as u32, done.key.scale == 0));
+            let texture =
+                Rc::new(renderer.create_tile(device, queue, &tile.rgb, TILE_SIZE as u32, done.key.scale == 0));
             let estimates = Arc::new(tile.estimates);
-            self.entries.insert(done.key, Entry { texture, arrived: now, estimates, last_used_frame: self.frame });
+            self.entries.insert(
+                done.key,
+                Entry {
+                    texture,
+                    arrived: now,
+                    estimates,
+                    last_used_frame: self.frame,
+                },
+            );
             changed = true;
         }
         self.evict();
@@ -285,7 +319,12 @@ impl TileCache {
 
 /// The 4 tiles one scale finer covering `key`: top left, top right, bottom left, bottom right.
 fn children(key: &TileKey) -> [TileKey; 4] {
-    [(0, 0), (1, 0), (0, 1), (1, 1)].map(|(dx, dz)| TileKey { scale: key.scale - 1, x: key.x * 2 + dx, z: key.z * 2 + dz, ..*key })
+    [(0, 0), (1, 0), (0, 1), (1, 1)].map(|(dx, dz)| TileKey {
+        scale: key.scale - 1,
+        x: key.x * 2 + dx,
+        z: key.z * 2 + dz,
+        ..*key
+    })
 }
 
 impl Shared {

@@ -13,10 +13,10 @@ pub type Lab = [f32; 3];
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct TileKey {
-    pub scale: u8, // scale of sampling
-    pub sample_height: i32, // the y coordinate in blocks
+    pub scale: u8,           // scale of sampling
+    pub sample_height: i32,  // the y coordinate in blocks
     pub tile_size_px: usize, // size of the tile in pixels
-    pub samples: u8, // samples per axis per pixel, averaged together (supersampling)
+    pub samples: u8,         // samples per axis per pixel, averaged together (supersampling)
 
     // image coordinates of the tile
     pub x: i32,
@@ -51,16 +51,25 @@ fn offsets(stride: i32, n: i32) -> Vec<i32> {
 static SRGB_TO_LINEAR: LazyLock<[f32; 256]> = LazyLock::new(|| {
     std::array::from_fn(|i| {
         let c = i as f32 / 255.0;
-        if c <= 0.04045 { c / 12.92 } else { ((c + 0.055) / 1.055).powf(2.4) }
+        if c <= 0.04045 {
+            c / 12.92
+        } else {
+            ((c + 0.055) / 1.055).powf(2.4)
+        }
     })
 });
 
 fn linear_to_srgb(c: f32) -> u8 {
-    let c = if c <= 0.0031308 { c * 12.92 } else { 1.055 * c.powf(1.0 / 2.4) - 0.055 };
+    let c = if c <= 0.0031308 {
+        c * 12.92
+    } else {
+        1.055 * c.powf(1.0 / 2.4) - 0.055
+    };
     (c * 255.0 + 0.5).clamp(0.0, 255.0) as u8
 }
 
 /// sRGB bytes -> Oklab, see https://bottosson.github.io/posts/oklab/
+#[allow(clippy::excessive_precision)] // the published constants, as is
 fn srgb_to_lab(c: &[u8]) -> Lab {
     let [r, g, b] = [0, 1, 2].map(|ch| SRGB_TO_LINEAR[c[ch] as usize]);
     let l = (0.4122214708 * r + 0.5363325363 * g + 0.0514459929 * b).cbrt();
@@ -74,6 +83,7 @@ fn srgb_to_lab(c: &[u8]) -> Lab {
 }
 
 /// Oklab -> sRGB bytes
+#[allow(clippy::excessive_precision)] // the published constants, as is
 fn lab_to_srgb(c: Lab, pixel: &mut [u8]) {
     let l = (c[0] + 0.3963377774 * c[1] + 0.2158037573 * c[2]).powi(3);
     let m = (c[0] - 0.1055613458 * c[1] - 0.0638541728 * c[2]).powi(3);
@@ -169,14 +179,22 @@ const FLAT_DEVIATION: f32 = 0.002;
 impl Shading {
     /// Shading that shows the estimates as they are.
     pub fn exact(mean: Lab) -> Self {
-        Self { mean, signal: 1.0, noise: 0.0 }
+        Self {
+            mean,
+            signal: 1.0,
+            noise: 0.0,
+        }
     }
 
     /// How much of an estimate's deviation from the mean is kept, for estimates whose error
     /// variance is `noise`.
     fn weight(&self, noise: f32) -> f32 {
         let total = self.signal + noise;
-        if total <= 0.0 { 1.0 } else { (self.signal / total).sqrt() }
+        if total <= 0.0 {
+            1.0
+        } else {
+            (self.signal / total).sqrt()
+        }
     }
 
     /// Whether the true pixel averages of this level are practically all the world mean.
@@ -217,10 +235,18 @@ pub fn calibrate(source: &BiomeSourceKind, key: TileKey, mean: Lab) -> Shading {
     let noise = error / CALIBRATION_PIXELS as f32;
     let count = truths.len() as f32;
     let center: Lab = std::array::from_fn(|ch| truths.iter().map(|t| t[ch]).sum::<f32>() / count);
-    let spread = truths.iter().map(|t| (0..3).map(|ch| (t[ch] - center[ch]).powi(2)).sum::<f32>()).sum::<f32>() / (count - 1.0);
+    let spread = truths
+        .iter()
+        .map(|t| (0..3).map(|ch| (t[ch] - center[ch]).powi(2)).sum::<f32>())
+        .sum::<f32>()
+        / (count - 1.0);
     // the reference has an error too, about noise * samples / reference samples if samples are independent
     let reference_noise = noise * (n * n) as f32 / (reference_n * reference_n) as f32;
-    Shading { mean, signal: (spread - reference_noise).max(0.0), noise }
+    Shading {
+        mean,
+        signal: (spread - reference_noise).max(0.0),
+        noise,
+    }
 }
 
 fn splitmix(mut x: u64) -> u64 {
@@ -233,9 +259,12 @@ fn splitmix(mut x: u64) -> u64 {
 /// Shades estimates with `weight` (see `Shading::weight`) into sRGB colors.
 fn shade(estimates: Vec<Estimate>, shading: &Shading, weight: f32) -> Tile {
     let mut rgb = vec![0u8; estimates.len() * 3];
-    for (pixel, &e) in rgb.chunks_exact_mut(3).zip(&estimates) {
+    for (pixel, &e) in rgb.as_chunks_mut::<3>().0.iter_mut().zip(&estimates) {
         let avg = unpack(e);
-        lab_to_srgb(std::array::from_fn(|ch| shading.mean[ch] + weight * (avg[ch] - shading.mean[ch])), pixel);
+        lab_to_srgb(
+            std::array::from_fn(|ch| shading.mean[ch] + weight * (avg[ch] - shading.mean[ch])),
+            pixel,
+        );
     }
     Tile { rgb, estimates }
 }
@@ -244,7 +273,12 @@ fn shade(estimates: Vec<Estimate>, shading: &Shading, weight: f32) -> Tile {
 /// Each pixel is the average of `samples * samples` evenly spaced biome samples over the area the
 /// pixel covers, shaded by `shading` (from `calibrate` for this key's level).
 /// `keep_going` is asked before every row, if it says no the tile is abandoned and None returned.
-pub fn render_tile(source: &BiomeSourceKind, key: TileKey, shading: &Shading, keep_going: &dyn Fn() -> bool) -> Option<Tile> {
+pub fn render_tile(
+    source: &BiomeSourceKind,
+    key: TileKey,
+    shading: &Shading,
+    keep_going: &dyn Fn() -> bool,
+) -> Option<Tile> {
     let size = key.tile_size_px;
     if shading.is_flat() {
         return Some(shade(vec![pack(shading.mean); size * size], shading, 0.0));
@@ -308,11 +342,24 @@ mod tests {
         let source = BiomeSourceKind::overworld(12345);
         let exact = Shading::exact([0.5, 0.0, -0.02]);
         for (scale, size) in [(3, 32), (6, 32), (9, 16)] {
-            let parent = TileKey { scale, sample_height: 256, tile_size_px: size, samples: 4, x: -1, z: 2 };
+            let parent = TileKey {
+                scale,
+                sample_height: 256,
+                tile_size_px: size,
+                samples: 4,
+                x: -1,
+                z: 2,
+            };
             let children: Vec<Vec<Estimate>> = [(0, 0), (1, 0), (0, 1), (1, 1)]
                 .iter()
                 .map(|&(dx, dz)| {
-                    let child = TileKey { scale: scale - 1, samples: 2, x: parent.x * 2 + dx, z: parent.z * 2 + dz, ..parent };
+                    let child = TileKey {
+                        scale: scale - 1,
+                        samples: 2,
+                        x: parent.x * 2 + dx,
+                        z: parent.z * 2 + dz,
+                        ..parent
+                    };
                     render_tile(&source, child, &exact, &|| true).unwrap().estimates
                 })
                 .collect();
@@ -324,7 +371,10 @@ mod tests {
                 .filter(|(a, b)| a.iter().zip(*b).any(|(a, b)| a.abs_diff(*b) > 2))
                 .count();
             let pixels = parent.tile_size_px * parent.tile_size_px;
-            assert!(differing * 100 <= pixels, "scale {scale}: {differing} of {pixels} pixels differ");
+            assert!(
+                differing * 100 <= pixels,
+                "scale {scale}: {differing} of {pixels} pixels differ"
+            );
         }
     }
 
@@ -332,7 +382,14 @@ mod tests {
     #[test]
     fn calibration_fades_out_with_distance() {
         let source = BiomeSourceKind::overworld(12345);
-        let key = |scale| TileKey { scale, sample_height: 256, tile_size_px: 128, samples: 2, x: 0, z: 0 };
+        let key = |scale| TileKey {
+            scale,
+            sample_height: 256,
+            tile_size_px: 128,
+            samples: 2,
+            x: 0,
+            z: 0,
+        };
         let near = calibrate(&source, key(2), [0.0; 3]);
         let far = calibrate(&source, key(13), [0.0; 3]);
         assert!(near.weight(near.noise) > 0.9, "{near:?}");

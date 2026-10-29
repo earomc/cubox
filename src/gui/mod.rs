@@ -65,7 +65,10 @@ impl ApplicationHandler for App {
             WindowEvent::RedrawRequested => {
                 let capture = match &mut self.script {
                     Some(script) => {
-                        let frame = script.step((state.ui.map.camera.center, state.ui.map.camera.zoom), state.ui.tiles.pending() > 0);
+                        let frame = script.step(
+                            (state.ui.map.camera.center, state.ui.map.camera.zoom),
+                            state.ui.tiles.pending() > 0,
+                        );
                         if frame.quit {
                             event_loop.exit();
                             return;
@@ -85,9 +88,9 @@ impl ApplicationHandler for App {
                     Err(e) => {
                         log::error!("{e}");
                         event_loop.exit();
-                    },
+                    }
                 }
-            },
+            }
             WindowEvent::KeyboardInput {
                 event:
                     KeyEvent {
@@ -317,7 +320,8 @@ impl State {
         let raw_input = self.egui_state.take_egui_input(&self.window);
         let ui = &mut self.ui;
         let full_output = self.egui_ctx.run_ui(raw_input, |root| ui.show(root));
-        self.egui_state.handle_platform_output(&self.window, full_output.platform_output);
+        self.egui_state
+            .handle_platform_output(&self.window, full_output.platform_output);
 
         // keep drawing while tiles are generating, otherwise only when egui asks for it
         let repaint_delay = full_output
@@ -350,23 +354,25 @@ impl State {
             }
         };
         let view = output.texture.create_view(&Default::default());
-        let mut encoder = self
-            .device
-            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                label: Some("Cubox Render Encoder"),
-            });
+        let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("Cubox Render Encoder"),
+        });
 
         let screen = egui_wgpu::ScreenDescriptor {
             size_in_pixels: [self.surface_config.width, self.surface_config.height],
             pixels_per_point: full_output.pixels_per_point,
         };
-        let paint_jobs = self.egui_ctx.tessellate(full_output.shapes, full_output.pixels_per_point);
+        let paint_jobs = self
+            .egui_ctx
+            .tessellate(full_output.shapes, full_output.pixels_per_point);
         for (id, deltas) in &full_output.textures_delta.set {
             for delta in deltas {
                 self.egui_renderer.update_texture(&self.device, &self.queue, *id, delta);
             }
         }
-        let egui_cmds = self.egui_renderer.update_buffers(&self.device, &self.queue, &mut encoder, &paint_jobs, &screen);
+        let egui_cmds =
+            self.egui_renderer
+                .update_buffers(&self.device, &self.queue, &mut encoder, &paint_jobs, &screen);
 
         self.draw(&mut encoder, &view, &paint_jobs, &screen);
         // the surface can't be read back, so a captured frame is drawn a second time into a texture that can
@@ -380,7 +386,11 @@ impl State {
         let readback = capture.map(|_| {
             let texture = self.device.create_texture(&wgpu::TextureDescriptor {
                 label: Some("capture"),
-                size: wgpu::Extent3d { width: screen.size_in_pixels[0], height: screen.size_in_pixels[1], depth_or_array_layers: 1 },
+                size: wgpu::Extent3d {
+                    width: screen.size_in_pixels[0],
+                    height: screen.size_in_pixels[1],
+                    depth_or_array_layers: 1,
+                },
                 mip_level_count: 1,
                 sample_count: 1,
                 dimension: wgpu::TextureDimension::D2,
@@ -388,11 +398,17 @@ impl State {
                 usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
                 view_formats: &[],
             });
-            self.draw(&mut encoder, &texture.create_view(&Default::default()), &paint_jobs, &screen);
+            self.draw(
+                &mut encoder,
+                &texture.create_view(&Default::default()),
+                &paint_jobs,
+                &screen,
+            );
             Readback::copy(&self.device, &mut encoder, &texture)
         });
 
-        self.queue.submit(egui_cmds.into_iter().chain(std::iter::once(encoder.finish())));
+        self.queue
+            .submit(egui_cmds.into_iter().chain(std::iter::once(encoder.finish())));
         if let (Some(readback), Some(path)) = (readback, capture) {
             readback.save(&self.device, self.surface_config.format, path.to_owned())?;
         }
@@ -413,7 +429,8 @@ impl State {
         screen: &egui_wgpu::ScreenDescriptor,
     ) {
         // the map covers the whole window, egui goes on top
-        self.map_renderer.render(&self.device, &self.queue, encoder, target, &self.ui.quads);
+        self.map_renderer
+            .render(&self.device, &self.queue, encoder, target, &self.ui.quads);
 
         let render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("Cubox Render Pass"),
@@ -436,9 +453,8 @@ impl State {
     }
 
     fn handle_key(&self, event_loop: &ActiveEventLoop, code: KeyCode, is_pressed: bool) {
-        match (code, is_pressed) {
-            (KeyCode::Escape, true) => event_loop.exit(),
-            _ => {}
+        if let (KeyCode::Escape, true) = (code, is_pressed) {
+            event_loop.exit()
         }
     }
 
@@ -472,25 +488,44 @@ impl Readback {
             texture.as_image_copy(),
             wgpu::TexelCopyBufferInfo {
                 buffer: &buffer,
-                layout: wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(bytes_per_row), rows_per_image: None },
+                layout: wgpu::TexelCopyBufferLayout {
+                    offset: 0,
+                    bytes_per_row: Some(bytes_per_row),
+                    rows_per_image: None,
+                },
             },
             texture.size(),
         );
-        Self { buffer, size, bytes_per_row }
+        Self {
+            buffer,
+            size,
+            bytes_per_row,
+        }
     }
 
     /// Waits for the copy and writes a png in the background.
     fn save(self, device: &wgpu::Device, format: wgpu::TextureFormat, path: PathBuf) -> anyhow::Result<()> {
         self.buffer.slice(..).map_async(wgpu::MapMode::Read, |_| {});
         device.poll(wgpu::PollType::wait_indefinitely())?;
-        let bgra = matches!(format, wgpu::TextureFormat::Bgra8Unorm | wgpu::TextureFormat::Bgra8UnormSrgb);
+        let bgra = matches!(
+            format,
+            wgpu::TextureFormat::Bgra8Unorm | wgpu::TextureFormat::Bgra8UnormSrgb
+        );
         let [w, h] = self.size;
         let mut rgb = Vec::with_capacity((w * h * 3) as usize);
         {
-            let data = self.buffer.slice(..).get_mapped_range().map_err(|e| anyhow::anyhow!("{e:?}"))?;
+            let data = self
+                .buffer
+                .slice(..)
+                .get_mapped_range()
+                .map_err(|e| anyhow::anyhow!("{e:?}"))?;
             for row in data.chunks_exact(self.bytes_per_row as usize) {
-                for px in row[..(w * 4) as usize].chunks_exact(4) {
-                    rgb.extend_from_slice(&if bgra { [px[2], px[1], px[0]] } else { [px[0], px[1], px[2]] });
+                for px in row[..(w * 4) as usize].as_chunks::<4>().0 {
+                    rgb.extend_from_slice(&if bgra {
+                        [px[2], px[1], px[0]]
+                    } else {
+                        [px[0], px[1], px[2]]
+                    });
                 }
             }
         }
@@ -517,11 +552,15 @@ impl Ui {
     /// Throws away all tiles after the world or how it is sampled changed.
     fn reset_tiles(&mut self) {
         self.hovered_biome = None;
-        self.tiles.clear(self.biome_source.clone(), self.sample_height, self.samples);
+        self.tiles
+            .clear(self.biome_source.clone(), self.sample_height, self.samples);
     }
 
     fn show(&mut self, root: &mut egui::Ui) {
-        let settings = MapSettings { sample_height: self.sample_height, samples: self.samples };
+        let settings = MapSettings {
+            sample_height: self.sample_height,
+            samples: self.samples,
+        };
         self.quads.clear();
         egui::CentralPanel::no_frame().show(root, |ui| self.map.show(ui, &mut self.tiles, settings, &mut self.quads));
         if !self.panel {
@@ -616,7 +655,12 @@ pub fn run(seed: u64, dimension: Dimension, script: Option<PathBuf>) -> anyhow::
     env_logger::init();
     let script = script.map(|path| Script::load(&path)).transpose()?;
     let event_loop = EventLoop::new()?;
-    let mut app = App { seed, dimension, script, state: None };
+    let mut app = App {
+        seed,
+        dimension,
+        script,
+        state: None,
+    };
     event_loop.run_app(&mut app)?;
     Ok(())
 }

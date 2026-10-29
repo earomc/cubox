@@ -70,7 +70,6 @@ pub fn biome_color(path: &str) -> [u8; 3] {
         "eroded_badlands" => 0xFF6D3D,
 
         // ---- Caves ----
-        
         "deep_dark" => 0x0A2E3A,
         "dripstone_caves" => 0x8B6F4E,
         "lush_caves" => 0x6FA83C,

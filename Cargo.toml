@@ -3,11 +3,17 @@ name = "cubox"
 description = "A super fast Minecraft seed viewer"
 version = "0.1.0"
 edition = "2024"
+license = "AGPL-3.0-or-later"
+repository = "https://github.com/earomc/cubox"
+readme = "README.md"
+keywords = ["minecraft", "seed", "map", "biome", "worldgen"]
+categories = ["games", "visualization"]
 
 [dependencies]
 steel-worldgen = { git = "https://github.com/Steel-Foundation/SteelMC" }
 
-image = "0.25.10"
+# png only, the default formats pull in a c++ build for avif encoding
+image = { version = "0.25.10", default-features = false, features = ["png"] }
 rayon = "1.12.0"
 clap = { version = "4.6.7", features = ["cargo"] }
 winit = { version = "0.30" }
@@ -20,3 +26,5 @@ egui = { version = "0.37", features = ["default_fonts"] }
 egui-winit = "0.37"
 egui-wgpu = "0.37"
 
+[profile.release]
+strip = true

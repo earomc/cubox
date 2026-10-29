@@ -1,27 +1,26 @@
 mod biome_colors;
 mod cli;
 mod dimension;
-mod tile_renderer;
 mod gui;
+mod tile_renderer;
 use rayon::prelude::*;
 use std::time::Instant;
 
-use crate::{cli::build_cmd, dimension::Dimension, tile_renderer::{Shading, TileKey, calibrate, render_tile, world_mean}};
+use crate::{
+    cli::build_cmd,
+    dimension::Dimension,
+    tile_renderer::{Shading, TileKey, calibrate, render_tile, world_mean},
+};
 
 fn main() {
-    let mut cmd = build_cmd();
-    let matches = cmd.get_matches_mut();
+    let matches = build_cmd().get_matches();
     match matches.subcommand() {
         Some(("gui", matches)) => {
-            println!("launching gui");
             let seed = *matches.get_one::<u64>("seed").unwrap();
             let dimension = Dimension::from_name(matches.get_one::<String>("dimension").unwrap()).unwrap();
             let script = matches.get_one::<std::path::PathBuf>("script").cloned();
-            if let Err(err) = crate::gui::run(seed, dimension, script) {
-                log::error!("{err}");
-                return;
-            }
-        },
+            run_gui(seed, dimension, script);
+        }
         Some(("img", matches)) => {
             let seed = *matches.get_one::<u64>("seed").unwrap();
             let tiles_per_side = *matches.get_one::<i32>("tiles").unwrap();
@@ -49,9 +48,15 @@ fn main() {
             let biome_source = dimension.biome_source(seed);
             let start = Instant::now();
             let mean = world_mean(&biome_source, sample_height);
-            let shading = if exact { Shading::exact(mean) } else { calibrate(&biome_source, keys[0], mean) };
-            let tiles: Vec<Vec<u8>> =
-                keys.par_iter().map(|&k| render_tile(&biome_source, k, &shading, &|| true).unwrap().rgb).collect();
+            let shading = if exact {
+                Shading::exact(mean)
+            } else {
+                calibrate(&biome_source, keys[0], mean)
+            };
+            let tiles: Vec<Vec<u8>> = keys
+                .par_iter()
+                .map(|&k| render_tile(&biome_source, k, &shading, &|| true).unwrap().rgb)
+                .collect();
             println!("generated {} tiles in {:?}", tiles.len(), start.elapsed());
 
             // Pixels per side, and how much world each pixel covers.
@@ -61,7 +66,10 @@ fn main() {
             let side_blocks = side_quarts * 4;
             println!(
                 "image: {0}x{0} px, visible area: {1}x{1} quarts ({2}x{2} blocks), 1px = {3}x{3} blocks",
-                pixels_per_side, side_quarts, side_blocks, side_blocks / pixels_per_side
+                pixels_per_side,
+                side_quarts,
+                side_blocks,
+                side_blocks / pixels_per_side
             );
 
             // stitch tiles together
@@ -70,16 +78,25 @@ fn main() {
             let buf: &mut [u8] = &mut img;
             for (i, tile) in tiles.iter().enumerate() {
                 let (tx, tz) = (i % tiles_per_side as usize, i / tiles_per_side as usize); // coordinates of tiles in grid
-                for row in 0..tile_size_px { // horizontal row of pixels
+                for row in 0..tile_size_px {
+                    // horizontal row of pixels
                     // computing start location of pixel row in buffer
                     let dst = ((tz * tile_size_px + row) * side_px + tx * tile_size_px) * 3;
 
                     // copying
-                    buf[dst..dst + tile_size_px * 3].copy_from_slice(&tile[row * tile_size_px * 3..][..tile_size_px * 3]);
+                    buf[dst..dst + tile_size_px * 3]
+                        .copy_from_slice(&tile[row * tile_size_px * 3..][..tile_size_px * 3]);
                 }
             }
             img.save("map.png").unwrap();
-        },
-        _ => cmd.print_help().unwrap(),
+        }
+        // started without arguments, e.g. by double clicking it
+        _ => run_gui(0, Dimension::Overworld, None),
+    }
+}
+
+fn run_gui(seed: u64, dimension: Dimension, script: Option<std::path::PathBuf>) {
+    if let Err(err) = crate::gui::run(seed, dimension, script) {
+        eprintln!("error: {err:#}");
     }
 }

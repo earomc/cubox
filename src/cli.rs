@@ -3,6 +3,7 @@ use clap::{Arg, ArgAction, Command, crate_description, crate_name, crate_version
 pub(crate) fn build_cmd() -> Command {
     Command::new(crate_name!())
         .about(crate_description!())
+        .after_help("Without a subcommand the GUI opens.")
         .version(crate_version!())
         .subcommand(
             Command::new("gui").about("Launch the GUI")

@@ -91,7 +91,10 @@ impl MapRenderer {
                     attributes: &wgpu::vertex_attr_array![0 => Float32x4, 1 => Float32x4, 2 => Float32],
                 })],
             },
-            primitive: wgpu::PrimitiveState { topology: wgpu::PrimitiveTopology::TriangleStrip, ..Default::default() },
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleStrip,
+                ..Default::default()
+            },
             depth_stencil: None,
             multisample: Default::default(),
             fragment: Some(wgpu::FragmentState {
@@ -124,7 +127,10 @@ impl MapRenderer {
         let screen_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("map screen"),
             layout: &screen_layout,
-            entries: &[wgpu::BindGroupEntry { binding: 0, resource: screen_buffer.as_entire_binding() }],
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: screen_buffer.as_entire_binding(),
+            }],
         });
 
         Self {
@@ -154,8 +160,19 @@ impl MapRenderer {
     }
 
     /// Uploads a tile. `nearest` keeps single texels crisp when they are magnified.
-    pub fn create_tile(&self, device: &wgpu::Device, queue: &wgpu::Queue, rgb: &[u8], size: u32, nearest: bool) -> TileTexture {
-        let extent = wgpu::Extent3d { width: size, height: size, depth_or_array_layers: 1 };
+    pub fn create_tile(
+        &self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        rgb: &[u8],
+        size: u32,
+        nearest: bool,
+    ) -> TileTexture {
+        let extent = wgpu::Extent3d {
+            width: size,
+            height: size,
+            depth_or_array_layers: 1,
+        };
         let texture = device.create_texture(&wgpu::TextureDescriptor {
             label: Some("map tile"),
             size: extent,
@@ -166,7 +183,12 @@ impl MapRenderer {
             usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
             view_formats: &[],
         });
-        let rgba: Vec<u8> = rgb.chunks_exact(3).flat_map(|c| [c[0], c[1], c[2], 255]).collect();
+        let rgba: Vec<u8> = rgb
+            .as_chunks::<3>()
+            .0
+            .iter()
+            .flat_map(|c| [c[0], c[1], c[2], 255])
+            .collect();
         queue.write_texture(
             wgpu::TexelCopyTextureInfo {
                 texture: &texture,
@@ -175,17 +197,31 @@ impl MapRenderer {
                 aspect: wgpu::TextureAspect::All,
             },
             &rgba,
-            wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(size * 4), rows_per_image: None },
+            wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(size * 4),
+                rows_per_image: None,
+            },
             extent,
         );
         let view = texture.create_view(&Default::default());
-        let sampler = if nearest { &self.nearest_sampler } else { &self.linear_sampler };
+        let sampler = if nearest {
+            &self.nearest_sampler
+        } else {
+            &self.linear_sampler
+        };
         let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("map tile"),
             layout: &self.tile_layout,
             entries: &[
-                wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(&view) },
-                wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::Sampler(sampler) },
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(&view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::Sampler(sampler),
+                },
             ],
         });
         TileTexture { bind_group }
@@ -220,7 +256,11 @@ impl MapRenderer {
         }
 
         // wgpu clear colors are linear for sRGB surfaces and written as is otherwise
-        let background = if self.encode_srgb { BACKGROUND_SRGB } else { srgb_to_linear(BACKGROUND_SRGB) };
+        let background = if self.encode_srgb {
+            BACKGROUND_SRGB
+        } else {
+            srgb_to_linear(BACKGROUND_SRGB)
+        };
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("map tiles"),
             color_attachments: &[Some(wgpu::RenderPassColorAttachment {
@@ -228,7 +268,12 @@ impl MapRenderer {
                 depth_slice: None,
                 resolve_target: None,
                 ops: wgpu::Operations {
-                    load: wgpu::LoadOp::Clear(wgpu::Color { r: background, g: background, b: background, a: 1.0 }),
+                    load: wgpu::LoadOp::Clear(wgpu::Color {
+                        r: background,
+                        g: background,
+                        b: background,
+                        a: 1.0,
+                    }),
                     store: wgpu::StoreOp::Store,
                 },
             })],
@@ -249,5 +294,9 @@ impl MapRenderer {
 }
 
 fn srgb_to_linear(c: f64) -> f64 {
-    if c <= 0.04045 { c / 12.92 } else { ((c + 0.055) / 1.055).powf(2.4) }
+    if c <= 0.04045 {
+        c / 12.92
+    } else {
+        ((c + 0.055) / 1.055).powf(2.4)
+    }
 }

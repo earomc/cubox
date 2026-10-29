@@ -48,15 +48,22 @@ impl Command {
         let Some(name) = words.next() else { return Ok(None) };
         let args: Vec<&str> = words.collect();
         let num = |i: usize| -> anyhow::Result<f64> {
-            args.get(i).with_context(|| format!("{name}: missing argument {}", i + 1))?.parse::<f64>().context(name.to_string())
+            args.get(i)
+                .with_context(|| format!("{name}: missing argument {}", i + 1))?
+                .parse::<f64>()
+                .context(name.to_string())
         };
         let path = |i: usize| -> anyhow::Result<PathBuf> {
-            Ok(PathBuf::from(args.get(i).with_context(|| format!("{name}: missing path"))?))
+            Ok(PathBuf::from(
+                args.get(i).with_context(|| format!("{name}: missing path"))?,
+            ))
         };
         Ok(Some(match name {
             "size" => Command::Size(num(0)? as u32, num(1)? as u32),
             "dimension" => Command::Dimension(
-                args.first().and_then(|d| Dimension::from_name(d)).context("dimension: overworld, nether or end")?,
+                args.first()
+                    .and_then(|d| Dimension::from_name(d))
+                    .context("dimension: overworld, nether or end")?,
             ),
             "samples" => Command::Samples(num(0)? as u8),
             "panel" => Command::Panel(args.first() != Some(&"off")),
@@ -90,10 +97,22 @@ pub struct Frame {
 
 /// A command that takes more than one frame.
 enum Running {
-    Wait { until: Instant },
+    Wait {
+        until: Instant,
+    },
     WaitIdle,
-    ZoomTo { from: f64, to: f64, start: Instant, secs: f64 },
-    PanTo { from: [f64; 2], to: [f64; 2], start: Instant, secs: f64 },
+    ZoomTo {
+        from: f64,
+        to: f64,
+        start: Instant,
+        secs: f64,
+    },
+    PanTo {
+        from: [f64; 2],
+        to: [f64; 2],
+        start: Instant,
+        secs: f64,
+    },
 }
 
 pub struct Script {
@@ -116,7 +135,15 @@ impl Script {
             }
         }
         let now = Instant::now();
-        Ok(Self { commands, running: None, recording: None, frame: 0, recorded: 0, started: now, idle_since: None })
+        Ok(Self {
+            commands,
+            running: None,
+            recording: None,
+            frame: 0,
+            recorded: 0,
+            started: now,
+            idle_since: None,
+        })
     }
 
     /// Advances the script by one frame. `camera` is the current center (quarts) and zoom,
@@ -126,7 +153,7 @@ impl Script {
         let mut frame = Frame::default();
         self.frame += 1;
         if let Some((dir, every)) = &self.recording
-            && self.frame % every == 0
+            && self.frame.is_multiple_of(*every)
         {
             frame.capture = Some(dir.join(format!("{:05}.png", self.recorded)));
             self.recorded += 1;
@@ -174,14 +201,26 @@ impl Script {
                 Command::Zoom(zoom) => frame.zoom = Some(zoom),
                 Command::ZoomTo(to, secs) => {
                     let from = frame.zoom.unwrap_or(camera.1);
-                    self.running = Some(Running::ZoomTo { from, to, start: now, secs });
+                    self.running = Some(Running::ZoomTo {
+                        from,
+                        to,
+                        start: now,
+                        secs,
+                    });
                 }
                 Command::PanTo(x, z, secs) => {
                     let from = frame.center.unwrap_or(camera.0);
-                    self.running = Some(Running::PanTo { from, to: [x / 4.0, z / 4.0], start: now, secs });
+                    self.running = Some(Running::PanTo {
+                        from,
+                        to: [x / 4.0, z / 4.0],
+                        start: now,
+                        secs,
+                    });
                 }
                 Command::Wait(secs) => {
-                    self.running = Some(Running::Wait { until: now + std::time::Duration::from_secs_f64(secs) })
+                    self.running = Some(Running::Wait {
+                        until: now + std::time::Duration::from_secs_f64(secs),
+                    })
                 }
                 Command::WaitIdle => {
                     self.idle_since = None;

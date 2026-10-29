@@ -1,2 +1,4 @@
 [toolchain]
+# steel-worldgen uses nightly features (portable_simd, const traits)
 channel = "nightly-2026-08-21"
+components = ["rustfmt", "clippy"]
