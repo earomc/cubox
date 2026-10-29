@@ -1,0 +1,61 @@
+name: Release
+
+# Push a tag like v0.2.0 to build all platforms and publish a GitHub release.
+# The release notes are the matching section of CHANGELOG.md.
+on:
+  push:
+    tags: ["v[0-9]+.[0-9]+.[0-9]+*"]
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  create-release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: taiki-e/create-gh-release-action@v1
+        with:
+          changelog: CHANGELOG.md
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+  upload-assets:
+    needs: create-release
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # an older glibc, so the binary runs on more distributions
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-22.04
+          - target: aarch64-unknown-linux-gnu
+            os: ubuntu-22.04-arm
+          # one binary for intel and apple silicon
+          - target: universal-apple-darwin
+            os: macos-14
+            targets: x86_64-apple-darwin aarch64-apple-darwin
+          - target: x86_64-pc-windows-msvc
+            os: windows-latest
+          - target: aarch64-pc-windows-msvc
+            os: windows-latest
+            targets: aarch64-pc-windows-msvc
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: ./.github/actions/setup-rust
+        with:
+          targets: ${{ matrix.targets }}
+          cache-key: ${{ matrix.target }}
+      - uses: taiki-e/upload-rust-binary-action@v1
+        with:
+          bin: cubox
+          target: ${{ matrix.target }}
+          include: LICENSE,README.md
+          tar: unix
+          zip: windows
+          checksum: sha256
+          locked: true
+          token: ${{ secrets.GITHUB_TOKEN }}

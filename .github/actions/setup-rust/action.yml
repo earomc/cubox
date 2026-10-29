@@ -1,0 +1,38 @@
+name: Set up Rust
+description: Installs the toolchain pinned in rust-toolchain.toml, optional extra targets, and a build cache
+
+inputs:
+  targets:
+    description: Space separated extra targets to install
+    required: false
+    default: ""
+  cache-key:
+    description: Extra key for the build cache, e.g. the target
+    required: false
+    default: ""
+
+runs:
+  using: composite
+  steps:
+    - name: Install rustup if the runner has none
+      shell: bash
+      run: |
+        if ! command -v rustup >/dev/null; then
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain none
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+        fi
+
+    - name: Install the pinned toolchain
+      shell: bash
+      run: |
+        export PATH="$HOME/.cargo/bin:$PATH"
+        # rustup >= 1.28 installs rust-toolchain.toml with `toolchain install`, older ones with `show`
+        rustup toolchain install || rustup show
+        if [ -n "${{ inputs.targets }}" ]; then
+          rustup target add ${{ inputs.targets }}
+        fi
+        rustc --version
+
+    - uses: Swatinem/rust-cache@v2
+      with:
+        key: ${{ inputs.cache-key }}
