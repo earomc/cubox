@@ -1,18 +1,26 @@
-mod biome_colors;
-mod cli;
-mod dimension;
-mod gui;
-mod seed;
-mod tile_renderer;
-use rayon::prelude::*;
-use std::time::Instant;
+//! The desktop app and command line. Browsers use the library directly, see `src/web.rs`.
+#![cfg_attr(target_arch = "wasm32", allow(unused))]
 
-use crate::{
-    cli::build_cmd,
+#[cfg(not(target_arch = "wasm32"))]
+mod cli;
+
+#[cfg(not(target_arch = "wasm32"))]
+use cubox::{
     dimension::Dimension,
     tile_renderer::{Shading, TileKey, calibrate, render_tile, world_mean},
 };
+#[cfg(not(target_arch = "wasm32"))]
+use rayon::prelude::*;
+#[cfg(not(target_arch = "wasm32"))]
+use std::time::Instant;
 
+#[cfg(not(target_arch = "wasm32"))]
+use crate::cli::build_cmd;
+
+#[cfg(target_arch = "wasm32")]
+fn main() {}
+
+#[cfg(not(target_arch = "wasm32"))]
 fn main() {
     let matches = build_cmd().get_matches();
     match matches.subcommand() {
@@ -96,8 +104,9 @@ fn main() {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn run_gui(seed: i64, dimension: Dimension, script: Option<std::path::PathBuf>) {
-    if let Err(err) = crate::gui::run(seed, dimension, script) {
+    if let Err(err) = cubox::gui::run(seed, dimension, script) {
         eprintln!("error: {err:#}");
     }
 }

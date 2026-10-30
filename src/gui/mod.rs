@@ -1,31 +1,38 @@
+// tile tasks run on threads on the desktop and in web workers in browsers
+#[cfg(not(target_arch = "wasm32"))]
+#[path = "executor_native.rs"]
+mod executor;
+#[cfg(target_arch = "wasm32")]
+#[path = "executor_web.rs"]
+pub(crate) mod executor;
 mod map_renderer;
 mod map_view;
+#[cfg(not(target_arch = "wasm32"))]
 mod script;
 mod tiles;
+pub(crate) mod world;
 
-use std::{
-    path::{Path, PathBuf},
-    sync::Arc,
-    time::{Duration, Instant},
-};
+use std::{path::Path, sync::Arc, time::Duration};
 
 use steel_worldgen::biomes::BiomeSourceKind;
+use web_time::Instant;
 use winit::{
     application::ApplicationHandler,
-    dpi::PhysicalSize,
     event::{KeyEvent, WindowEvent},
     event_loop::{ActiveEventLoop, ControlFlow, EventLoop},
     keyboard::{KeyCode, PhysicalKey},
     window::Window,
 };
 
+#[cfg(not(target_arch = "wasm32"))]
+use crate::gui::script::{Command, Script};
 use crate::{
     dimension::Dimension,
     gui::{
         map_renderer::{MapRenderer, Quad},
         map_view::{MapSettings, MapView},
-        script::{Command, Script},
         tiles::TileCache,
+        world::WorldParams,
     },
     seed::parse_seed,
 };
@@ -33,15 +40,49 @@ use crate::{
 struct App {
     seed: i64,
     dimension: Dimension,
+    #[cfg(not(target_arch = "wasm32"))]
     script: Option<Script>,
+    /// in browsers the canvas to draw into, and how to hand over the state, which is created asynchronously
+    #[cfg(target_arch = "wasm32")]
+    web: (web_sys::HtmlCanvasElement, winit::event_loop::EventLoopProxy<State>),
     state: Option<State>,
 }
 
-impl ApplicationHandler for App {
+impl ApplicationHandler<State> for App {
     fn resumed(&mut self, event_loop: &winit::event_loop::ActiveEventLoop) {
         let window_attributes = with_app_name(Window::default_attributes().with_title("cubox"));
+        #[cfg(target_arch = "wasm32")]
+        let window_attributes = {
+            use winit::platform::web::WindowAttributesExtWebSys;
+            window_attributes.with_canvas(Some(self.web.0.clone()))
+        };
         let window = Arc::new(event_loop.create_window(window_attributes).unwrap());
-        self.state = Some(pollster::block_on(State::new(window, self.seed, self.dimension)).unwrap())
+
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            self.state = Some(pollster::block_on(State::new(window, self.seed, self.dimension)).unwrap())
+        }
+        // browsers can't block, the state arrives as user event
+        #[cfg(target_arch = "wasm32")]
+        {
+            let proxy = self.web.1.clone();
+            let (seed, dimension) = (self.seed, self.dimension);
+            wasm_bindgen_futures::spawn_local(async move {
+                match State::new(window, seed, dimension).await {
+                    Ok(state) => {
+                        let _ = proxy.send_event(state);
+                    }
+                    Err(err) => log::error!("starting: {err:#}"),
+                }
+            });
+        }
+    }
+
+    fn user_event(&mut self, _event_loop: &ActiveEventLoop, state: State) {
+        let size = state.window.inner_size();
+        let state = self.state.insert(state);
+        state.resize(size.width, size.height);
+        state.window.request_redraw();
     }
 
     fn window_event(
@@ -67,6 +108,9 @@ impl ApplicationHandler for App {
             WindowEvent::Resized(size) => state.resize(size.width, size.height),
             WindowEvent::Occluded(occluded) => state.occluded = occluded,
             WindowEvent::RedrawRequested => {
+                #[cfg(target_arch = "wasm32")]
+                let capture: Option<&Path> = None;
+                #[cfg(not(target_arch = "wasm32"))]
                 let capture = match &mut self.script {
                     Some(script) => {
                         let frame = script.step(
@@ -87,7 +131,9 @@ impl ApplicationHandler for App {
                     None => None,
                 };
                 state.update();
-                match state.render(capture.as_deref()) {
+                #[cfg(not(target_arch = "wasm32"))]
+                let capture = capture.as_deref();
+                match state.render(capture) {
                     Ok(_) => {}
                     Err(e) => {
                         log::error!("{e}");
@@ -175,15 +221,24 @@ impl State {
     pub async fn new(window: Arc<Window>, seed: i64, dimension: Dimension) -> anyhow::Result<Self> {
         let size = window.inner_size();
 
-        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
-            backends: wgpu::Backends::PRIMARY,
+        let descriptor = wgpu::InstanceDescriptor {
+            // browsers: webgpu where available, webgl2 otherwise
+            backends: if cfg!(target_arch = "wasm32") {
+                wgpu::Backends::BROWSER_WEBGPU | wgpu::Backends::GL
+            } else {
+                wgpu::Backends::PRIMARY
+            },
 
             // default stuff
             flags: Default::default(),
             memory_budget_thresholds: Default::default(),
             backend_options: Default::default(),
             display: None,
-        });
+        };
+        #[cfg(target_arch = "wasm32")]
+        let instance = wgpu::util::new_instance_with_webgpu_detection(descriptor).await;
+        #[cfg(not(target_arch = "wasm32"))]
+        let instance = wgpu::Instance::new(descriptor);
         let surface = instance.create_surface(window.clone())?;
 
         let adapter = instance
@@ -199,7 +254,12 @@ impl State {
             .request_device(&wgpu::DeviceDescriptor {
                 label: None,
                 required_features: wgpu::Features::empty(),
-                required_limits: Default::default(),
+                // webgl2 can't do all of the defaults, but enough for cubox
+                required_limits: if cfg!(target_arch = "wasm32") {
+                    wgpu::Limits::downlevel_webgl2_defaults().using_resolution(adapter.limits())
+                } else {
+                    Default::default()
+                },
                 experimental_features: wgpu::ExperimentalFeatures::disabled(),
                 memory_hints: Default::default(),
                 trace: wgpu::Trace::Off,
@@ -243,16 +303,20 @@ impl State {
         let map_renderer = MapRenderer::new(&device, surface_format, [size.width, size.height]);
 
         let biome_source = Arc::new(dimension.biome_source(seed));
-        let sample_height = dimension.default_height();
-        // more samples show more of the real variation far out, but are hard to tell apart and much slower
-        let samples = 1;
+        let params = WorldParams {
+            seed,
+            dimension,
+            sample_height: dimension.default_height(),
+            // more samples show more of the real variation far out, but are hard to tell apart and much slower
+            samples: 1,
+        };
         let ui = Ui {
             seed,
             seed_text: seed.to_string(),
             dimension,
-            sample_height,
-            samples,
-            tiles: TileCache::new(biome_source.clone(), sample_height, samples),
+            sample_height: params.sample_height,
+            samples: params.samples,
+            tiles: TileCache::new(params),
             biome_source,
             map: MapView::new(),
             panel: true,
@@ -289,6 +353,7 @@ impl State {
     }
 
     /// Applies what a script wants for this frame.
+    #[cfg(not(target_arch = "wasm32"))]
     fn apply_script(&mut self, commands: Vec<Command>, center: Option<[f64; 2]>, zoom: Option<f64>) {
         let mut resized = None;
         let ui = &mut self.ui;
@@ -296,7 +361,7 @@ impl State {
             match command {
                 Command::Size(w, h) => {
                     // when the size is applied right away there is no resized event
-                    if let Some(size) = self.window.request_inner_size(PhysicalSize::new(w, h)) {
+                    if let Some(size) = self.window.request_inner_size(winit::dpi::PhysicalSize::new(w, h)) {
                         resized = Some(size);
                     }
                 }
@@ -384,14 +449,22 @@ impl State {
                 .update_buffers(&self.device, &self.queue, &mut encoder, &paint_jobs, &screen);
 
         self.draw(&mut encoder, &view, &paint_jobs, &screen);
+        #[cfg(target_arch = "wasm32")]
+        let _ = capture;
+        #[cfg(target_arch = "wasm32")]
+        self.queue
+            .submit(egui_cmds.into_iter().chain(std::iter::once(encoder.finish())));
         // the surface can't be read back, so a captured frame is drawn a second time into a texture that can
+        #[cfg(not(target_arch = "wasm32"))]
         let capturable = matches!(
             self.surface_config.format,
             wgpu::TextureFormat::Bgra8Unorm | wgpu::TextureFormat::Rgba8Unorm
         );
+        #[cfg(not(target_arch = "wasm32"))]
         if capture.is_some() && !capturable {
             anyhow::bail!("can only capture 8 bit surfaces, not {:?}", self.surface_config.format);
         }
+        #[cfg(not(target_arch = "wasm32"))]
         let readback = capture.map(|_| {
             let texture = self.device.create_texture(&wgpu::TextureDescriptor {
                 label: Some("capture"),
@@ -416,8 +489,10 @@ impl State {
             Readback::copy(&self.device, &mut encoder, &texture)
         });
 
+        #[cfg(not(target_arch = "wasm32"))]
         self.queue
             .submit(egui_cmds.into_iter().chain(std::iter::once(encoder.finish())));
+        #[cfg(not(target_arch = "wasm32"))]
         if let (Some(readback), Some(path)) = (readback, capture) {
             readback.save(&self.device, self.surface_config.format, path.to_owned())?;
         }
@@ -464,7 +539,8 @@ impl State {
     }
 
     fn handle_key(&self, event_loop: &ActiveEventLoop, code: KeyCode, is_pressed: bool) {
-        if let (KeyCode::Escape, true) = (code, is_pressed) {
+        // a web page isn't closed with a key
+        if let (KeyCode::Escape, true, false) = (code, is_pressed, cfg!(target_arch = "wasm32")) {
             event_loop.exit()
         }
     }
@@ -478,12 +554,14 @@ impl State {
 }
 
 /// A frame copied into a buffer the cpu can read.
+#[cfg(not(target_arch = "wasm32"))]
 struct Readback {
     buffer: wgpu::Buffer,
     size: [u32; 2],
     bytes_per_row: u32,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl Readback {
     fn copy(device: &wgpu::Device, encoder: &mut wgpu::CommandEncoder, texture: &wgpu::Texture) -> Self {
         let size = [texture.width(), texture.height()];
@@ -515,7 +593,7 @@ impl Readback {
     }
 
     /// Waits for the copy and writes a png in the background.
-    fn save(self, device: &wgpu::Device, format: wgpu::TextureFormat, path: PathBuf) -> anyhow::Result<()> {
+    fn save(self, device: &wgpu::Device, format: wgpu::TextureFormat, path: std::path::PathBuf) -> anyhow::Result<()> {
         self.buffer.slice(..).map_async(wgpu::MapMode::Read, |_| {});
         device.poll(wgpu::PollType::wait_indefinitely())?;
         let bgra = matches!(
@@ -563,8 +641,12 @@ impl Ui {
     /// Throws away all tiles after the world or how it is sampled changed.
     fn reset_tiles(&mut self) {
         self.hovered_biome = None;
-        self.tiles
-            .clear(self.biome_source.clone(), self.sample_height, self.samples);
+        self.tiles.clear(WorldParams {
+            seed: self.seed,
+            dimension: self.dimension,
+            sample_height: self.sample_height,
+            samples: self.samples,
+        });
     }
 
     fn show(&mut self, root: &mut egui::Ui) {
@@ -679,10 +761,11 @@ fn with_app_name(attributes: winit::window::WindowAttributes) -> winit::window::
     attributes
 }
 
-pub fn run(seed: i64, dimension: Dimension, script: Option<PathBuf>) -> anyhow::Result<()> {
+#[cfg(not(target_arch = "wasm32"))]
+pub fn run(seed: i64, dimension: Dimension, script: Option<std::path::PathBuf>) -> anyhow::Result<()> {
     env_logger::init();
     let script = script.map(|path| Script::load(&path)).transpose()?;
-    let event_loop = EventLoop::new()?;
+    let event_loop = EventLoop::with_user_event().build()?;
     let mut app = App {
         seed,
         dimension,
@@ -690,5 +773,20 @@ pub fn run(seed: i64, dimension: Dimension, script: Option<PathBuf>) -> anyhow::
         state: None,
     };
     event_loop.run_app(&mut app)?;
+    Ok(())
+}
+
+/// Starts the viewer in `canvas`. Returns right away, the browser drives the event loop.
+#[cfg(target_arch = "wasm32")]
+pub fn start(canvas: web_sys::HtmlCanvasElement, seed: i64, dimension: Dimension) -> anyhow::Result<()> {
+    use winit::platform::web::EventLoopExtWebSys;
+    let event_loop = EventLoop::with_user_event().build()?;
+    let proxy = event_loop.create_proxy();
+    event_loop.spawn_app(App {
+        seed,
+        dimension,
+        web: (canvas, proxy),
+        state: None,
+    });
     Ok(())
 }

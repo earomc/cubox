@@ -1,5 +1,5 @@
-use crate::seed::parse_seed;
 use clap::{Arg, ArgAction, Command, crate_description, crate_name, crate_version, value_parser};
+use cubox::seed::parse_seed;
 
 const SEED_HELP: &str = "Seed like in Minecraft: a number (negative too) or any text";
 
