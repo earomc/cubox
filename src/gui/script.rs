@@ -6,6 +6,10 @@
 //! dimension nether       # overworld, nether or end
 //! samples 2              # samples per pixel and axis
 //! panel off              # hide the settings window (on to show it again)
+//! structure village      # show a kind of structure, or `all`, or `none`
+//! relief on              # terrain on the map (off to hide it)
+//! grid on                # the distance grid (off to hide it)
+//! search village         # search for a kind of structure or a biome from the view center
 //! goto 1000 -500         # center the view on these block coordinates
 //! zoom 6                 # log2 of quarts per screen point, 0 = 1 quart per point
 //! zoom_to 12 2.5         # zoom there (around the center) over 2.5 seconds
@@ -29,6 +33,10 @@ pub enum Command {
     Dimension(Dimension),
     Samples(u8),
     Panel(bool),
+    Structure(String),
+    Relief(bool),
+    Grid(bool),
+    Search(String),
     Goto(f64, f64),
     Zoom(f64),
     ZoomTo(f64, f64),
@@ -67,6 +75,10 @@ impl Command {
             ),
             "samples" => Command::Samples(num(0)? as u8),
             "panel" => Command::Panel(args.first() != Some(&"off")),
+            "structure" => Command::Structure(args.first().context("structure: which")?.to_string()),
+            "relief" => Command::Relief(args.first() != Some(&"off")),
+            "grid" => Command::Grid(args.first() != Some(&"off")),
+            "search" => Command::Search(args.first().context("search: for what")?.to_string()),
             "goto" => Command::Goto(num(0)?, num(1)?),
             "zoom" => Command::Zoom(num(0)?),
             "zoom_to" => Command::ZoomTo(num(0)?, num(1)?),

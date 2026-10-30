@@ -168,6 +168,24 @@ impl MapRenderer {
         size: u32,
         nearest: bool,
     ) -> TileTexture {
+        let rgba: Vec<u8> = rgb
+            .as_chunks::<3>()
+            .0
+            .iter()
+            .flat_map(|c| [c[0], c[1], c[2], 255])
+            .collect();
+        self.create_rgba_tile(device, queue, &rgba, size, nearest)
+    }
+
+    /// Uploads a tile with its own opacity, see `create_tile`.
+    pub fn create_rgba_tile(
+        &self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        rgba: &[u8],
+        size: u32,
+        nearest: bool,
+    ) -> TileTexture {
         let extent = wgpu::Extent3d {
             width: size,
             height: size,
@@ -183,12 +201,6 @@ impl MapRenderer {
             usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
             view_formats: &[],
         });
-        let rgba: Vec<u8> = rgb
-            .as_chunks::<3>()
-            .0
-            .iter()
-            .flat_map(|c| [c[0], c[1], c[2], 255])
-            .collect();
         queue.write_texture(
             wgpu::TexelCopyTextureInfo {
                 texture: &texture,
@@ -196,7 +208,7 @@ impl MapRenderer {
                 origin: wgpu::Origin3d::ZERO,
                 aspect: wgpu::TextureAspect::All,
             },
-            &rgba,
+            rgba,
             wgpu::TexelCopyBufferLayout {
                 offset: 0,
                 bytes_per_row: Some(size * 4),

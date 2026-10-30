@@ -5,8 +5,18 @@ mod executor;
 #[cfg(target_arch = "wasm32")]
 #[path = "executor_web.rs"]
 pub(crate) mod executor;
+mod finder;
+// finder jobs too
+#[cfg(not(target_arch = "wasm32"))]
+#[path = "finder_native.rs"]
+mod finder_pool;
+#[cfg(target_arch = "wasm32")]
+#[path = "finder_web.rs"]
+pub(crate) mod finder_pool;
 mod map_renderer;
 mod map_view;
+mod menus;
+mod overlays;
 #[cfg(not(target_arch = "wasm32"))]
 mod script;
 mod tiles;
@@ -29,12 +39,16 @@ use crate::gui::script::{Command, Script};
 use crate::{
     dimension::Dimension,
     gui::{
+        finder::{FinderWorld, Queries},
         map_renderer::{MapRenderer, Quad},
         map_view::{MapSettings, MapView},
+        overlays::{Grid, Icons},
         tiles::TileCache,
         world::WorldParams,
     },
     seed::parse_seed,
+    structures::{Found, STRUCTURE_KINDS},
+    terrain::Terrain,
 };
 
 struct App {
@@ -97,6 +111,14 @@ impl ApplicationHandler<State> for App {
         };
 
         let response = state.egui_state.on_window_event(&state.window, &event);
+        // in browsers every finger counts as its own device, but egui only sees a pinch in the
+        // touches of one device
+        #[cfg(target_arch = "wasm32")]
+        for event in &mut state.egui_state.egui_input_mut().events {
+            if let egui::Event::Touch { device_id, .. } = event {
+                *device_id = egui::TouchDeviceId(0);
+            }
+        }
         // egui asks to repaint after every redraw too, following that would draw forever.
         // what needs another frame requests it in render
         if response.repaint && !matches!(event, WindowEvent::RedrawRequested) {
@@ -113,10 +135,8 @@ impl ApplicationHandler<State> for App {
                 #[cfg(not(target_arch = "wasm32"))]
                 let capture = match &mut self.script {
                     Some(script) => {
-                        let frame = script.step(
-                            (state.ui.map.camera.center, state.ui.map.camera.zoom),
-                            state.ui.tiles.pending() > 0,
-                        );
+                        let frame =
+                            script.step((state.ui.map.camera.center, state.ui.map.camera.zoom), state.ui.busy());
                         if frame.quit {
                             event_loop.exit();
                             return;
@@ -215,11 +235,30 @@ struct Ui {
     hovered_biome: Option<([i32; 2], String)>,
     /// what the map view wants drawn this frame
     quads: Vec<Quad>,
+    /// structures and search
+    queries: Queries,
+    /// which of `STRUCTURE_KINDS` are shown
+    shown_kinds: Vec<bool>,
+    /// structures on the screen, cached for the markers
+    markers: Vec<Found>,
+    /// kinds of which too much is on the screen, they say to zoom in
+    too_far: Vec<bool>,
+    icons: Option<Icons>,
+    search_filter: String,
+    /// draw the terrain over the biomes
+    relief: bool,
+    /// made when relief is first used, for the height under the cursor
+    terrain: Option<Terrain>,
+    /// height under the cursor, cached for the quart it was sampled at
+    hovered_height: Option<([i32; 2], i32)>,
+    grid: Grid,
 }
 
 impl State {
     pub async fn new(window: Arc<Window>, seed: i64, dimension: Dimension) -> anyhow::Result<Self> {
         let size = window.inner_size();
+        #[cfg(target_arch = "wasm32")]
+        crate::web::set_window(window.clone());
 
         let descriptor = wgpu::InstanceDescriptor {
             // browsers: webgpu where available, webgl2 otherwise
@@ -291,6 +330,15 @@ impl State {
         };
 
         let egui_ctx = egui::Context::default();
+        // fingers are bigger than a mouse pointer
+        #[cfg(target_arch = "wasm32")]
+        if web_sys::window().is_some_and(|w| w.navigator().max_touch_points() > 0) {
+            egui_ctx.all_styles_mut(|style| {
+                style.spacing.interact_size.y = 34.0;
+                style.spacing.button_padding = egui::vec2(10.0, 7.0);
+                style.spacing.item_spacing.y = 8.0;
+            });
+        }
         let egui_state = egui_winit::State::new(
             egui_ctx.clone(),
             egui::ViewportId::ROOT,
@@ -323,6 +371,20 @@ impl State {
             goto: [0, 0],
             hovered_biome: None,
             quads: Vec::new(),
+            queries: Queries::new(FinderWorld {
+                seed,
+                dimension,
+                sample_height: params.sample_height,
+            }),
+            shown_kinds: vec![false; STRUCTURE_KINDS.len()],
+            markers: Vec::new(),
+            too_far: vec![false; STRUCTURE_KINDS.len()],
+            icons: None,
+            search_filter: String::new(),
+            relief: false,
+            terrain: None,
+            hovered_height: None,
+            grid: Grid::default(),
         };
 
         Ok(Self {
@@ -371,6 +433,10 @@ impl State {
                     ui.reset_tiles();
                 }
                 Command::Panel(on) => ui.panel = on,
+                Command::Structure(which) => ui.script_structure(&which),
+                Command::Relief(on) => ui.relief = on,
+                Command::Grid(on) => ui.grid.enabled = on,
+                Command::Search(what) => ui.script_search(&what),
                 _ => {}
             }
         }
@@ -394,6 +460,9 @@ impl State {
         let raw_input = self.egui_state.take_egui_input(&self.window);
         let ui = &mut self.ui;
         let full_output = self.egui_ctx.run_ui(raw_input, |root| ui.show(root));
+        // a phone only shows its keyboard for a real text field, see web/index.html
+        #[cfg(target_arch = "wasm32")]
+        crate::web::set_keyboard(full_output.platform_output.ime.is_some());
         self.egui_state
             .handle_platform_output(&self.window, full_output.platform_output);
 
@@ -402,7 +471,7 @@ impl State {
             .viewport_output
             .get(&egui::ViewportId::ROOT)
             .map_or(Duration::MAX, |v| v.repaint_delay);
-        if self.ui.tiles.pending() > 0 || repaint_delay.is_zero() {
+        if self.ui.busy() || repaint_delay.is_zero() {
             self.window.request_redraw();
         } else {
             self.repaint_at = Instant::now().checked_add(repaint_delay);
@@ -546,6 +615,12 @@ impl State {
     }
 
     fn update(&mut self) {
+        // what was typed on a phone's keyboard
+        #[cfg(target_arch = "wasm32")]
+        self.egui_state
+            .egui_input_mut()
+            .events
+            .extend(crate::web::take_typed_events());
         let now = self.egui_ctx.input(|i| i.time);
         if self.ui.tiles.poll(now, &self.device, &self.queue, &self.map_renderer) {
             self.window.request_redraw();
@@ -631,6 +706,11 @@ impl Readback {
 }
 
 impl Ui {
+    /// Whether anything is being generated, then frames keep coming to show it.
+    fn busy(&self) -> bool {
+        self.tiles.pending() > 0 || self.queries.busy()
+    }
+
     fn set_dimension(&mut self, dimension: Dimension) {
         self.dimension = dimension;
         self.sample_height = dimension.default_height();
@@ -641,6 +721,13 @@ impl Ui {
     /// Throws away all tiles after the world or how it is sampled changed.
     fn reset_tiles(&mut self) {
         self.hovered_biome = None;
+        self.hovered_height = None;
+        self.terrain = None;
+        self.queries.set_world(FinderWorld {
+            seed: self.seed,
+            dimension: self.dimension,
+            sample_height: self.sample_height,
+        });
         self.tiles.clear(WorldParams {
             seed: self.seed,
             dimension: self.dimension,
@@ -653,9 +740,16 @@ impl Ui {
         let settings = MapSettings {
             sample_height: self.sample_height,
             samples: self.samples,
+            relief: self.relief && self.dimension == Dimension::Overworld,
         };
         self.quads.clear();
-        egui::CentralPanel::no_frame().show(root, |ui| self.map.show(ui, &mut self.tiles, settings, &mut self.quads));
+        if self.icons.is_none() {
+            self.icons = Some(Icons::load(root.ctx()));
+        }
+        egui::CentralPanel::no_frame().show(root, |ui| {
+            self.map.show(ui, &mut self.tiles, settings, &mut self.quads);
+            self.show_overlays(ui);
+        });
         if !self.panel {
             return;
         }
@@ -664,7 +758,15 @@ impl Ui {
         let mut changed = false;
         let mut new_dimension = None;
         let mut go = false;
-        egui::Window::new("cubox").resizable(false).show(root.ctx(), |ui| {
+        // on a phone the window would cover the map, so it starts closed and scrolls
+        let screen = root.ctx().content_rect().size();
+        let narrow = screen.x < 500.0;
+        egui::Window::new("cubox")
+            .auto_sized()
+            .default_open(!narrow)
+            .default_pos(egui::pos2(8.0, 8.0))
+            .max_width((screen.x - 16.0).min(360.0))
+            .show(root.ctx(), |ui| egui::ScrollArea::vertical().max_height(screen.y - 60.0).show(ui, |ui| {
             egui::Grid::new("settings").num_columns(2).show(ui, |ui| {
                 ui.label("Seed").on_hover_text("A number, negative too, or any text like in Minecraft");
                 if ui.text_edit_singleline(&mut self.seed_text).changed()
@@ -712,7 +814,7 @@ impl Ui {
                 ui.label("Go to (x z)");
                 ui.horizontal(|ui| {
                     for v in &mut self.goto {
-                        let response = ui.add(egui::DragValue::new(v).speed(16.0));
+                        let response = ui.add(egui::DragValue::new(v).speed(16.0).update_while_editing(false));
                         go |= response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
                     }
                     go |= ui.button("Go").clicked();
@@ -728,13 +830,20 @@ impl Ui {
                     let biome = self.biome_source.chunk_sampler().sample(q[0], self.sample_height >> 2, q[1]);
                     self.hovered_biome = Some((q, biome.key.path.to_string()));
                 }
+                let height = self.hovered_height(q);
                 let name = &self.hovered_biome.as_ref().unwrap().1;
-                ui.label(format!("x {} z {}: {name}", q[0] * 4, q[1] * 4));
+                let height = height.map_or(String::new(), |y| format!(" y {y}"));
+                ui.label(format!("x {} z {}{height}: {name}", q[0] * 4, q[1] * 4));
             } else {
                 ui.label("");
             }
             ui.label(format!("Tiles generating: {}", self.tiles.pending()));
-        });
+            ui.separator();
+            self.structures_menu(ui);
+            self.search_menu(ui);
+            self.terrain_menu(ui, level);
+            self.grid_menu(ui);
+        }));
 
         if go {
             self.map.camera.center = [self.goto[0] as f64 / 4.0, self.goto[1] as f64 / 4.0];

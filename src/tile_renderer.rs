@@ -11,8 +11,17 @@ pub const WORLD_BORDER_QUARTS: i32 = 29_999_984 / 4;
 /// perceived lightness and color. Averaging linear light makes mixes pale, averaging sRGB bytes dark.
 pub type Lab = [f32; 3];
 
+/// What a tile shows.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub enum Layer {
+    Biome,
+    /// the hillshade of the terrain, drawn over the biomes
+    Relief,
+}
+
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct TileKey {
+    pub layer: Layer,
     pub scale: u8,           // scale of sampling
     pub sample_height: i32,  // the y coordinate in blocks
     pub tile_size_px: usize, // size of the tile in pixels
@@ -24,7 +33,7 @@ pub struct TileKey {
 }
 
 impl TileKey {
-    fn stride(&self) -> i32 {
+    pub fn stride(&self) -> i32 {
         1 << self.scale
     }
 
@@ -35,7 +44,7 @@ impl TileKey {
     }
 
     /// World origin of the tile in quarts.
-    fn origin(&self) -> (i32, i32) {
+    pub fn origin(&self) -> (i32, i32) {
         let size = self.tile_size_px as i32 * self.stride();
         (self.x * size, self.z * size)
     }
@@ -343,6 +352,7 @@ mod tests {
         let exact = Shading::exact([0.5, 0.0, -0.02]);
         for (scale, size) in [(3, 32), (6, 32), (9, 16)] {
             let parent = TileKey {
+                layer: Layer::Biome,
                 scale,
                 sample_height: 256,
                 tile_size_px: size,
@@ -383,6 +393,7 @@ mod tests {
     fn calibration_fades_out_with_distance() {
         let source = BiomeSourceKind::overworld(12345);
         let key = |scale| TileKey {
+            layer: Layer::Biome,
             scale,
             sample_height: 256,
             tile_size_px: 128,

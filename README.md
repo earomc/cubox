@@ -40,6 +40,13 @@ cubes/boxes ... so it works in multiple ways I guess ...
 | **Nether** | **End** |
 | ![The nether](docs/media/nether.webp) | ![The end around the main island](docs/media/end.webp) |
 
+- **Structures:** every kind in the game, each with its own icon and switch, off by default. Positions
+  come from the game's real generation code, including biome and terrain checks.
+- **Search** for the nearest structures or biomes from the middle of the view.
+- **Height map:** the real terrain shaded over the biomes when zoomed in, in the overworld.
+- **Distance grid** with block coordinates and a scale bar, with automatic or fixed spacing.
+- **Touch screens:** pinch to zoom, and an on screen keyboard for numbers and seeds in the web version.
+
 ## Download
 
 The web version runs at **[earomc.github.io/cubox](https://earomc.github.io/cubox)**, in any current browser
@@ -92,6 +99,11 @@ samples per pixel and axis, and `--exact` shows the raw sampled averages without
 
 `cubox gui --script file` drives the viewer from a script and saves screenshots, see
 [`src/gui/script.rs`](src/gui/script.rs). The images above were made that way.
+
+### Structure icons
+
+The icons are the PNG files in [`assets/icons`](assets/icons), named after each structure, 32x32 pixels
+with transparency. To change one, replace its file and rebuild. The current ones are placeholders.
 
 ## How it works
 
@@ -153,7 +165,7 @@ changelog section as release notes, and deploys the web version to GitHub Pages.
 
 ## Roadmap
 
-- **Structures:** find villages, strongholds, monuments and other structures, and search the world for them.
+- **Terrain further out:** true heights get too slow past 8 blocks per pixel, the game's fast estimate is about 10 blocks off.
 - **Large biomes** worlds, once SteelMC's world generator supports them.
 - macOS app bundle and code signing, and a Windows build without a console window.
 

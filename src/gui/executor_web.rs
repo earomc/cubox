@@ -16,7 +16,7 @@ use web_sys::{MessageEvent, Worker, WorkerOptions, WorkerType};
 use crate::{
     dimension::Dimension,
     gui::world::{Finished, Queue, Task, World, WorldParams},
-    tile_renderer::{Estimate, Tile, TileKey},
+    tile_renderer::{Estimate, Layer, Tile, TileKey},
 };
 
 /// The worker script next to the page, see `web/worker.js`.
@@ -47,8 +47,15 @@ impl Executor {
             workers: Vec::new(),
             finished: Vec::new(),
         }));
-        let count = web_sys::window().map_or(4.0, |w| w.navigator().hardware_concurrency()) as usize;
-        for index in 0..count.clamp(1, 16) {
+        let navigator = web_sys::window().map(|w| w.navigator());
+        let count = navigator.as_ref().map_or(4.0, |n| n.hardware_concurrency()) as usize;
+        // every worker has its own copy of the world, too much for the memory of a phone
+        let max = if navigator.is_some_and(|n| n.max_touch_points() > 0) {
+            4
+        } else {
+            16
+        };
+        for index in 0..count.clamp(1, max) {
             match spawn_worker(&inner, index) {
                 Ok(worker) => inner.borrow_mut().workers.push(Slot { worker, busy: None }),
                 Err(err) => log::error!("starting a tile worker: {err:?}"),
@@ -117,13 +124,13 @@ fn spawn_worker(inner: &Rc<RefCell<Inner>>, index: usize) -> Result<Worker, JsVa
     Ok(worker)
 }
 
-/// `[seed, dimension, sample height, samples setting, scale, x, z, tile size, samples, children]`.
+/// `[seed, dimension, sample height, samples setting, scale, x, z, tile size, samples, children, relief]`.
 /// The seed is a string, JavaScript numbers can't hold all 64 bits. `children` are the estimates
 /// of the 4 children for downsampling, or null to sample the tile.
 fn encode_request(params: &WorldParams, key: TileKey, task: &Task) -> (Array, Array) {
     let transfer = Array::new();
     let children = match task {
-        Task::Render => JsValue::NULL,
+        Task::Render | Task::Relief => JsValue::NULL,
         Task::Downsample(children) => {
             let array = Array::new();
             for child in children {
@@ -145,6 +152,7 @@ fn encode_request(params: &WorldParams, key: TileKey, task: &Task) -> (Array, Ar
         (key.tile_size_px as u32).into(),
         key.samples.into(),
         children,
+        (key.layer == Layer::Relief).into(),
     ]);
     (request, transfer)
 }
@@ -190,7 +198,9 @@ pub fn worker_run(request: &Array) -> Result<Array, JsValue> {
         sample_height: number(2)? as i32,
         samples: number(3)? as u8,
     };
+    let relief = request.get(10).is_truthy();
     let key = TileKey {
+        layer: if relief { Layer::Relief } else { Layer::Biome },
         scale: number(4)? as u8,
         x: number(5)? as i32,
         z: number(6)? as i32,
@@ -199,7 +209,9 @@ pub fn worker_run(request: &Array) -> Result<Array, JsValue> {
         sample_height: params.sample_height,
     };
     let children = request.get(9);
-    let task = if children.is_null() {
+    let task = if relief {
+        Task::Relief
+    } else if children.is_null() {
         Task::Render
     } else {
         let children: Array = children.dyn_into()?;

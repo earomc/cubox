@@ -10,7 +10,7 @@ use crate::{
         map_renderer::{MapRenderer, TileTexture},
         world::{Estimates, Task, WorldParams},
     },
-    tile_renderer::TileKey,
+    tile_renderer::{Layer, TileKey},
 };
 
 /// Small tiles pop in quickly one by one and waste little work on parts outside the screen.
@@ -70,8 +70,8 @@ impl TileCache {
     /// first, and `cover` quick coarse tiles to show until they are there, which go first.
     /// Queues what is missing of them, drops queued work for tiles that aren't wanted anymore and
     /// makes running work for them stop. Visible tiles are only sampled if `allow_sampling`, the
-    /// map view holds that back while the zoom level is still changing.
-    pub fn update(&mut self, visible: &[TileKey], cover: &[TileKey], allow_sampling: bool) {
+    /// map view holds that back while the zoom level is still changing. `relief` tiles come last.
+    pub fn update(&mut self, visible: &[TileKey], cover: &[TileKey], relief: &[TileKey], allow_sampling: bool) {
         self.frame += 1;
         let mut rank = HashMap::new();
         for (i, &key) in cover.iter().enumerate() {
@@ -79,6 +79,9 @@ impl TileCache {
         }
         for (i, &key) in visible.iter().enumerate() {
             self.plan(key, cover.len() + i, allow_sampling, &mut rank);
+        }
+        for (i, &key) in relief.iter().enumerate() {
+            self.plan(key, cover.len() + visible.len() + i, allow_sampling, &mut rank);
         }
         self.executor.update(rank, &mut self.pending);
     }
@@ -91,7 +94,11 @@ impl TileCache {
         if self.pending.contains(&key) || self.entries.contains_key(&key) {
             return;
         }
-        if let Some(children) = self.finished_children(&key) {
+        if key.layer == Layer::Relief {
+            if allow_sampling {
+                self.queue(key, Task::Relief);
+            }
+        } else if let Some(children) = self.finished_children(&key) {
             self.queue(key, Task::Downsample(children));
         } else if self.buildable(&key, MAX_BUILD_DEPTH) {
             for child in children(&key) {
@@ -145,8 +152,10 @@ impl TileCache {
             self.pending.remove(&done.key);
             let Some(tile) = done.tile else { continue };
             // nearest at the finest level so single quarts stay crisp when zoomed in
-            let texture =
-                Rc::new(renderer.create_tile(device, queue, &tile.rgb, TILE_SIZE as u32, done.key.scale == 0));
+            let texture = Rc::new(match done.key.layer {
+                Layer::Biome => renderer.create_tile(device, queue, &tile.rgb, TILE_SIZE as u32, done.key.scale == 0),
+                Layer::Relief => renderer.create_rgba_tile(device, queue, &tile.rgb, TILE_SIZE as u32, false),
+            });
             let estimates = Arc::new(tile.estimates);
             self.entries.insert(
                 done.key,

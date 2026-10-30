@@ -4,3 +4,4 @@ dist
 .github
 docs/media
 *.png
+!assets/icons/*.png

@@ -7,7 +7,7 @@ mod cli;
 #[cfg(not(target_arch = "wasm32"))]
 use cubox::{
     dimension::Dimension,
-    tile_renderer::{Shading, TileKey, calibrate, render_tile, world_mean},
+    tile_renderer::{Layer, Shading, TileKey, calibrate, render_tile, world_mean},
 };
 #[cfg(not(target_arch = "wasm32"))]
 use rayon::prelude::*;
@@ -44,6 +44,7 @@ fn main() {
             let keys: Vec<TileKey> = (0..tiles_per_side)
                 .flat_map(|tz| {
                     (0..tiles_per_side).map(move |tx| TileKey {
+                        layer: Layer::Biome,
                         scale,
                         sample_height,
                         tile_size_px,

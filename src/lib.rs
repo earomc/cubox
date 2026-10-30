@@ -5,6 +5,8 @@ pub mod biome_colors;
 pub mod dimension;
 pub mod gui;
 pub mod seed;
+pub mod structures;
+pub mod terrain;
 pub mod tile_renderer;
 #[cfg(target_arch = "wasm32")]
-mod web;
+pub(crate) mod web;

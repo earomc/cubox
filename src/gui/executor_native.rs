@@ -14,7 +14,7 @@ use crate::{
         tiles::TILE_SIZE,
         world::{Finished, Queue, Task, World, WorldParams},
     },
-    tile_renderer::TileKey,
+    tile_renderer::{Layer, TileKey},
 };
 
 /// The coarsest level, see `MapView`.
@@ -99,6 +99,7 @@ fn new_world(params: WorldParams) -> Arc<World> {
                 // stop once the world was replaced, e.g. by another seed
                 let Some(world) = weak.upgrade() else { return };
                 world.shading(TileKey {
+                    layer: Layer::Biome,
                     scale,
                     sample_height: params.sample_height,
                     tile_size_px: TILE_SIZE,

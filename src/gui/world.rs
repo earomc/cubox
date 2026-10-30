@@ -10,6 +10,7 @@ use steel_worldgen::biomes::BiomeSourceKind;
 
 use crate::{
     dimension::Dimension,
+    terrain::{Terrain, hillshade},
     tile_renderer::{Estimate, Lab, Shading, Tile, TileKey, calibrate, downsample, render_tile, world_mean},
 };
 
@@ -31,6 +32,8 @@ pub enum Task {
     Downsample([Estimates; 4]),
     /// sample the tile
     Render,
+    /// sample the terrain for a relief tile, the most expensive work
+    Relief,
 }
 
 impl Task {
@@ -38,6 +41,7 @@ impl Task {
         match self {
             Task::Downsample(_) => 0,
             Task::Render => 1,
+            Task::Relief => 2,
         }
     }
 }
@@ -96,6 +100,8 @@ pub struct World {
     mean: OnceLock<Lab>,
     /// shading per scale and samples setting, each calibrated by the first worker that needs it
     shadings: Mutex<HashMap<(u8, u8), Arc<ShadingCell>>>,
+    /// only made when relief tiles are wanted
+    terrain: OnceLock<Terrain>,
 }
 
 impl World {
@@ -105,6 +111,7 @@ impl World {
             params,
             mean: OnceLock::new(),
             shadings: Default::default(),
+            terrain: OnceLock::new(),
         }
     }
 
@@ -127,10 +134,27 @@ impl World {
 
     /// Runs a task. `keep_going` is asked while sampling, a tile it says no to is abandoned.
     pub fn run(&self, key: TileKey, task: Task, keep_going: &dyn Fn() -> bool) -> Option<Tile> {
+        if matches!(task, Task::Relief) {
+            return self.relief(key, keep_going);
+        }
         let shading = self.shading(key);
         match task {
             Task::Downsample(children) => Some(downsample(children.each_ref().map(|c| c.as_slice()), key, &shading)),
             Task::Render => render_tile(&self.source, key, &shading, keep_going),
+            Task::Relief => unreachable!(),
         }
+    }
+
+    /// A relief tile: its `rgb` are RGBA pixels and it has no estimates.
+    fn relief(&self, key: TileKey, keep_going: &dyn Fn() -> bool) -> Option<Tile> {
+        let terrain = self.terrain.get_or_init(|| Terrain::new(self.params.seed));
+        let (x, z) = key.origin();
+        let stride = key.stride() * 4;
+        let size = key.tile_size_px;
+        let heights = terrain.heights([x * 4, z * 4], stride, size + 1, keep_going)?;
+        Some(Tile {
+            rgb: hillshade(&heights, size, stride),
+            estimates: Vec::new(),
+        })
     }
 }

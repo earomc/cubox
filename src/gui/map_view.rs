@@ -7,7 +7,7 @@ use crate::{
         map_renderer::{Quad, TileTexture},
         tiles::{TILE_SIZE, TileCache},
     },
-    tile_renderer::{self, TileKey},
+    tile_renderer::{self, Layer, TileKey},
 };
 
 const WORLD_BORDER_QUARTS: f64 = tile_renderer::WORLD_BORDER_QUARTS as f64;
@@ -24,6 +24,10 @@ const MAX_STAND_IN_DOWN: i32 = 3;
 /// coarser with one sample per pixel, 1/16 to 1/64 of the work at the default samples. It keeps up
 /// even while zooming out continuously.
 const COVER_LEVELS: i32 = 2;
+/// The coarsest level with relief. True heights cost 0.7s per tile at level 0 and 1.5s at level 1,
+/// but 6s from level 2 on, where a chunk's caches can't be shared anymore. Level 1 still shows
+/// 15000 blocks across on a 1080p screen.
+pub const MAX_RELIEF_LEVEL: i32 = 1;
 
 pub struct Camera {
     /// world position in the center of the view, in quarts
@@ -59,12 +63,16 @@ impl Camera {
 pub struct MapSettings {
     pub sample_height: i32,
     pub samples: u8,
+    /// draw the terrain over the biomes where possible
+    pub relief: bool,
 }
 
 pub struct MapView {
     pub camera: Camera,
     /// quart position under the mouse cursor, if it is over the map
     pub hovered_quart: Option<[i32; 2]>,
+    /// quart position last tapped, touch screens have nothing to hover with
+    tapped_quart: Option<[i32; 2]>,
     /// The level of the last frame and the egui time it was switched to. Tiles are only sampled
     /// once the level has settled, so levels flown through while zooming quickly cost nothing.
     level_since: (i32, f64),
@@ -78,6 +86,7 @@ impl MapView {
                 zoom: 2.0,
             },
             hovered_quart: None,
+            tapped_quart: None,
             level_since: (-1, 0.0),
         }
     }
@@ -89,6 +98,30 @@ impl MapView {
         (self.camera.zoom - (pixels_per_point as f64).log2())
             .round()
             .clamp(0.0, MAX_LEVEL as f64) as i32
+    }
+
+    /// Zooms around the center of the view, `delta` in the units of `Camera::zoom`.
+    pub fn zoom_by(&mut self, delta: f64) {
+        self.camera.zoom = (self.camera.zoom + delta).clamp(MIN_ZOOM, MAX_ZOOM);
+    }
+
+    /// Blocks per screen point.
+    pub fn blocks_per_point(&self) -> f64 {
+        self.camera.quarts_per_point() * 4.0
+    }
+
+    /// The block coordinates at the corners of `rect`.
+    pub fn visible_blocks(&self, rect: Rect) -> ([f64; 2], [f64; 2]) {
+        let (min, max) = (
+            self.camera.screen_to_world(rect, rect.min),
+            self.camera.screen_to_world(rect, rect.max),
+        );
+        (min.map(|q| q * 4.0), max.map(|q| q * 4.0))
+    }
+
+    /// Where a block position is on the screen.
+    pub fn block_to_screen(&self, rect: Rect, block: [f64; 2]) -> Pos2 {
+        self.camera.world_to_screen(rect, block.map(|b| b / 4.0))
     }
 
     /// Handles input and fills `quads` with the tiles to draw, back to front.
@@ -111,6 +144,7 @@ impl MapView {
         let level = self.level(ui.pixels_per_point());
         let tile_quarts = (TILE_SIZE as f64) * (level as f64).exp2();
         let key_at = |level: i32, x: i32, z: i32| TileKey {
+            layer: Layer::Biome,
             scale: level as u8,
             sample_height: settings.sample_height,
             tile_size_px: TILE_SIZE,
@@ -169,9 +203,28 @@ impl MapView {
                 cover.push(coarse);
             }
         }
-        tiles.update(&keys, &cover, unsettled_for <= 0.0);
+        let relief_key = |key: TileKey| TileKey {
+            layer: Layer::Relief,
+            samples: 1,
+            ..key
+        };
+        let relief: Vec<TileKey> = if settings.relief && level <= MAX_RELIEF_LEVEL {
+            keys.iter().map(|&key| relief_key(key)).collect()
+        } else {
+            Vec::new()
+        };
+        tiles.update(&keys, &cover, &relief, unsettled_for <= 0.0);
 
         let mut fading = false;
+        let tile_screen = |camera: &Camera, key: &TileKey| {
+            Rect::from_min_max(
+                camera.world_to_screen(rect, [key.x as f64 * tile_quarts, key.z as f64 * tile_quarts]),
+                camera.world_to_screen(
+                    rect,
+                    [(key.x + 1) as f64 * tile_quarts, (key.z + 1) as f64 * tile_quarts],
+                ),
+            )
+        };
         for key in keys {
             let screen = Rect::from_min_max(
                 self.camera
@@ -199,16 +252,36 @@ impl MapView {
                 out.push(tex, screen, FULL_UV, alpha);
             }
         }
+        for key in relief {
+            let screen = tile_screen(&self.camera, &key);
+            let tile = tiles.get(&key, now);
+            if !tile.as_ref().is_some_and(|(_, alpha)| *alpha >= 1.0) {
+                draw_ancestor(&mut out, tiles, now, key, screen);
+            }
+            if let Some((tex, alpha)) = tile {
+                fading |= alpha < 1.0;
+                out.push(tex, screen, FULL_UV, alpha);
+            }
+        }
         if fading {
             ui.ctx().request_repaint();
         }
 
         painter.rect_stroke(border, 0.0, Stroke::new(1.5, Color32::RED), StrokeKind::Outside);
 
-        self.hovered_quart = response.hover_pos().map(|p| {
-            let w = self.camera.screen_to_world(rect, p);
+        let quart_at = |camera: &Camera, p: Pos2| {
+            let w = camera.screen_to_world(rect, p);
             [w[0].floor() as i32, w[1].floor() as i32]
-        });
+        };
+        if response.clicked()
+            && let Some(p) = response.interact_pointer_pos()
+        {
+            self.tapped_quart = Some(quart_at(&self.camera, p));
+        }
+        self.hovered_quart = response
+            .hover_pos()
+            .map(|p| quart_at(&self.camera, p))
+            .or(self.tapped_quart);
     }
 
     fn handle_input(&mut self, ui: &egui::Ui, rect: Rect, response: &egui::Response) {
@@ -219,7 +292,13 @@ impl MapView {
         cam.center[0] -= drag.x as f64 * qpp;
         cam.center[1] -= drag.y as f64 * qpp;
 
-        if let Some(pointer) = response.hover_pos() {
+        // fingers on the screen don't hover, and a pinch has its own center
+        let multi_touch = ui.input(|i| i.multi_touch());
+        let pointer = match &multi_touch {
+            Some(touch) => Some(touch.center_pos),
+            None => response.hover_pos(),
+        };
+        if let Some(pointer) = pointer.filter(|p| rect.contains(*p)) {
             let (scroll, pinch) = ui.input(|i| (i.smooth_scroll_delta(), i.zoom_delta()));
             // scroll up / pinch out zooms in
             let delta = -scroll.y as f64 * 0.005 - (pinch as f64).log2();
@@ -230,6 +309,10 @@ impl MapView {
                 let offset: Vec2 = pointer - rect.center();
                 let qpp = cam.quarts_per_point();
                 cam.center = [anchor[0] - offset.x as f64 * qpp, anchor[1] - offset.y as f64 * qpp];
+            }
+            if let Some(touch) = multi_touch {
+                cam.center[0] -= touch.translation_delta.x as f64 * cam.quarts_per_point();
+                cam.center[1] -= touch.translation_delta.y as f64 * cam.quarts_per_point();
             }
         }
 

@@ -43,9 +43,11 @@ fn linear_to_srgb(c: vec3<f32>) -> vec3<f32> {
 @fragment
 fn fs_tile(in: TileOut) -> @location(0) vec4<f32> {
     // tiles are sRGB textures, so filtering happens in linear light
-    var c = textureSample(tile_tex, tile_sampler, in.uv).rgb;
+    let texel = textureSample(tile_tex, tile_sampler, in.uv);
+    var c = texel.rgb;
     if screen.encode_srgb != 0u {
         c = linear_to_srgb(c);
     }
-    return vec4<f32>(c * in.alpha, in.alpha); // premultiplied
+    let alpha = texel.a * in.alpha;
+    return vec4<f32>(c * alpha, alpha); // premultiplied
 }

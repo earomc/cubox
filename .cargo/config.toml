@@ -1,3 +1,4 @@
 [target.wasm32-unknown-unknown]
 # SteelMC's noise uses portable SIMD, all current browsers support wasm SIMD
-rustflags = ["-C", "target-feature=+simd128"]
+# and placing structures recurses deeply, more than the default 1 MiB of stack allows
+rustflags = ["-C", "target-feature=+simd128", "-C", "link-arg=-zstack-size=16777216"]

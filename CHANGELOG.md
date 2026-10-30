@@ -8,6 +8,20 @@ The release workflow publishes the section of a version as its release notes.
 
 ## [Unreleased]
 
+### Added
+
+- Structures on the map: a sub menu with a switch and an icon for every kind, all off by default.
+  Their positions come from the game's real generation code.
+- A search for the nearest structures and biomes.
+- A height map of the real terrain when zoomed in, in the overworld, off by default.
+- A distance grid with coordinates and a scale bar, with automatic or fixed spacing, off by default.
+- Zoom buttons, and tapping the map shows the biome on touch screens.
+
+### Fixed
+
+- Pinching to zoom didn't work in browsers, and on phones numbers and seeds couldn't be typed.
+- The settings window scrolls and starts closed on small screens.
+
 ## [0.2.0] - 2026-10-30
 
 ### Added
