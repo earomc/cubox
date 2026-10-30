@@ -8,6 +8,8 @@ The release workflow publishes the section of a version as its release notes.
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-10-30
+
 ### Added
 
 - cubox runs in the browser, generating tiles in web workers on all cores, with WebGPU or WebGL2.
@@ -43,6 +45,7 @@ First release.
 - `cubox img` renders a map to a PNG. `cubox gui --script` drives the view and takes screenshots.
 - Builds for Linux, macOS and Windows on x86_64 and ARM.
 
-[Unreleased]: https://github.com/earomc/cubox/compare/v0.1.1...HEAD
+[Unreleased]: https://github.com/earomc/cubox/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/earomc/cubox/compare/v0.1.1...v0.2.0
 [0.1.1]: https://github.com/earomc/cubox/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/earomc/cubox/releases/tag/v0.1.0
