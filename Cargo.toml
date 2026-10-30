@@ -9,22 +9,67 @@ readme = "README.md"
 keywords = ["minecraft", "seed", "map", "biome", "worldgen"]
 categories = ["games", "visualization"]
 
+[lib]
+# cdylib for the web build, rlib for the desktop binary
+crate-type = ["cdylib", "rlib"]
+
 [dependencies]
 steel-worldgen = { git = "https://github.com/Steel-Foundation/SteelMC" }
 
-# png only, the default formats pull in a c++ build for avif encoding
-image = { version = "0.25.10", default-features = false, features = ["png"] }
 rayon = "1.12.0"
-clap = { version = "4.6.7", features = ["cargo"] }
 winit = { version = "0.30" }
 anyhow = "1.0"
-env_logger = "0.10"
 log = "0.4"
-wgpu = "30.0"
-pollster = "0.3"
+wgpu = { version = "30.0", features = ["webgl"] }
 egui = { version = "0.37", features = ["default_fonts"] }
-egui-winit = "0.37"
 egui-wgpu = "0.37"
+web-time = "1.1"
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+# png only, the default formats pull in a c++ build for avif encoding
+image = { version = "0.25.10", default-features = false, features = ["png"] }
+clap = { version = "4.6.7", features = ["cargo"] }
+env_logger = "0.10"
+pollster = "0.3"
+egui-winit = "0.37"
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+# without the desktop clipboard, which has no browser backend
+egui-winit = { version = "0.37", default-features = false, features = ["links"] }
+wasm-bindgen = "0.2.106"
+wasm-bindgen-futures = "0.4"
+js-sys = "0.3"
+web-sys = { version = "0.3", features = [
+    "Document",
+    "DedicatedWorkerGlobalScope",
+    "HtmlCanvasElement",
+    "Location",
+    "MessageEvent",
+    "Navigator",
+    "UrlSearchParams",
+    "Window",
+    "Worker",
+    "WorkerOptions",
+    "WorkerType",
+] }
+console_log = "1"
+console_error_panic_hook = "0.1"
+# the browser's random numbers, for SteelMC's rand and uuid
+getrandom = { version = "0.4", features = ["wasm_js"] }
+uuid = { version = "1", features = ["js"] }
+
+# SteelMC with the changes to build for browsers (branch wasm-support of earomc/SteelMC, based on
+# the SteelMC commit cubox was using), until they are upstream
+[patch."https://github.com/Steel-Foundation/SteelMC"]
+steel-worldgen = { git = "https://github.com/earomc/SteelMC", rev = "8b8f27491e30a134aa1b257247fda36e19e009c8" }
+steel-utils = { git = "https://github.com/earomc/SteelMC", rev = "8b8f27491e30a134aa1b257247fda36e19e009c8" }
+steel-registry = { git = "https://github.com/earomc/SteelMC", rev = "8b8f27491e30a134aa1b257247fda36e19e009c8" }
+steel-math = { git = "https://github.com/earomc/SteelMC", rev = "8b8f27491e30a134aa1b257247fda36e19e009c8" }
+steel-macros = { git = "https://github.com/earomc/SteelMC", rev = "8b8f27491e30a134aa1b257247fda36e19e009c8" }
 
 [profile.release]
 strip = true
+
+# simdnbt refuses 32-bit targets like wasm32, see vendor/simdnbt/CUBOX.md
+[patch.crates-io]
+simdnbt = { path = "vendor/simdnbt" }

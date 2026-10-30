@@ -536,6 +536,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "console_error_panic_hook"
+version = "0.1.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a06aeb73f470f66dcdbf7223caeebb85984942f22f1adb2a088cf9668146bbbc"
+dependencies = [
+ "cfg-if",
+ "wasm-bindgen",
+]
+
+[[package]]
+name = "console_log"
+version = "1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "86919cef3e37b9356ccf54d4421208c17ecfda01beae61393e7ffd72916c0ef1"
+dependencies = [
+ "log",
+ "web-sys",
+]
+
+[[package]]
 name = "const-oid"
 version = "0.10.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -664,15 +684,24 @@ version = "0.1.1"
 dependencies = [
  "anyhow",
  "clap",
+ "console_error_panic_hook",
+ "console_log",
  "egui",
  "egui-wgpu",
  "egui-winit",
  "env_logger",
+ "getrandom 0.4.3",
  "image",
+ "js-sys",
  "log",
  "pollster",
  "rayon",
  "steel-worldgen",
+ "uuid",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
+ "web-sys",
+ "web-time",
  "wgpu",
  "winit",
 ]
@@ -3264,16 +3293,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f8fadd59c855ef2080decdef8ff161eb6661b86933c9d82e5ba29dc602a55aba"
 
 [[package]]
-name = "signal-hook-registry"
-version = "1.4.8"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c4db69cba1110affc0e9f7bcd48bbf87b3f4fc7c61fc9155afd4c469eb3d6c1b"
-dependencies = [
- "errno",
- "libc",
-]
-
-[[package]]
 name = "simd-adler32"
 version = "0.3.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3292,8 +3311,6 @@ dependencies = [
 [[package]]
 name = "simdnbt"
 version = "0.10.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7893a73842e21e674dde2bb31be1b949c127294f13dd52ee530d2f75a90ffe44"
 dependencies = [
  "byteorder",
  "flate2",
@@ -3463,7 +3480,7 @@ checksum = "a2eb9349b6444b326872e140eb1cf5e7c522154d69e7a0ffb0fb81c06b37543f"
 [[package]]
 name = "steel-macros"
 version = "0.15.3+mc26.2"
-source = "git+https://github.com/Steel-Foundation/SteelMC#f7f116218cad1457f40235ab7b263db045866c46"
+source = "git+https://github.com/earomc/SteelMC?rev=8b8f27491e30a134aa1b257247fda36e19e009c8#8b8f27491e30a134aa1b257247fda36e19e009c8"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -3473,12 +3490,12 @@ dependencies = [
 [[package]]
 name = "steel-math"
 version = "0.15.3+mc26.2"
-source = "git+https://github.com/Steel-Foundation/SteelMC#f7f116218cad1457f40235ab7b263db045866c46"
+source = "git+https://github.com/earomc/SteelMC?rev=8b8f27491e30a134aa1b257247fda36e19e009c8#8b8f27491e30a134aa1b257247fda36e19e009c8"
 
 [[package]]
 name = "steel-registry"
 version = "0.15.3+mc26.2"
-source = "git+https://github.com/Steel-Foundation/SteelMC#f7f116218cad1457f40235ab7b263db045866c46"
+source = "git+https://github.com/earomc/SteelMC?rev=8b8f27491e30a134aa1b257247fda36e19e009c8#8b8f27491e30a134aa1b257247fda36e19e009c8"
 dependencies = [
  "bitflags 2.13.2",
  "flate2",
@@ -3503,7 +3520,7 @@ dependencies = [
 [[package]]
 name = "steel-utils"
 version = "0.15.3+mc26.2"
-source = "git+https://github.com/Steel-Foundation/SteelMC#f7f116218cad1457f40235ab7b263db045866c46"
+source = "git+https://github.com/earomc/SteelMC?rev=8b8f27491e30a134aa1b257247fda36e19e009c8#8b8f27491e30a134aa1b257247fda36e19e009c8"
 dependencies = [
  "bitflags 2.13.2",
  "chrono",
@@ -3539,7 +3556,7 @@ dependencies = [
 [[package]]
 name = "steel-worldgen"
 version = "0.15.3+mc26.2"
-source = "git+https://github.com/Steel-Foundation/SteelMC#f7f116218cad1457f40235ab7b263db045866c46"
+source = "git+https://github.com/earomc/SteelMC?rev=8b8f27491e30a134aa1b257247fda36e19e009c8#8b8f27491e30a134aa1b257247fda36e19e009c8"
 dependencies = [
  "glam",
  "proc-macro2",
@@ -3754,7 +3771,6 @@ dependencies = [
  "libc",
  "mio",
  "pin-project-lite",
- "signal-hook-registry",
  "socket2",
  "tokio-macros",
  "windows-sys 0.61.2",
