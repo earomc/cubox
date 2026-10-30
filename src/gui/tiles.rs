@@ -121,7 +121,12 @@ impl World {
 
 struct Shared {
     queue: Mutex<Queue>,
-    /// rayon jobs that were spawned but haven't picked a task yet
+    /// The tile workers run in their own pool, not rayon's global one. While a world's mean and
+    /// shadings are computed, workers block waiting for them. The first biome sample builds
+    /// SteelMC's biome lookup tree, in parallel on the global pool: if the workers were the global
+    /// pool, nothing could run that and everything would wait forever.
+    pool: rayon::ThreadPool,
+    /// jobs that were spawned but haven't picked a task yet
     idle_workers: AtomicUsize,
     world: Mutex<Arc<World>>,
     tx: mpsc::Sender<Finished>,
@@ -161,6 +166,10 @@ impl TileCache {
         Self {
             shared: Arc::new(Shared {
                 queue: Default::default(),
+                pool: rayon::ThreadPoolBuilder::new()
+                    .thread_name(|i| format!("cubox-tiles-{i}"))
+                    .build()
+                    .expect("creating the tile worker threads"),
                 idle_workers: AtomicUsize::new(0),
                 world: Mutex::new(World::new(source, sample_height, samples)),
                 tx,
@@ -336,7 +345,7 @@ impl Shared {
         while this.idle_workers.load(Ordering::Acquire) < tasks {
             this.idle_workers.fetch_add(1, Ordering::AcqRel);
             let shared = this.clone();
-            rayon::spawn(move || shared.work());
+            this.pool.spawn(move || shared.work());
         }
     }
 

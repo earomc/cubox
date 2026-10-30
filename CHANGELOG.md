@@ -10,6 +10,8 @@ The release workflow publishes the section of a version as its release notes.
 
 ### Fixed
 
+- cubox could deadlock at startup, leaving the map black and sometimes the whole window unresponsive.
+  The tile workers no longer share a thread pool with the world generator's own parallel setup.
 - The window could freeze on Linux ("not responding"): cubox kept drawing frames even when nothing
   changed, and on Wayland a hidden window could block it. It now only draws when something changes,
   lets the compositor pace frames and pauses while hidden.
