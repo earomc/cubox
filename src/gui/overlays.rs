@@ -165,28 +165,35 @@ impl Ui {
         }
         self.update_structures(rect);
         self.paint_markers(ui, rect);
-        self.zoom_buttons(ui, rect);
+        if self.zoom_buttons_shown {
+            self.zoom_buttons(ui, rect);
+        }
     }
 
     fn update_structures(&mut self, rect: Rect) {
         let (min, max) = self.map.visible_blocks(rect);
-        let mut jobs: Vec<Job> = Vec::new();
+        let blocks_per_point = self.map.blocks_per_point();
+        let mut per_kind: Vec<std::vec::IntoIter<Job>> = Vec::new();
         self.markers.clear();
         for (kind, def) in STRUCTURE_KINDS.iter().enumerate() {
-            self.too_far[kind] = false;
+            self.sampled[kind] = false;
             if !self.shown_kinds[kind] || def.dimension != self.dimension {
                 continue;
             }
-            match self.queries.visible(kind, min, max) {
-                Some((wanted, known)) => {
-                    jobs.extend(wanted);
-                    self.markers.extend(known);
-                }
-                None => self.too_far[kind] = true,
+            let visible = self.queries.visible(kind, min, max, blocks_per_point);
+            self.sampled[kind] = visible.sampled;
+            self.markers.extend(visible.known);
+            per_kind.push(visible.jobs.into_iter());
+        }
+        // taking turns, or the kinds further down the list would wait for all of the others
+        let mut jobs: Vec<Job> = Vec::new();
+        loop {
+            let before = jobs.len();
+            jobs.extend(per_kind.iter_mut().filter_map(Iterator::next));
+            if jobs.len() == before {
+                break;
             }
         }
-        // rings first, they are few and the rest is nearest first per kind
-        jobs.sort_by_key(|job| !matches!(job, Job::Rings { .. }));
         self.queries.update(&jobs);
     }
 

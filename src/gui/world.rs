@@ -10,8 +10,8 @@ use steel_worldgen::biomes::BiomeSourceKind;
 
 use crate::{
     dimension::Dimension,
-    terrain::{Terrain, hillshade},
-    tile_renderer::{Estimate, Lab, Shading, Tile, TileKey, calibrate, downsample, render_tile, world_mean},
+    terrain::Terrain,
+    tile_renderer::{Estimate, Lab, Layer, Shading, Tile, TileKey, calibrate, downsample, render_tile, world_mean},
 };
 
 /// Everything that decides how a tile looks besides its key.
@@ -148,12 +148,20 @@ impl World {
     /// A relief tile: its `rgb` are RGBA pixels and it has no estimates.
     fn relief(&self, key: TileKey, keep_going: &dyn Fn() -> bool) -> Option<Tile> {
         let terrain = self.terrain.get_or_init(|| Terrain::new(self.params.seed));
+        let Layer::Relief { step, sea_floor } = key.layer else {
+            return None;
+        };
         let (x, z) = key.origin();
-        let stride = key.stride() * 4;
-        let size = key.tile_size_px;
-        let heights = terrain.heights([x * 4, z * 4], stride, size + 1, keep_going)?;
+        let rgb = terrain.relief(
+            [x * 4, z * 4],
+            key.stride() * 4,
+            key.tile_size_px,
+            step as usize,
+            sea_floor,
+            keep_going,
+        )?;
         Some(Tile {
-            rgb: hillshade(&heights, size, stride),
+            rgb,
             estimates: Vec::new(),
         })
     }

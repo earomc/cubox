@@ -1,0 +1,82 @@
+name: Pages
+
+# The web version on GitHub Pages: the latest release at the root and the newest commit on main at
+# /nightly/. A deployment replaces the whole site, so each one builds both.
+# Needs Settings > Pages > Source: GitHub Actions, and the github-pages environment has to allow
+# main and the v* tags.
+on:
+  push:
+    branches: [main]
+    tags: ["v[0-9]+.[0-9]+.[0-9]+*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  latest-release:
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.tag.outputs.tag }}
+    steps:
+      - id: tag
+        # a release that is being created right now isn't the latest yet, its tag is
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PUSHED: ${{ github.ref_type == 'tag' && github.ref_name || '' }}
+        run: echo "tag=${PUSHED:-$(gh release view --repo "$GITHUB_REPOSITORY" --json tagName --jq .tagName)}" >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: latest-release
+    runs-on: ubuntu-latest
+    strategy:
+      # separately, the two can lock different versions of wasm-bindgen
+      matrix:
+        site:
+          - name: release
+            ref: ${{ needs.latest-release.outputs.tag }}
+          - name: nightly
+            ref: main
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ matrix.site.ref }}
+      - uses: ./.github/actions/setup-rust
+        with:
+          cache-key: wasm
+      - uses: ./.github/actions/setup-web
+        with:
+          wasm-opt: "true"
+      - run: ./scripts/build-web.sh dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.site.name }}
+          path: dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: release
+          path: site
+      - uses: actions/download-artifact@v4
+        with:
+          name: nightly
+          path: site/nightly
+      - uses: actions/upload-pages-artifact@v4
+        with:
+          path: site
+      - id: deploy
+        uses: actions/deploy-pages@v4

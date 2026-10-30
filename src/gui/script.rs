@@ -26,7 +26,7 @@ use std::{collections::VecDeque, path::PathBuf, time::Instant};
 
 use anyhow::{Context, bail};
 
-use crate::dimension::Dimension;
+use crate::{dimension::Dimension, gui::menus::ReliefQuality};
 
 pub enum Command {
     Size(u32, u32),
@@ -35,6 +35,10 @@ pub enum Command {
     Panel(bool),
     Structure(String),
     Relief(bool),
+    Quality(ReliefQuality),
+    SeaFloor(bool),
+    ZoomButtons(bool),
+    ClearSearch,
     Grid(bool),
     Search(String),
     Goto(f64, f64),
@@ -77,6 +81,15 @@ impl Command {
             "panel" => Command::Panel(args.first() != Some(&"off")),
             "structure" => Command::Structure(args.first().context("structure: which")?.to_string()),
             "relief" => Command::Relief(args.first() != Some(&"off")),
+            "quality" => Command::Quality(
+                ReliefQuality::ALL
+                    .into_iter()
+                    .find(|quality| quality.name().eq_ignore_ascii_case(args.first().unwrap_or(&"")))
+                    .context("quality: low, medium, high or full")?,
+            ),
+            "sea_floor" => Command::SeaFloor(args.first() != Some(&"off")),
+            "zoom_buttons" => Command::ZoomButtons(args.first() != Some(&"off")),
+            "clear_search" => Command::ClearSearch,
             "grid" => Command::Grid(args.first() != Some(&"off")),
             "search" => Command::Search(args.first().context("search: for what")?.to_string()),
             "goto" => Command::Goto(num(0)?, num(1)?),

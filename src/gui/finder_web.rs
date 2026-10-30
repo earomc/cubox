@@ -12,7 +12,17 @@ use crate::{
     gui::finder::{FinderWorld, Job, Reply, WorldQueries},
 };
 
-const WORKERS: usize = 2;
+/// Half of the cores, the others are for the map. Each worker is a copy of the wasm module with
+/// all of the structure data, too much for many on the memory of a phone.
+fn max_workers() -> usize {
+    let Some(navigator) = web_sys::window().map(|w| w.navigator()) else {
+        return 2;
+    };
+    if navigator.max_touch_points() > 0 {
+        return 2;
+    }
+    (navigator.hardware_concurrency() as usize / 2).clamp(2, 4)
+}
 
 pub struct Pool {
     inner: Rc<RefCell<Inner>>,
@@ -39,7 +49,7 @@ impl Pool {
 
     pub fn has_idle(&self) -> bool {
         let inner = self.inner.borrow();
-        inner.workers.len() < WORKERS || inner.workers.iter().any(|slot| slot.busy.is_none())
+        inner.workers.len() < max_workers() || inner.workers.iter().any(|slot| slot.busy.is_none())
     }
 
     pub fn post(&mut self, world: FinderWorld, generation: u64, job: Job) {

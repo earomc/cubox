@@ -12,10 +12,13 @@ The release workflow publishes the section of a version as its release notes.
 
 - Structures on the map: a sub menu with a switch and an icon for every kind, all off by default.
   Their positions come from the game's real generation code.
+  They show at every zoom. When zoomed far out, only a sample of them is shown.
 - A search for the nearest structures and biomes.
-- A height map of the real terrain when zoomed in, in the overworld, off by default.
+- A height map of the real terrain when zoomed in, in the overworld, off by default, with a quality
+  setting and the sea floor shown under water.
+- A nightly web version of the newest commit on main, at `/nightly/`.
 - A distance grid with coordinates and a scale bar, with automatic or fixed spacing, off by default.
-- Zoom buttons, and tapping the map shows the biome on touch screens.
+- Zoom buttons that can be hidden, and tapping the map shows the biome on touch screens.
 
 ### Fixed
 

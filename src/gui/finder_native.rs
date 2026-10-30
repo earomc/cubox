@@ -58,8 +58,9 @@ impl Pool {
         }
     }
 
+    /// Replies are taken once per frame, so threads have some jobs waiting not to run dry.
     pub fn has_idle(&self) -> bool {
-        self.running < self.threads
+        self.running < self.threads * 4
     }
 
     pub fn post(&mut self, world: FinderWorld, generation: u64, job: Job) {

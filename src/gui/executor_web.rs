@@ -124,7 +124,8 @@ fn spawn_worker(inner: &Rc<RefCell<Inner>>, index: usize) -> Result<Worker, JsVa
     Ok(worker)
 }
 
-/// `[seed, dimension, sample height, samples setting, scale, x, z, tile size, samples, children, relief]`.
+/// `[seed, dimension, sample height, samples setting, scale, x, z, tile size, samples, children,
+/// relief step or 0, relief of the sea floor]`.
 /// The seed is a string, JavaScript numbers can't hold all 64 bits. `children` are the estimates
 /// of the 4 children for downsampling, or null to sample the tile.
 fn encode_request(params: &WorldParams, key: TileKey, task: &Task) -> (Array, Array) {
@@ -152,7 +153,11 @@ fn encode_request(params: &WorldParams, key: TileKey, task: &Task) -> (Array, Ar
         (key.tile_size_px as u32).into(),
         key.samples.into(),
         children,
-        (key.layer == Layer::Relief).into(),
+        match key.layer {
+            Layer::Biome => 0.into(),
+            Layer::Relief { step, .. } => step.into(),
+        },
+        matches!(key.layer, Layer::Relief { sea_floor: true, .. }).into(),
     ]);
     (request, transfer)
 }
@@ -198,9 +203,17 @@ pub fn worker_run(request: &Array) -> Result<Array, JsValue> {
         sample_height: number(2)? as i32,
         samples: number(3)? as u8,
     };
-    let relief = request.get(10).is_truthy();
+    let step = number(10)? as u8;
+    let relief = step > 0;
     let key = TileKey {
-        layer: if relief { Layer::Relief } else { Layer::Biome },
+        layer: if relief {
+            Layer::Relief {
+                step,
+                sea_floor: request.get(11).is_truthy(),
+            }
+        } else {
+            Layer::Biome
+        },
         scale: number(4)? as u8,
         x: number(5)? as i32,
         z: number(6)? as i32,

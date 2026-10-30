@@ -15,8 +15,12 @@ pub type Lab = [f32; 3];
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum Layer {
     Biome,
-    /// the hillshade of the terrain, drawn over the biomes
-    Relief,
+    /// the hillshade of the terrain, drawn over the biomes, with a real height every `step` pixels
+    /// and heights being those of the `sea_floor` or the water
+    Relief {
+        step: u8,
+        sea_floor: bool,
+    },
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]

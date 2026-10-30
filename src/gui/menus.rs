@@ -9,6 +9,48 @@ use crate::{
 
 const ICON_SIZE: f32 = 18.0;
 
+/// How many real heights the height map is made of.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub enum ReliefQuality {
+    Low,
+    Medium,
+    High,
+    Full,
+}
+
+impl ReliefQuality {
+    pub const ALL: [Self; 4] = [Self::Low, Self::Medium, Self::High, Self::Full];
+
+    /// Pixels between real heights.
+    pub fn step(self) -> u8 {
+        match self {
+            Self::Low => 8,
+            Self::Medium => 4,
+            Self::High => 2,
+            Self::Full => 1,
+        }
+    }
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Low => "Low",
+            Self::Medium => "Medium",
+            Self::High => "High",
+            Self::Full => "Full",
+        }
+    }
+
+    /// Measured on a desktop core, zoomed out. Close up, Full costs less.
+    fn hint(self) -> &'static str {
+        match self {
+            Self::Low => "A real height every 8 pixels: 0.3 seconds per tile",
+            Self::Medium => "A real height every 4 pixels: 1 second per tile",
+            Self::High => "A real height every 2 pixels: 3 seconds per tile",
+            Self::Full => "A real height for every pixel: 13 seconds per tile",
+        }
+    }
+}
+
 impl Ui {
     fn kinds_here(&self) -> impl Iterator<Item = usize> + use<'_> {
         (0..STRUCTURE_KINDS.len()).filter(|&kind| STRUCTURE_KINDS[kind].dimension == self.dimension)
@@ -31,8 +73,9 @@ impl Ui {
                         ui.add(icons.image(kind, ICON_SIZE));
                     }
                     ui.checkbox(&mut self.shown_kinds[kind], STRUCTURE_KINDS[kind].name);
-                    if self.too_far[kind] {
-                        ui.weak("zoom in");
+                    if self.sampled[kind] {
+                        ui.weak("some shown")
+                            .on_hover_text("Too many to look at all of them: zoom in to see every one");
                     }
                 });
             }
@@ -42,6 +85,7 @@ impl Ui {
     pub(super) fn search_menu(&mut self, ui: &mut egui::Ui) {
         let mut new_target = None;
         let mut go_to = None;
+        let mut clear = false;
         egui::CollapsingHeader::new("Search").show(ui, |ui| {
             ui.add(
                 egui::TextEdit::singleline(&mut self.search_filter)
@@ -50,14 +94,27 @@ impl Ui {
             );
             let filter = self.search_filter.trim().to_lowercase();
             let matches = |name: &str| name.to_lowercase().contains(&filter);
+            let active = self.queries.search.as_ref().map(|search| search.target.clone());
+            let mut pick = |target: Target| {
+                if active.as_ref() == Some(&target) {
+                    clear = true;
+                } else {
+                    new_target = Some(target);
+                }
+            };
             egui::ScrollArea::vertical()
                 .id_salt("search list")
                 .max_height(140.0)
                 .show(ui, |ui| {
                     for kind in self.kinds_here() {
                         let def = &STRUCTURE_KINDS[kind];
-                        if matches(def.name) && ui.selectable_label(false, def.name).clicked() {
-                            new_target = Some(Target::Structure(kind));
+                        let target = Target::Structure(kind);
+                        if matches(def.name)
+                            && ui
+                                .selectable_label(active.as_ref() == Some(&target), def.name)
+                                .clicked()
+                        {
+                            pick(target);
                         }
                     }
                     let mut biomes: Vec<String> = self
@@ -69,19 +126,27 @@ impl Ui {
                     biomes.sort();
                     for biome in biomes {
                         let name = biome.replace('_', " ");
-                        if matches(&name) && ui.selectable_label(false, format!("{name} (biome)")).clicked() {
-                            new_target = Some(Target::Biome(biome));
+                        let target = Target::Biome(biome);
+                        if matches(&name)
+                            && ui
+                                .selectable_label(active.as_ref() == Some(&target), format!("{name} (biome)"))
+                                .clicked()
+                        {
+                            pick(target);
                         }
                     }
                 });
             ui.weak("Biome patches under 32 blocks wide can be missed");
 
-            let mut cancel = false;
+            let (mut cancel, mut clear_button) = (false, false);
             if let Some(search) = &self.queries.search {
                 ui.separator();
                 let center = search.center;
                 if search.done {
-                    ui.label(format!("{}: {} found", search.target.name(), search.results.len()));
+                    ui.horizontal(|ui| {
+                        ui.label(format!("{}: {} found", search.target.name(), search.results.len()));
+                        clear_button = ui.button("Clear").clicked();
+                    });
                 } else {
                     ui.horizontal(|ui| {
                         ui.spinner();
@@ -100,7 +165,11 @@ impl Ui {
             if cancel && let Some(search) = &mut self.queries.search {
                 search.done = true;
             }
+            clear |= clear_button;
         });
+        if clear {
+            self.queries.clear_search();
+        }
         if let Some(target) = new_target {
             let center = self.map.camera.center;
             self.queries
@@ -116,6 +185,17 @@ impl Ui {
             ui.add_enabled_ui(self.dimension == Dimension::Overworld, |ui| {
                 ui.checkbox(&mut self.relief, "Show height map")
                     .on_hover_text("The real terrain height, shaded with the light in the north west");
+                ui.add_enabled_ui(self.relief, |ui| {
+                    ui.horizontal(|ui| {
+                        ui.label("Quality");
+                        for quality in ReliefQuality::ALL {
+                            ui.selectable_value(&mut self.relief_quality, quality, quality.name())
+                                .on_hover_text(quality.hint());
+                        }
+                    });
+                    ui.checkbox(&mut self.sea_floor, "Show sea floor")
+                        .on_hover_text("Shade the ground under water. Without this water is flat.");
+                });
             });
             if self.dimension != Dimension::Overworld {
                 ui.weak("Only in the overworld");
@@ -164,14 +244,15 @@ impl Ui {
         if !self.relief || self.dimension != Dimension::Overworld {
             return None;
         }
-        if let Some((at, height)) = self.hovered_height
+        if let Some((at, sea_floor, height)) = self.hovered_height
             && at == quart
+            && sea_floor == self.sea_floor
         {
             return Some(height);
         }
         let terrain = self.terrain.get_or_insert_with(|| Terrain::new(self.seed));
-        let height = terrain.heights([quart[0] * 4, quart[1] * 4], 4, 1, &|| true)?[0];
-        self.hovered_height = Some((quart, height));
+        let height = terrain.heights([quart[0] * 4, quart[1] * 4], 4, 1, self.sea_floor, &|| true)?[0];
+        self.hovered_height = Some((quart, self.sea_floor, height));
         Some(height)
     }
 

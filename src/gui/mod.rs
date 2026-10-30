@@ -15,7 +15,7 @@ mod finder_pool;
 pub(crate) mod finder_pool;
 mod map_renderer;
 mod map_view;
-mod menus;
+pub(crate) mod menus;
 mod overlays;
 #[cfg(not(target_arch = "wasm32"))]
 mod script;
@@ -42,6 +42,7 @@ use crate::{
         finder::{FinderWorld, Queries},
         map_renderer::{MapRenderer, Quad},
         map_view::{MapSettings, MapView},
+        menus::ReliefQuality,
         overlays::{Grid, Icons},
         tiles::TileCache,
         world::WorldParams,
@@ -241,16 +242,20 @@ struct Ui {
     shown_kinds: Vec<bool>,
     /// structures on the screen, cached for the markers
     markers: Vec<Found>,
-    /// kinds of which too much is on the screen, they say to zoom in
-    too_far: Vec<bool>,
+    /// kinds of which only some are shown at this zoom
+    sampled: Vec<bool>,
     icons: Option<Icons>,
     search_filter: String,
     /// draw the terrain over the biomes
     relief: bool,
+    relief_quality: ReliefQuality,
+    /// the relief of the sea floor instead of the flat water
+    sea_floor: bool,
+    zoom_buttons_shown: bool,
     /// made when relief is first used, for the height under the cursor
     terrain: Option<Terrain>,
-    /// height under the cursor, cached for the quart it was sampled at
-    hovered_height: Option<([i32; 2], i32)>,
+    /// height under the cursor, cached for the quart and the sea floor setting it was sampled at
+    hovered_height: Option<([i32; 2], bool, i32)>,
     grid: Grid,
 }
 
@@ -378,10 +383,13 @@ impl State {
             }),
             shown_kinds: vec![false; STRUCTURE_KINDS.len()],
             markers: Vec::new(),
-            too_far: vec![false; STRUCTURE_KINDS.len()],
+            sampled: vec![false; STRUCTURE_KINDS.len()],
             icons: None,
             search_filter: String::new(),
             relief: false,
+            relief_quality: ReliefQuality::Medium,
+            sea_floor: true,
+            zoom_buttons_shown: true,
             terrain: None,
             hovered_height: None,
             grid: Grid::default(),
@@ -435,6 +443,10 @@ impl State {
                 Command::Panel(on) => ui.panel = on,
                 Command::Structure(which) => ui.script_structure(&which),
                 Command::Relief(on) => ui.relief = on,
+                Command::Quality(quality) => ui.relief_quality = quality,
+                Command::SeaFloor(on) => ui.sea_floor = on,
+                Command::ZoomButtons(on) => ui.zoom_buttons_shown = on,
+                Command::ClearSearch => ui.queries.clear_search(),
                 Command::Grid(on) => ui.grid.enabled = on,
                 Command::Search(what) => ui.script_search(&what),
                 _ => {}
@@ -740,7 +752,8 @@ impl Ui {
         let settings = MapSettings {
             sample_height: self.sample_height,
             samples: self.samples,
-            relief: self.relief && self.dimension == Dimension::Overworld,
+            relief_step: (self.relief && self.dimension == Dimension::Overworld).then_some(self.relief_quality.step()),
+            sea_floor: self.sea_floor,
         };
         self.quads.clear();
         if self.icons.is_none() {
@@ -843,6 +856,7 @@ impl Ui {
             self.search_menu(ui);
             self.terrain_menu(ui, level);
             self.grid_menu(ui);
+            ui.checkbox(&mut self.zoom_buttons_shown, "Zoom buttons");
         }));
 
         if go {

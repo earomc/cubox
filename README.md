@@ -41,9 +41,11 @@ cubes/boxes ... so it works in multiple ways I guess ...
 | ![The nether](docs/media/nether.webp) | ![The end around the main island](docs/media/end.webp) |
 
 - **Structures:** every kind in the game, each with its own icon and switch, off by default. Positions
-  come from the game's real generation code, including biome and terrain checks.
+  come from the game's real generation code, including biome and terrain checks. They show at any zoom: when
+  zoomed far out each spot shows one real structure, and zooming in reveals the rest.
 - **Search** for the nearest structures or biomes from the middle of the view.
-- **Height map:** the real terrain shaded over the biomes when zoomed in, in the overworld.
+- **Height map:** the real terrain shaded over the biomes when zoomed in, in the overworld, sea floor included.
+  Choose how many real heights it uses: the higher the quality, the slower.
 - **Distance grid** with block coordinates and a scale bar, with automatic or fixed spacing.
 - **Touch screens:** pinch to zoom, and an on screen keyboard for numbers and seeds in the web version.
 
@@ -51,6 +53,7 @@ cubes/boxes ... so it works in multiple ways I guess ...
 
 The web version runs at **[earomc.github.io/cubox](https://earomc.github.io/cubox)**, in any current browser
 (WebGPU where available, WebGL2 otherwise). Add `?seed=hello&dimension=nether` to the address to open a world.
+The newest commit on main, which may be broken, runs at [earomc.github.io/cubox/nightly](https://earomc.github.io/cubox/nightly/).
 
 Get the latest build for your platform from the [releases page](https://github.com/earomc/cubox/releases/latest):
 
@@ -161,7 +164,8 @@ files, so any static host works too.
 2. Commit, then tag and push: `git tag vx.y.z && git push origin main vx.y.z`.
 
 The [release workflow](.github/workflows/release.yml) builds all platforms and publishes the release, with the
-changelog section as release notes, and deploys the web version to GitHub Pages.
+changelog section as release notes. The [pages workflow](.github/workflows/pages.yml) deploys the web version to
+GitHub Pages on every tag and every push to main: the latest release at the root and main at `/nightly/`.
 
 ## Roadmap
 
