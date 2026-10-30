@@ -6,6 +6,8 @@
 [![Latest release](https://img.shields.io/github/v/release/earomc/cubox?sort=semver)](https://github.com/earomc/cubox/releases/latest)
 [![License: AGPL-3.0-or-later](https://img.shields.io/badge/license-AGPL--3.0--or--later-blue)](LICENSE)
 
+<p align="center"><b><a href="https://earomc.github.io/cubox">Try it in your browser</a></b> · <a href="https://github.com/earomc/cubox/releases/latest">Download for desktop</a></p>
+
 <p align="center">
   <img src="docs/media/zoom.webp" alt="Zooming out from a few hundred blocks to the whole 60 million block world" width="560">
 </p>
@@ -30,6 +32,7 @@ cubes/boxes ... so it works in multiple ways I guess ...
 - **Fast:** tiles are generated on all cores, centre first, with quick coarse previews while you zoom.
   Work for tiles that leave the screen is cancelled.
 - **Image export** from the command line.
+- **Runs in the browser** too, using all cores through web workers.
 
 | Overworld | Zoomed out |
 |---|---|
@@ -38,6 +41,9 @@ cubes/boxes ... so it works in multiple ways I guess ...
 | ![The nether](docs/media/nether.webp) | ![The end around the main island](docs/media/end.webp) |
 
 ## Download
+
+The web version runs at **[earomc.github.io/cubox](https://earomc.github.io/cubox)**, in any current browser
+(WebGPU where available, WebGL2 otherwise). Add `?seed=hello&dimension=nether` to the address to open a world.
 
 Get the latest build for your platform from the [releases page](https://github.com/earomc/cubox/releases/latest):
 
@@ -110,7 +116,31 @@ cd cubox
 cargo run --release
 ```
 
-On Linux, building needs no extra system packages.
+On Linux, building needs no extra system packages. The first build downloads Minecraft's data for SteelMC.
+
+### Web version
+
+```sh
+cargo install wasm-bindgen-cli --version 0.2.129 --locked   # the version of wasm-bindgen in Cargo.lock
+./scripts/build-web.sh                                       # builds into dist/
+python3 -m http.server --directory dist                      # or any static file server
+```
+
+`wasm-opt` from [binaryen](https://github.com/WebAssembly/binaryen) is used when installed, it makes the wasm smaller
+and faster. Distributions often ship versions too old for current wasm, `scripts/install-wasm-opt.sh` installs a release.
+
+For the browser, cubox uses SteelMC from a [fork](https://github.com/earomc/SteelMC/tree/wasm-support) that builds
+for `wasm32-unknown-unknown`, until the change is upstream, and a copy of simdnbt that allows 32-bit targets
+([`vendor/simdnbt`](vendor/simdnbt/CUBOX.md)).
+
+### Docker
+
+```sh
+docker compose up --build
+```
+
+builds the web version and serves it at http://localhost:8080 with nginx. The image only contains the static
+files, so any static host works too.
 
 ## Releasing
 
@@ -119,13 +149,12 @@ On Linux, building needs no extra system packages.
 2. Commit, then tag and push: `git tag vx.y.z && git push origin main vx.y.z`.
 
 The [release workflow](.github/workflows/release.yml) builds all platforms and publishes the release, with the
-changelog section as release notes.
+changelog section as release notes, and deploys the web version to GitHub Pages.
 
 ## Roadmap
 
 - **Structures:** find villages, strongholds, monuments and other structures, and search the world for them.
 - **Large biomes** worlds, once SteelMC's world generator supports them.
-- **Web version:** cubox renders with wgpu, which also runs in the browser through WebGPU/WebGL.
 - macOS app bundle and code signing, and a Windows build without a console window.
 
 ## Credits

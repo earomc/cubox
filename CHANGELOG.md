@@ -8,6 +8,13 @@ The release workflow publishes the section of a version as its release notes.
 
 ## [Unreleased]
 
+### Added
+
+- cubox runs in the browser, generating tiles in web workers on all cores, with WebGPU or WebGL2.
+  `?seed=...&dimension=...` in the address picks the world.
+- A Docker image that builds the web version and serves it: `docker compose up --build`.
+- Releases also deploy the web version to GitHub Pages.
+
 ## [0.1.1] - 2026-10-30
 
 ### Fixed

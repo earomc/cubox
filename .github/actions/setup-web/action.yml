@@ -1,0 +1,21 @@
+name: Set up the web build
+description: Installs wasm-bindgen-cli in the version of the wasm-bindgen crate in Cargo.lock
+
+inputs:
+  wasm-opt:
+    description: Also install wasm-opt (a binaryen release) to optimize the wasm
+    required: false
+    default: "false"
+
+runs:
+  using: composite
+  steps:
+    - id: version
+      shell: bash
+      run: echo "wasm-bindgen=$(grep -A1 '^name = "wasm-bindgen"$' Cargo.lock | sed -n 's/^version = "\(.*\)"$/\1/p')" >> "$GITHUB_OUTPUT"
+    - uses: taiki-e/install-action@v2
+      with:
+        tool: wasm-bindgen@${{ steps.version.outputs.wasm-bindgen }}
+    - if: inputs.wasm-opt == 'true'
+      shell: bash
+      run: sudo ./scripts/install-wasm-opt.sh

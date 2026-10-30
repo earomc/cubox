@@ -1,0 +1,7 @@
+# docker compose up --build    then open http://localhost:8080
+services:
+  cubox:
+    build: .
+    ports:
+      - "8080:80"
+    restart: unless-stopped
