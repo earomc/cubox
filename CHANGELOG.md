@@ -8,6 +8,8 @@ The release workflow publishes the section of a version as its release notes.
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-10-30
+
 ### Fixed
 
 - cubox could deadlock at startup, leaving the map black and sometimes the whole window unresponsive.
@@ -34,5 +36,6 @@ First release.
 - `cubox img` renders a map to a PNG. `cubox gui --script` drives the view and takes screenshots.
 - Builds for Linux, macOS and Windows on x86_64 and ARM.
 
-[Unreleased]: https://github.com/earomc/cubox/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/earomc/cubox/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/earomc/cubox/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/earomc/cubox/releases/tag/v0.1.0
