@@ -20,6 +20,8 @@ mod overlays;
 mod resources;
 #[cfg(not(target_arch = "wasm32"))]
 mod script;
+#[cfg(not(target_arch = "wasm32"))]
+mod seed_search;
 mod tiles;
 pub(crate) mod world;
 
@@ -251,6 +253,8 @@ struct Ui {
     marker_overlap: bool,
     /// per dimension the biomes that stay bright while the others are darkened
     highlighted: [HashSet<&'static str>; 3],
+    #[cfg(not(target_arch = "wasm32"))]
+    seed_search: seed_search::SeedSearch,
     /// how dark the others get
     dim_others: f32,
     biome_filter: String,
@@ -268,7 +272,6 @@ struct Ui {
     /// kinds of which only some are shown at this zoom
     sampled: Vec<bool>,
     icons: Option<Icons>,
-    search_filter: String,
     /// draw the terrain over the biomes
     relief: bool,
     /// replace the estimated heights with exact ones when zoomed in, in this quality
@@ -416,6 +419,8 @@ impl State {
             marker_gap: overlays::DEFAULT_MARKER_GAP,
             marker_overlap: true,
             highlighted: Default::default(),
+            #[cfg(not(target_arch = "wasm32"))]
+            seed_search: Default::default(),
             dim_others: 0.75,
             biome_filter: String::new(),
             prioritize_rare: true,
@@ -427,7 +432,6 @@ impl State {
             marker_jobs: Vec::new(),
             sampled: vec![false; STRUCTURE_KINDS.len()],
             icons: None,
-            search_filter: String::new(),
             relief: false,
             relief_exact: false,
             relief_quality: ReliefQuality::Auto,
@@ -507,10 +511,10 @@ impl State {
                 Command::Threads(threads) => ui.threads = threads,
                 Command::SeaFloor(on) => ui.sea_floor = on,
                 Command::ZoomButtons(on) => ui.zoom_buttons_shown = on,
-                Command::ClearSearch => ui.queries.clear_search(),
                 Command::Grid(on) => ui.grid.enabled = on,
                 Command::GridOverMarkers(on) => ui.grid.over_markers = on,
-                Command::Search(what) => ui.script_search(&what),
+                Command::OpenFirstMatch => ui.script_open_first_match(),
+                Command::SearchSeeds(text) => ui.seed_search.script_start(&text, ui.seed),
                 _ => {}
             }
         }
@@ -825,6 +829,10 @@ impl Ui {
     }
 
     fn show(&mut self, root: &mut egui::Ui) {
+        #[cfg(not(target_arch = "wasm32"))]
+        if self.seed_search.poll(self.threads) {
+            root.ctx().request_repaint_after(Duration::from_millis(200));
+        }
         let settings = MapSettings {
             sample_height: self.sample_height,
             samples: self.samples,
@@ -968,7 +976,8 @@ impl Ui {
                     ui.separator();
                     self.structures_menu(ui);
                     self.biomes_menu(ui);
-                    self.search_menu(ui);
+                    #[cfg(not(target_arch = "wasm32"))]
+                    self.seed_search_menu(ui);
                     self.terrain_menu(ui, level);
                     self.grid_menu(ui);
                     self.performance_menu(ui);

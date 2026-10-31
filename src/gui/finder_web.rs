@@ -110,10 +110,7 @@ fn spawn_worker(inner: &Rc<RefCell<Inner>>, index: usize) -> Result<Worker, JsVa
         let reply = event.data().as_string().and_then(|line| Reply::decode(&line));
         let reply = reply.unwrap_or_else(|| {
             log::error!("a finder worker failed: {:?}", event.data());
-            match job {
-                Job::Biome { .. } => Reply::Biome(Vec::new()),
-                _ => Reply::Found(Vec::new()),
-            }
+            Reply::Found(Vec::new())
         });
         inner.finished.push((generation, job, reply));
     });

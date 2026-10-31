@@ -1,4 +1,4 @@
-// Generates map tiles and answers structure and search questions off the main thread, see
+// Generates map tiles and answers structure questions off the main thread, see
 // src/gui/executor_web.rs and src/gui/finder_web.rs.
 import init, { finder_run, worker_run } from "./pkg/cubox.js";
 

@@ -18,7 +18,6 @@ use crate::{
 const LINE_FADE_POINTS: [f64; 2] = [12.0, 4.0];
 /// Coordinates of grid lines keep this far apart in points, the lines between go without.
 const LABEL_POINTS: f64 = 70.0;
-const SEARCH_COLOR: Color32 = Color32::from_rgb(255, 225, 60);
 
 /// The space between markers, in points.
 pub const MARKER_GAPS: std::ops::RangeInclusive<f32> = 0.0..=100.0;
@@ -418,12 +417,6 @@ impl Ui {
                 };
                 let text = format!("{name}{about}\nx {} z {}", found.x, found.z);
                 label = Some((marker.right_top(), text));
-            }
-        }
-        if let Some(search) = &self.queries.search {
-            for result in &search.results {
-                let at = self.map.block_to_screen(rect, [result[0] as f64, result[1] as f64]);
-                painter.circle_stroke(at, size * 0.75, Stroke::new(2.5, SEARCH_COLOR));
             }
         }
         if let Some((at, text)) = label {

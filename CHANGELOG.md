@@ -12,6 +12,12 @@ The release workflow publishes the section of a version as its release notes.
 
 - `cubox find` searches for seeds: structures near a spot or spawn, structures close together, biomes with a
   minimum size or share of an area, and noise values. See `docs/seed-search.md`.
+- A Seed search section on the desktop with presets, finding locations in one seed too. Clicking a result goes there
+  and shows its markers.
+
+### Removed
+
+- The Search section, Seed search has taken its place. The web version has no search for now.
 
 ## [0.4.2] - 2026-10-31
 

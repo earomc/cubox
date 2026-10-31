@@ -5,7 +5,6 @@ use crate::{
     dimension::Dimension,
     gui::{
         Ui,
-        finder::Target,
         overlays::{GridSpacing, MARKER_GAPS, line_visibility},
         resources,
     },
@@ -159,104 +158,6 @@ impl Ui {
                 });
             }
         });
-    }
-
-    pub(super) fn search_menu(&mut self, ui: &mut egui::Ui) {
-        let mut new_target = None;
-        let mut go_to = None;
-        let mut clear = false;
-        egui::CollapsingHeader::new("Search").show(ui, |ui| {
-            ui.add(
-                egui::TextEdit::singleline(&mut self.search_filter)
-                    .hint_text("Structure or biome")
-                    .desired_width(f32::INFINITY),
-            );
-            let filter = self.search_filter.trim().to_lowercase();
-            let matches = |name: &str| name.to_lowercase().contains(&filter);
-            let active = self.queries.search.as_ref().map(|search| search.target.clone());
-            let mut pick = |target: Target| {
-                if active.as_ref() == Some(&target) {
-                    clear = true;
-                } else {
-                    new_target = Some(target);
-                }
-            };
-            egui::ScrollArea::vertical()
-                .id_salt("search list")
-                .max_height(140.0)
-                .show(ui, |ui| {
-                    for kind in self.kinds_here() {
-                        let def = &STRUCTURE_KINDS[kind];
-                        let target = Target::Structure(kind);
-                        if matches(def.name)
-                            && ui
-                                .selectable_label(active.as_ref() == Some(&target), def.name)
-                                .clicked()
-                        {
-                            pick(target);
-                        }
-                    }
-                    let mut biomes: Vec<String> = self
-                        .biome_source
-                        .possible_biome_refs()
-                        .iter()
-                        .map(|biome| biome.key.path.to_string())
-                        .collect();
-                    biomes.sort();
-                    for biome in biomes {
-                        let name = biome.replace('_', " ");
-                        let target = Target::Biome(biome);
-                        if matches(&name)
-                            && ui
-                                .selectable_label(active.as_ref() == Some(&target), format!("{name} (biome)"))
-                                .clicked()
-                        {
-                            pick(target);
-                        }
-                    }
-                });
-            ui.weak("Biome patches under 32 blocks wide can be missed");
-
-            let (mut cancel, mut clear_button) = (false, false);
-            if let Some(search) = &self.queries.search {
-                ui.separator();
-                let center = search.center;
-                if search.done {
-                    ui.horizontal(|ui| {
-                        ui.label(format!("{}: {} found", search.target.name(), search.results.len()));
-                        clear_button = ui.button("Clear").clicked();
-                    });
-                } else {
-                    ui.horizontal(|ui| {
-                        ui.spinner();
-                        ui.label(format!("{}: {} blocks out", search.target.name(), search.reached));
-                        cancel = ui.button("Cancel").clicked();
-                    });
-                }
-                for result in &search.results {
-                    let distance = ((result[0] - center[0]) as f64).hypot((result[1] - center[1]) as f64);
-                    let text = format!("x {} z {} ({:.0} blocks)", result[0], result[1], distance);
-                    if ui.selectable_label(false, text).clicked() {
-                        go_to = Some(*result);
-                    }
-                }
-            }
-            if cancel && let Some(search) = &mut self.queries.search {
-                search.done = true;
-            }
-            clear |= clear_button;
-        });
-        if clear {
-            self.queries.clear_search();
-        }
-        if let Some(target) = new_target {
-            let center = self.map.camera.center;
-            self.queries
-                .start_search(target, [(center[0] * 4.0) as i32, (center[1] * 4.0) as i32]);
-        }
-        if let Some(block) = go_to {
-            self.map.camera.center = [block[0] as f64 / 4.0, block[1] as f64 / 4.0];
-        }
     }
 
     pub(super) fn terrain_menu(&mut self, ui: &mut egui::Ui, level: i32) {
@@ -599,17 +500,5 @@ impl Ui {
                 None => log::error!("no structure {which}"),
             },
         }
-    }
-
-    /// `search` of a script.
-    #[cfg(not(target_arch = "wasm32"))]
-    pub(super) fn script_search(&mut self, what: &str) {
-        let target = match STRUCTURE_KINDS.iter().position(|kind| kind.id == what) {
-            Some(kind) => Target::Structure(kind),
-            None => Target::Biome(what.to_string()),
-        };
-        let center = self.map.camera.center;
-        self.queries
-            .start_search(target, [(center[0] * 4.0) as i32, (center[1] * 4.0) as i32]);
     }
 }

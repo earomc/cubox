@@ -8,12 +8,10 @@ use std::{
     sync::OnceLock,
 };
 
-use steel_worldgen::biomes::BiomeSourceKind;
-
 use crate::{
     dimension::Dimension,
     gui::finder_pool::Pool,
-    structures::{Finder, Found, STRUCTURE_KINDS, Spread, bin_rounds, rarity, real_rate, spread},
+    structures::{Finder, Found, Spread, bin_rounds, rarity, real_rate, spread},
 };
 
 /// Which world questions are about.
@@ -24,17 +22,6 @@ pub struct FinderWorld {
     pub sample_height: i32,
 }
 
-/// Blocks searched per biome job, and how far apart its samples are.
-const BIOME_BAND: i32 = 1024;
-const BIOME_STEP: i32 = 32;
-/// How far a search for a biome goes in blocks.
-const BIOME_LIMIT: i32 = 100_000;
-/// Hits closer than this are the same patch of biome.
-const BIOME_PATCH: i32 = 512;
-/// How far a search for a structure goes in blocks.
-const STRUCTURE_LIMIT: i64 = 300_000;
-/// Results a search ends at.
-const SEARCH_RESULTS: usize = 10;
 /// Bins remembered at most, about 100 bytes each. Beyond that they are looked for again if needed.
 const MAX_BINS: usize = 1_000_000;
 /// The edge of the world in blocks.
@@ -55,19 +42,11 @@ pub enum Job {
     Rings {
         kind: usize,
     },
-    /// samples on the square shells from `from` up to `to` blocks around `center`
-    Biome {
-        biome: String,
-        center: [i32; 2],
-        from: i32,
-        to: i32,
-    },
 }
 
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub enum Reply {
     Found(Vec<Found>),
-    Biome(Vec<[i32; 2]>),
 }
 
 #[cfg(any(target_arch = "wasm32", test))]
@@ -89,14 +68,6 @@ impl Job {
                 tries,
             } => format!("bins {kind} {level} {x} {z} {side} {} {}", tries.start, tries.end),
             Job::Rings { kind } => format!("rings {kind}"),
-            Job::Biome {
-                biome,
-                center,
-                from,
-                to,
-            } => {
-                format!("biome {biome} {} {} {from} {to}", center[0], center[1])
-            }
         }
     }
 
@@ -117,15 +88,6 @@ impl Job {
             "rings" => Some(Job::Rings {
                 kind: words.get(1)?.parse().ok()?,
             }),
-            "biome" => {
-                let n = numbers(words.get(2..)?)?;
-                Some(Job::Biome {
-                    biome: words.get(1)?.to_string(),
-                    center: [*n.first()?, *n.get(1)?],
-                    from: *n.get(2)?,
-                    to: *n.get(3)?,
-                })
-            }
             _ => None,
         }
     }
@@ -140,12 +102,6 @@ impl Reply {
                 line.push('f');
                 for f in found {
                     line += &format!(" {} {} {}", f.kind, f.x, f.z);
-                }
-            }
-            Reply::Biome(hits) => {
-                line.push('b');
-                for hit in hits {
-                    line += &format!(" {} {}", hit[0], hit[1]);
                 }
             }
         }
@@ -167,7 +123,6 @@ impl Reply {
                     })
                     .collect(),
             )),
-            "b" => Some(Reply::Biome(n.as_chunks::<2>().0.to_vec())),
             _ => None,
         }
     }
@@ -177,7 +132,6 @@ impl Reply {
 pub struct WorldQueries {
     pub world: FinderWorld,
     finder: OnceLock<Option<Finder>>,
-    source: OnceLock<BiomeSourceKind>,
 }
 
 impl WorldQueries {
@@ -185,7 +139,6 @@ impl WorldQueries {
         Self {
             world,
             finder: OnceLock::new(),
-            source: OnceLock::new(),
         }
     }
 
@@ -226,44 +179,7 @@ impl WorldQueries {
                 Reply::Found(found)
             }
             Job::Rings { kind } => Reply::Found(self.finder().map_or(Vec::new(), |finder| finder.rings(*kind))),
-            Job::Biome {
-                biome,
-                center,
-                from,
-                to,
-            } => Reply::Biome(self.scan_biome(biome, *center, *from, *to)),
         }
-    }
-
-    fn scan_biome(&self, biome: &str, center: [i32; 2], from: i32, to: i32) -> Vec<[i32; 2]> {
-        let source = self
-            .source
-            .get_or_init(|| self.world.dimension.biome_source(self.world.seed));
-        let mut sampler = source.chunk_sampler();
-        let qy = self.world.sample_height >> 2;
-        let mut hits = Vec::new();
-        for radius in (from..to).step_by(BIOME_STEP as usize) {
-            let steps = (radius / BIOME_STEP).max(1);
-            for i in 0..steps * 8 {
-                let (dx, dz) = shell_position(i, steps);
-                let (x, z) = (center[0] + dx * BIOME_STEP, center[1] + dz * BIOME_STEP);
-                if &*sampler.sample(x >> 2, qy, z >> 2).key.path == biome {
-                    hits.push([x, z]);
-                }
-            }
-        }
-        hits
-    }
-}
-
-/// Position `i` of `radius * 8` around a square shell of that radius.
-fn shell_position(i: i32, radius: i32) -> (i32, i32) {
-    let side = radius * 2;
-    match i / side {
-        0 => (-radius + i % side, -radius),
-        1 => (radius, -radius + i % side),
-        2 => (radius - i % side, radius),
-        _ => (-radius, radius - i % side),
     }
 }
 
@@ -347,53 +263,6 @@ pub struct Visible {
     pub sampled: bool,
 }
 
-/// What a search looks for.
-#[derive(Clone, PartialEq, Debug)]
-pub enum Target {
-    Structure(usize),
-    Biome(String),
-}
-
-impl Target {
-    pub fn name(&self) -> String {
-        match self {
-            Target::Structure(kind) => STRUCTURE_KINDS[*kind].name.to_string(),
-            Target::Biome(biome) => biome.replace('_', " "),
-        }
-    }
-}
-
-pub struct Search {
-    pub target: Target,
-    /// where it started from, in blocks
-    pub center: [i32; 2],
-    /// nearest first, in blocks
-    pub results: Vec<[i32; 2]>,
-    /// how far it has looked in blocks
-    pub reached: i64,
-    pub done: bool,
-    /// the shell being worked on, in cells for structures and bands for biomes
-    shell: i32,
-    /// the shell after results were enough, in which something closer might still be
-    last_shell: Option<i32>,
-}
-
-impl Search {
-    /// The biome job of the band being searched.
-    fn band_job(&self) -> Option<Job> {
-        let Target::Biome(biome) = &self.target else {
-            return None;
-        };
-        let from = self.shell * BIOME_BAND;
-        Some(Job::Biome {
-            biome: biome.clone(),
-            center: self.center,
-            from,
-            to: from + BIOME_BAND,
-        })
-    }
-}
-
 /// Asks the workers what is wanted and remembers the answers.
 pub struct Queries {
     pool: Pool,
@@ -404,7 +273,6 @@ pub struct Queries {
     bins: HashMap<(usize, u32, i32, i32), BinState>,
     rings: HashMap<usize, Vec<Found>>,
     in_flight: HashSet<Job>,
-    pub search: Option<Search>,
     /// jobs for the view that aren't answered yet
     waiting: usize,
     /// per kind the view and level last looked at, and the bins looked at there
@@ -424,7 +292,6 @@ impl Queries {
             bins: HashMap::new(),
             rings: HashMap::new(),
             in_flight: HashSet::new(),
-            search: None,
             waiting: 0,
             chosen: HashMap::new(),
             revision: 0,
@@ -446,7 +313,7 @@ impl Queries {
         self.waiting
     }
 
-    /// Forgets everything if the world changed. The height only changes what biome searches see.
+    /// Forgets everything if the world changed. The height doesn't change structureses see.
     pub fn set_world(&mut self, world: FinderWorld) {
         let same_structures = self.world.seed == world.seed && self.world.dimension == world.dimension;
         if self.world == world {
@@ -457,7 +324,6 @@ impl Queries {
         self.in_flight.clear();
         self.waiting = 0;
         self.revision += 1;
-        self.search = None;
         if !same_structures {
             self.bins.clear();
             self.rings.clear();
@@ -465,23 +331,7 @@ impl Queries {
     }
 
     pub fn busy(&self) -> bool {
-        self.waiting > 0 || !self.in_flight.is_empty() || self.search.as_ref().is_some_and(|search| !search.done)
-    }
-
-    pub fn clear_search(&mut self) {
-        self.search = None;
-    }
-
-    pub fn start_search(&mut self, target: Target, center: [i32; 2]) {
-        self.search = Some(Search {
-            target,
-            center,
-            results: Vec::new(),
-            reached: 0,
-            done: false,
-            shell: 0,
-            last_shell: None,
-        });
+        self.waiting > 0 || !self.in_flight.is_empty()
     }
 
     /// The visible part of a kind. `min` and `max` are in blocks.
@@ -657,8 +507,7 @@ impl Queries {
             self.store(job, reply);
             self.revision += 1;
         }
-        let search_jobs = self.search_jobs();
-        for job in search_jobs.iter().chain(wanted) {
+        for job in wanted {
             if !self.pool.has_idle() {
                 break;
             }
@@ -684,7 +533,6 @@ impl Queries {
                 .get(&(*kind, *level, *x, *z))
                 .is_some_and(|state| state.tried >= tries.end),
             Job::Rings { kind } => self.rings.contains_key(kind),
-            Job::Biome { .. } => false,
         }
     }
 
@@ -711,123 +559,14 @@ impl Queries {
             (Job::Rings { kind }, Reply::Found(found)) => {
                 self.rings.insert(kind, found);
             }
-            (job @ Job::Biome { .. }, Reply::Biome(hits)) => {
-                let Job::Biome { to, .. } = job else { unreachable!() };
-                // a reply of a search that was replaced has no place here
-                if let Some(search) = &mut self.search
-                    && search.band_job().as_ref() == Some(&job)
-                {
-                    search.reached = to as i64;
-                    for hit in hits {
-                        let far_enough = search
-                            .results
-                            .iter()
-                            .all(|r| (r[0] - hit[0]).abs().max((r[1] - hit[1]).abs()) >= BIOME_PATCH);
-                        if far_enough {
-                            search.results.push(hit);
-                        }
-                    }
-                    sort_by_distance(&mut search.results, search.center);
-                    if search.results.len() >= SEARCH_RESULTS || to >= BIOME_LIMIT {
-                        search.results.truncate(SEARCH_RESULTS);
-                        search.done = true;
-                    }
-                    search.shell += 1;
-                }
-            }
-            _ => log::error!("a reply that doesn't fit its job"),
         }
     }
-
-    /// What the running search needs next. Advances it when its shell is answered.
-    fn search_jobs(&mut self) -> Vec<Job> {
-        let Some(search) = &mut self.search else {
-            return Vec::new();
-        };
-        if search.done {
-            return Vec::new();
-        }
-        match search.target.clone() {
-            Target::Biome(_) => search.band_job().into_iter().collect(),
-            Target::Structure(kind) => match spread(kind) {
-                Some(Spread::Rings) => {
-                    let Some(found) = self.rings.get(&kind) else {
-                        return vec![Job::Rings { kind }];
-                    };
-                    search.results = found.iter().map(|f| [f.x, f.z]).collect();
-                    sort_by_distance(&mut search.results, search.center);
-                    search.results.truncate(SEARCH_RESULTS);
-                    search.done = true;
-                    Vec::new()
-                }
-                Some(Spread::Grid(spacing)) => {
-                    let side = job_side(spacing);
-                    let block = spacing * side * 16;
-                    let center = [search.center[0].div_euclid(block), search.center[1].div_euclid(block)];
-                    loop {
-                        let jobs = shell_blocks(search.shell)
-                            .into_iter()
-                            .map(|(dx, dz)| ((center[0] + dx) * side, (center[1] + dz) * side))
-                            .filter(|&(x, z)| !self.bins.contains_key(&(kind, 0, x, z)))
-                            .map(|(x, z)| Job::Bins {
-                                kind,
-                                level: 0,
-                                x,
-                                z,
-                                side,
-                                tries: 0..0,
-                            })
-                            .collect::<Vec<_>>();
-                        if !jobs.is_empty() {
-                            return jobs;
-                        }
-                        // the shell is answered
-                        for (dx, dz) in shell_blocks(search.shell) {
-                            let key = (kind, 0, (center[0] + dx) * side, (center[1] + dz) * side);
-                            search.results.extend(self.bins[&key].found.iter().map(|f| [f.x, f.z]));
-                        }
-                        sort_by_distance(&mut search.results, search.center);
-                        search.reached = search.shell as i64 * block as i64;
-                        if search.results.len() >= SEARCH_RESULTS && search.last_shell.is_none() {
-                            search.last_shell = Some(search.shell + 1);
-                        }
-                        if search.last_shell.is_some_and(|last| search.shell >= last)
-                            || search.reached >= STRUCTURE_LIMIT
-                        {
-                            search.results.truncate(SEARCH_RESULTS);
-                            search.done = true;
-                            return Vec::new();
-                        }
-                        search.shell += 1;
-                    }
-                }
-                None => {
-                    search.done = true;
-                    Vec::new()
-                }
-            },
-        }
-    }
-}
-
-fn sort_by_distance(results: &mut [[i32; 2]], center: [i32; 2]) {
-    results.sort_by_key(|r| {
-        let (dx, dz) = ((r[0] - center[0]) as i64, (r[1] - center[1]) as i64);
-        dx * dx + dz * dz
-    });
-}
-
-/// The cells at distance `shell` from the center cell.
-fn shell_blocks(shell: i32) -> Vec<(i32, i32)> {
-    if shell == 0 {
-        return vec![(0, 0)];
-    }
-    (0..shell * 8).map(|i| shell_position(i, shell)).collect()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::structures::STRUCTURE_KINDS;
 
     fn near(blocks_per_point: f64) -> MarkerSearch {
         // about as many as there are squares of 24 points in the views of these tests
@@ -956,56 +695,12 @@ mod tests {
                 tries: 16..128,
             },
             Job::Rings { kind: 2 },
-            Job::Biome {
-                biome: "dark_forest".into(),
-                center: [-10, 20],
-                from: 0,
-                to: 1024,
-            },
         ] {
             assert_eq!(Job::decode(&job.encode()), Some(job));
         }
-        for reply in [
-            Reply::Found(vec![]),
-            Reply::Found(vec![Found { kind: 1, x: -5, z: 6 }]),
-            Reply::Biome(vec![[1, 2], [-3, 4]]),
-        ] {
+        for reply in [Reply::Found(vec![]), Reply::Found(vec![Found { kind: 1, x: -5, z: 6 }])] {
             assert_eq!(Reply::decode(&reply.encode()), Some(reply));
         }
-    }
-
-    fn run_search(target: Target) -> Vec<[i32; 2]> {
-        let mut queries = Queries::new(FinderWorld {
-            seed: 12345,
-            dimension: Dimension::Overworld,
-            sample_height: 256,
-        });
-        queries.start_search(target, [1000, 1000]);
-        while queries.busy() {
-            queries.update(&[]);
-            std::thread::sleep(std::time::Duration::from_millis(1));
-        }
-        queries.search.unwrap().results
-    }
-
-    #[test]
-    fn searches_find_the_nearest_first() {
-        let biomes = run_search(Target::Biome("dark_forest".into()));
-        println!("{biomes:?}");
-        assert_eq!(biomes.len(), SEARCH_RESULTS);
-        let source = Dimension::Overworld.biome_source(12345);
-        let mut sampler = source.chunk_sampler();
-        for hit in &biomes {
-            assert_eq!(&*sampler.sample(hit[0] >> 2, 64, hit[1] >> 2).key.path, "dark_forest");
-        }
-        let kind = STRUCTURE_KINDS.iter().position(|kind| kind.id == "village").unwrap();
-        let villages = run_search(Target::Structure(kind));
-        println!("{villages:?}");
-        assert_eq!(villages.len(), SEARCH_RESULTS);
-        let distance = |r: &[i32; 2]| ((r[0] - 1000) as f64).hypot((r[1] - 1000) as f64);
-        assert!(villages.is_sorted_by_key(|r| distance(r) as i64));
-        let kind = STRUCTURE_KINDS.iter().position(|kind| kind.id == "stronghold").unwrap();
-        assert_eq!(run_search(Target::Structure(kind)).len(), SEARCH_RESULTS);
     }
 
     #[test]
@@ -1033,17 +728,5 @@ mod tests {
             std::thread::sleep(std::time::Duration::from_millis(1));
         }
         panic!("still {} waiting", queries.waiting());
-    }
-
-    #[test]
-    fn shells_visit_every_position_once() {
-        for radius in 1..5 {
-            let mut shell = shell_blocks(radius);
-            assert_eq!(shell.len() as i32, radius * 8);
-            assert!(shell.iter().all(|&(x, z)| x.abs().max(z.abs()) == radius));
-            shell.sort();
-            shell.dedup();
-            assert_eq!(shell.len() as i32, radius * 8);
-        }
     }
 }

@@ -1,5 +1,7 @@
 # Seed search
 
+The Seed search section of the desktop app and `cubox find` do the same. The web version doesn't have it yet.
+
 `cubox find` tries seeds until it has found ones that pass all your conditions. Each line is one condition:
 
 ```sh
