@@ -289,23 +289,15 @@ impl MapView {
         if settings.highlight {
             for &key in &keys_for_masks {
                 let screen = tile_screen(&self.camera, &key);
-                let tile = tiles.get(&key, now);
-                let own = tiles.mask(&key);
-                if (own.is_none() || !tile.as_ref().is_some_and(|(_, alpha)| *alpha >= 1.0))
-                    && let Some((parent, up)) = ancestor(tiles, &key)
-                    && let Some(tex) = tiles.mask(&parent)
-                {
-                    let sub = 1.0 / (1 << up) as f32;
-                    let n = 1 << up;
-                    let uv = Rect::from_min_size(
-                        pos2(key.x.rem_euclid(n) as f32 * sub, key.z.rem_euclid(n) as f32 * sub),
-                        vec2(sub, sub),
-                    );
-                    out.push(tex, screen, uv, 1.0);
+                let own = tiles.mask(&key).map(|tex| (tex, tiles.mask_alpha(&key, now)));
+                // what shows until then fades out as the tile's own fades in, both at full strength
+                // would darken twice
+                let own_alpha = own.as_ref().map_or(0.0, |(_, alpha)| *alpha);
+                fading |= own.is_some() && own_alpha < 1.0;
+                if own_alpha < 1.0 {
+                    draw_mask_stand_ins(&mut out, tiles, key, screen, 1.0 - own_alpha, MAX_STAND_IN_DOWN);
                 }
-                if let Some((_, alpha)) = tile
-                    && let Some(tex) = own
-                {
+                if let Some((tex, alpha)) = own {
                     out.push(tex, screen, FULL_UV, alpha);
                 }
             }
@@ -486,6 +478,71 @@ fn draw_ancestor(out: &mut Quads, tiles: &mut TileCache, now: f64, key: TileKey,
             vec2(sub, sub),
         );
         out.push(tex, screen, uv, 1.0);
+    }
+}
+
+/// The biome numbers of a tile or its cover version.
+fn cached_mask(tiles: &mut TileCache, key: TileKey) -> Option<Rc<TileTexture>> {
+    tiles.mask(&key).or_else(|| tiles.mask(&key.cover()))
+}
+
+fn child_of(key: TileKey, dx: i32, dz: i32) -> TileKey {
+    TileKey {
+        scale: key.scale - 1,
+        x: key.x * 2 + dx,
+        z: key.z * 2 + dz,
+        ..key
+    }
+}
+
+fn has_finer_mask(tiles: &mut TileCache, key: TileKey, depth: i32) -> bool {
+    key.scale > 0
+        && depth > 0
+        && [(0, 0), (1, 0), (0, 1), (1, 1)].into_iter().any(|(dx, dz)| {
+            let child = child_of(key, dx, dz);
+            cached_mask(tiles, child).is_some() || has_finer_mask(tiles, child, depth - 1)
+        })
+}
+
+/// Darkens like the stand ins of `key` that the colors show: finer tiles where there are some and
+/// the closest coarser one elsewhere. Those without numbers yet are passed over, nothing would
+/// darken there.
+fn draw_mask_stand_ins(out: &mut Quads, tiles: &mut TileCache, key: TileKey, screen: Rect, alpha: f32, depth: i32) {
+    if key.cover() != key
+        && let Some(tex) = tiles.mask(&key.cover())
+    {
+        out.push(tex, screen, FULL_UV, alpha);
+    } else if has_finer_mask(tiles, key, depth) {
+        let half = screen.size() / 2.0;
+        for (dx, dz) in [(0, 0), (1, 0), (0, 1), (1, 1)] {
+            let child = child_of(key, dx, dz);
+            let child_screen = Rect::from_min_size(screen.min + vec2(dx as f32 * half.x, dz as f32 * half.y), half);
+            match cached_mask(tiles, child) {
+                Some(tex) => out.push(tex, child_screen, FULL_UV, alpha),
+                None => draw_mask_stand_ins(out, tiles, child, child_screen, alpha, depth - 1),
+            }
+        }
+    } else {
+        let parent = (1..=MAX_STAND_IN_UP.min(MAX_LEVEL - key.scale as i32)).find_map(|up| {
+            let parent = TileKey {
+                scale: key.scale + up as u8,
+                x: key.x >> up,
+                z: key.z >> up,
+                ..key
+            };
+            cached_mask(tiles, parent).map(|tex| (tex, up))
+        });
+        if let Some((tex, up)) = parent {
+            let n = 1 << up;
+            let sub = 1.0 / n as f32;
+            let uv = Rect::from_min_size(
+                pos2(key.x.rem_euclid(n) as f32 * sub, key.z.rem_euclid(n) as f32 * sub),
+                vec2(sub, sub),
+            );
+            out.push(tex, screen, uv, alpha);
+        } else if let Some(tex) = tiles.unknown_mask() {
+            out.push(tex, screen, FULL_UV, alpha);
+        }
     }
 }
 

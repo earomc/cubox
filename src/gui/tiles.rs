@@ -29,8 +29,12 @@ struct Entry {
     biomes: Biomes,
     /// the biome numbers on the GPU, for highlighting
     mask: Option<Rc<TileTexture>>,
+    mask_arrived: f64,
     last_used_frame: u64,
 }
+
+/// Not the number of a biome, so the table of `MapRenderer::set_darkening` darkens it.
+const UNKNOWN_BIOME: u8 = 255;
 
 /// Caches tile textures and generates missing tiles with the platform's `Executor`.
 pub struct TileCache {
@@ -38,6 +42,8 @@ pub struct TileCache {
     entries: HashMap<TileKey, Entry>,
     /// tiles that have a task queued or running
     pending: HashSet<TileKey>,
+    /// darkens areas no biome numbers are known for yet, like a biome that isn't highlighted
+    unknown_mask: Option<Rc<TileTexture>>,
     /// bumped on clear(), so results of tasks for an old seed get dropped
     generation: u64,
     frame: u64,
@@ -54,6 +60,7 @@ impl TileCache {
             executor: Executor::new(params),
             entries: HashMap::new(),
             pending: HashSet::new(),
+            unknown_mask: None,
             generation: 0,
             frame: 0,
             max_tiles: resources::tiles_in_mib(resources::default_cache_mib()),
@@ -178,7 +185,21 @@ impl TileCache {
 
     /// The biome numbers of a tile on the GPU, if it is cached.
     pub fn mask(&mut self, key: &TileKey) -> Option<Rc<TileTexture>> {
-        self.entries.get(key)?.mask.clone()
+        let entry = self.entries.get_mut(key)?;
+        entry.last_used_frame = self.frame;
+        entry.mask.clone()
+    }
+
+    /// How far the biome numbers of a tile have faded in.
+    pub fn mask_alpha(&self, key: &TileKey, now: f64) -> f32 {
+        self.entries.get(key).map_or(0.0, |entry| {
+            let arrived = entry.arrived.max(entry.mask_arrived);
+            ((now - arrived) / self.fade_seconds).clamp(0.0, 1.0) as f32
+        })
+    }
+
+    pub fn unknown_mask(&self) -> Option<Rc<TileTexture>> {
+        self.unknown_mask.clone()
     }
 
     fn finished_children(&self, key: &TileKey) -> Option<([Estimates; 4], [Biomes; 4])> {
@@ -195,6 +216,9 @@ impl TileCache {
 
     /// Uploads finished tiles as textures. `now` is the egui time in seconds. Returns true if anything changed.
     pub fn poll(&mut self, now: f64, device: &wgpu::Device, queue: &wgpu::Queue, renderer: &MapRenderer) -> bool {
+        if self.highlight && self.unknown_mask.is_none() {
+            self.unknown_mask = Some(Rc::new(renderer.create_mask_tile(device, queue, &[UNKNOWN_BIOME], 1)));
+        }
         let mut changed = false;
         let finished: Vec<_> = self.executor.finished().collect();
         for done in finished {
@@ -212,6 +236,7 @@ impl TileCache {
                         &tile.biomes,
                         TILE_SIZE as u32,
                     )));
+                    entry.mask_arrived = now;
                     entry.biomes = Arc::new(tile.biomes);
                     changed = true;
                 }
@@ -235,6 +260,7 @@ impl TileCache {
                     estimates,
                     biomes,
                     mask,
+                    mask_arrived: now,
                     last_used_frame: self.frame,
                 },
             );
