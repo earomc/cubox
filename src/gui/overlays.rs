@@ -5,6 +5,7 @@ use std::collections::HashMap;
 use egui::{Align2, Color32, FontId, Pos2, Rect, Stroke, TextureHandle, pos2, vec2};
 
 use crate::{
+    dimension::Dimension,
     gui::{
         Ui,
         finder::{Job, MarkerSearch, Occupied},
@@ -23,8 +24,25 @@ const SEARCH_COLOR: Color32 = Color32::from_rgb(255, 225, 60);
 pub const MARKER_GAPS: std::ops::RangeInclusive<f32> = 1.0..=100.0;
 pub const DEFAULT_MARKER_GAP: f32 = 2.0;
 
-/// Squares of the screen a structure is shown for while markers may overlap, in points.
-const OVERLAP_BIN_POINTS: f64 = 24.0;
+/// While answers come in, markers are placed anew at most this often per marker, and after at most
+/// this many seconds.
+const MARKERS_PLACED_PER_SECOND: f64 = 100_000.0;
+const MAX_PLACING_WAIT: f64 = 0.5;
+
+/// What the markers on the screen depend on besides the answers about them.
+#[derive(PartialEq)]
+pub struct MarkerView {
+    min: [f64; 2],
+    max: [f64; 2],
+    target: f64,
+    kinds: Vec<bool>,
+    dimension: Dimension,
+    overlap: bool,
+    rare_first: bool,
+    distance: f64,
+    max_tries: u32,
+    max_markers: usize,
+}
 
 /// The markers that are shown: those with space around them, the rarest kinds first. Depends only
 /// on the structures and the distance, so moving the view doesn't shuffle them.
@@ -251,32 +269,69 @@ impl Ui {
         if self.grid.enabled {
             self.paint_grid(ui, rect);
         }
-        self.update_structures(rect);
+        self.update_structures(ui.ctx(), rect);
         self.paint_markers(ui, rect);
         if self.zoom_buttons_shown {
             self.zoom_buttons(ui, rect);
         }
     }
 
-    fn update_structures(&mut self, rect: Rect) {
+    fn update_structures(&mut self, ctx: &egui::Context, rect: Rect) {
         let (min, max) = self.map.visible_blocks(rect);
         let blocks_per_point = self.map.blocks_per_point();
-        let overlap = self.marker_overlap;
-        let spacing = (self.advanced.marker_size + self.marker_gap) as f64;
-        // finer than the distance: a structure too close to another leaves room for one in the next square
-        let bin_points = if overlap {
-            OVERLAP_BIN_POINTS
-        } else {
-            spacing / self.advanced.search_fineness as f64
-        };
-        let search = MarkerSearch {
-            blocks_per_point,
-            bin_points,
-            max_tries: self.advanced.search_tries,
-        };
+        let distance_points = (self.advanced.marker_size + self.marker_gap) as f64;
         // what is just off the screen can still be in the way of what is on it
-        let margin = spacing * blocks_per_point;
+        let margin = distance_points * blocks_per_point;
         let (min, max) = (min.map(|v| v - margin), max.map(|v| v + margin));
+        let kinds = STRUCTURE_KINDS
+            .iter()
+            .enumerate()
+            .filter(|(kind, def)| self.shown_kinds[*kind] && def.dimension == self.dimension)
+            .count();
+        let target = if self.marker_overlap {
+            // as many as asked for, whatever there is room for
+            self.max_markers as f64 / kinds.max(1) as f64
+        } else {
+            // what fits on the part of the screen with world on it, and some more to choose from
+            let edge = WORLD_BORDER_QUARTS as f64 * 4.0;
+            let side = |lo: f64, hi: f64| (hi.min(edge) - lo.max(-edge)).max(0.0) / blocks_per_point;
+            let fit = side(min[0], max[0]) * side(min[1], max[1]) / (distance_points * distance_points);
+            let choice = (self.advanced.search_fineness * self.advanced.search_fineness) as f64;
+            // with more kinds the others fill the gaps: half the work for 2% fewer markers
+            fit * if kinds >= 3 { choice / 2.0 } else { choice }
+        };
+        let view = MarkerView {
+            min,
+            max,
+            target,
+            kinds: self.shown_kinds.clone(),
+            dimension: self.dimension,
+            overlap: self.marker_overlap,
+            rare_first: self.prioritize_rare,
+            distance: distance_points * blocks_per_point,
+            max_tries: self.advanced.search_tries,
+            max_markers: self.max_markers,
+        };
+        // only when something changed, there can be a lot of them. Answers keep coming in while they
+        // are looked for, going through all markers for each would take the time from looking.
+        let now = ctx.input(|input| input.time);
+        let revision = self.queries.revision();
+        let wait = (self.markers.len() as f64 / MARKERS_PLACED_PER_SECOND).min(MAX_PLACING_WAIT);
+        let answered = revision != self.placed_revision && now - self.placed_at >= wait;
+        if answered || self.marker_view.as_ref() != Some(&view) {
+            self.place_markers(&view);
+            self.marker_view = Some(view);
+            self.placed_revision = revision;
+            self.placed_at = now;
+        }
+        self.queries.update(&self.marker_jobs);
+    }
+
+    fn place_markers(&mut self, view: &MarkerView) {
+        let search = MarkerSearch {
+            target: view.target,
+            max_tries: view.max_tries,
+        };
         let mut rounds: Vec<Vec<std::vec::IntoIter<Job>>> = Vec::new();
         let mut known = Vec::new();
         for (kind, def) in STRUCTURE_KINDS.iter().enumerate() {
@@ -284,7 +339,7 @@ impl Ui {
             if !self.shown_kinds[kind] || def.dimension != self.dimension {
                 continue;
             }
-            let visible = self.queries.visible(kind, min, max, search, &self.placed);
+            let visible = self.queries.visible(kind, view.min, view.max, search, &self.placed);
             self.sampled[kind] = visible.sampled;
             known.extend(visible.known);
             for (round, jobs) in visible.jobs.into_iter().enumerate() {
@@ -296,19 +351,18 @@ impl Ui {
         }
         // a round for all first. kinds take turns, or those further down the list would wait for
         // all of the others
-        let mut jobs: Vec<Job> = Vec::new();
+        self.marker_jobs.clear();
         for mut per_kind in rounds {
             loop {
-                let before = jobs.len();
-                jobs.extend(per_kind.iter_mut().filter_map(Iterator::next));
-                if jobs.len() == before {
+                let before = self.marker_jobs.len();
+                self.marker_jobs.extend(per_kind.iter_mut().filter_map(Iterator::next));
+                if self.marker_jobs.len() == before {
                     break;
                 }
             }
         }
-        self.queries.update(&jobs);
-        let distance = if overlap { 0.0 } else { spacing * blocks_per_point };
-        self.placed = Placed::new(known, distance, self.prioritize_rare, self.advanced.max_overlapping);
+        let distance = if view.overlap { 0.0 } else { view.distance };
+        self.placed = Placed::new(known, distance, view.rare_first, view.max_markers);
         self.markers.clear();
         self.markers.extend_from_slice(&self.placed.markers);
     }

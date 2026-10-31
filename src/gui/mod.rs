@@ -40,11 +40,11 @@ use crate::gui::script::{Command, Script};
 use crate::{
     dimension::Dimension,
     gui::{
-        finder::{FinderWorld, Queries},
+        finder::{FinderWorld, Job, Queries},
         map_renderer::{MapRenderer, Quad},
         map_view::{MapSettings, MapView},
         menus::{Advanced, ReliefQuality},
-        overlays::{Grid, Icons, Placed},
+        overlays::{Grid, Icons, MarkerView, Placed},
         tiles::TileCache,
         world::WorldParams,
     },
@@ -252,6 +252,14 @@ struct Ui {
     /// where markers compete for space, the rarest kinds get it
     prioritize_rare: bool,
     advanced: Advanced,
+    /// how many markers at most while they may overlap
+    max_markers: usize,
+    /// what the markers were last placed for, up to which answer and when
+    marker_view: Option<MarkerView>,
+    placed_revision: u64,
+    placed_at: f64,
+    /// the work needed for those
+    marker_jobs: Vec<Job>,
     /// kinds of which only some are shown at this zoom
     sampled: Vec<bool>,
     icons: Option<Icons>,
@@ -404,6 +412,11 @@ impl State {
             marker_overlap: false,
             prioritize_rare: true,
             advanced: Advanced::default(),
+            max_markers: resources::default_max_markers(),
+            marker_view: None,
+            placed_revision: 0,
+            placed_at: 0.0,
+            marker_jobs: Vec::new(),
             sampled: vec![false; STRUCTURE_KINDS.len()],
             icons: None,
             search_filter: String::new(),
@@ -470,7 +483,11 @@ impl State {
                 Command::Quality(quality) => ui.relief_quality = quality,
                 Command::Exact(on) => ui.relief_exact = on,
                 Command::MarkerGap(points) => ui.marker_gap = points,
+                Command::PrintMarkers => {
+                    println!("zoom {:.2}: {} markers", ui.map.camera.zoom, ui.markers.len());
+                }
                 Command::MarkerOverlap(on) => ui.marker_overlap = on,
+                Command::MaxMarkers(markers) => ui.max_markers = markers,
                 Command::PrioritizeRare(on) => ui.prioritize_rare = on,
                 Command::Threads(threads) => ui.threads = threads,
                 Command::SeaFloor(on) => ui.sea_floor = on,

@@ -13,9 +13,9 @@ The release workflow publishes the section of a version as its release notes.
 - Structures on the map: a sub menu with a switch and an icon for every kind, all off by default.
   Their positions come from the game's real generation code.
   End cities with a ship have their own switch and icon. They show at every zoom, all of them until they
-  get very dense and a sample beyond that. Markers don't overlap unless you let them, with a
-  slider for the space between them: where there is room and a structure it is shown, the rarest kinds first, and free spots keep
-  being searched in rounds.
+  get very dense and a sample beyond that. Their number stays steady while zooming. Markers don't overlap unless you let
+  them, with a slider for the space between them and a limit of markers with overlap: where there is room and a
+  structure it is shown, the rarest kinds first, and free spots keep being searched in rounds.
 - A search for the nearest structures and biomes.
 - A height map of the real terrain when zoomed in, in the overworld, off by default, with a quality
   setting and the sea floor shown under water. Each height is one visible square. It uses the game's own

@@ -202,6 +202,41 @@ const RARITY_ORDER: &[&str] = &[
     "end_city",
 ];
 
+/// How many of a grid's candidates really generate, measured over thousands of cells on several
+/// seeds. Depends a little on the seed, it is used to know how many to look for.
+const REAL_RATES: &[(&str, f64)] = &[
+    ("village", 0.239),
+    ("pillager_outpost", 0.032),
+    ("mineshaft", 0.0037),
+    ("desert_pyramid", 0.012),
+    ("jungle_temple", 0.019),
+    ("swamp_hut", 0.010),
+    ("igloo", 0.057),
+    ("ocean_monument", 0.091),
+    ("woodland_mansion", 0.021),
+    ("ocean_ruin", 0.30),
+    ("shipwreck", 0.33),
+    ("buried_treasure", 0.00029),
+    ("ruined_portal", 0.99),
+    ("ancient_city", 0.028),
+    ("trail_ruins", 0.11),
+    ("trial_chambers", 0.96),
+    ("fortress", 0.49),
+    ("bastion", 0.51),
+    ("nether_fossil", 0.083),
+    ("ruined_portal_nether", 1.0),
+    ("end_city", 0.089),
+    ("end_city_ship", 0.051),
+];
+
+/// How many of a kind's grid candidates really generate.
+pub fn real_rate(kind: usize) -> f64 {
+    REAL_RATES
+        .iter()
+        .find(|(id, _)| *id == STRUCTURE_KINDS[kind].id)
+        .map_or(1.0, |(_, rate)| *rate)
+}
+
 /// The place of a kind in `RARITY_ORDER`, lower is rarer.
 pub fn rarity(kind: usize) -> usize {
     static RANKS: LazyLock<Vec<usize>> = LazyLock::new(|| {
@@ -667,6 +702,38 @@ mod tests {
             }
             assert!(found > 10, "{found}");
         });
+    }
+
+    /// On a seed the table wasn't measured on.
+    #[test]
+    fn real_rates_are_about_right() {
+        for dimension in Dimension::ALL {
+            with_big_stack(move || {
+                let finder = Finder::new(987_654, dimension).unwrap();
+                for (kind, def) in STRUCTURE_KINDS.iter().enumerate() {
+                    if def.dimension != dimension {
+                        continue;
+                    }
+                    let Some(Spread::Grid(spacing)) = spread(kind) else {
+                        continue;
+                    };
+                    // far too rare to measure quickly
+                    if def.id == "buried_treasure" {
+                        continue;
+                    }
+                    let n: i32 = if spacing <= 4 { 250 } else { 50 };
+                    let cells = (0..n).flat_map(|x| (0..n).map(move |z| (x * 29 - 700, z * 31 - 800)));
+                    let real = cells.filter(|&(x, z)| finder.in_cell(kind, x, z).is_some()).count();
+                    let rate = real as f64 / (n * n) as f64;
+                    let table = real_rate(kind);
+                    assert!(
+                        (table / 2.2..table * 2.2).contains(&rate),
+                        "{}: {rate} and not {table}",
+                        def.id
+                    );
+                }
+            });
+        }
     }
 
     #[test]

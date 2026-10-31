@@ -41,6 +41,15 @@ pub fn default_cache_mib() -> u32 {
     1024
 }
 
+/// How many markers at most at the start while they may overlap.
+pub fn default_max_markers() -> usize {
+    #[cfg(target_arch = "wasm32")]
+    if web_sys::window().is_some_and(|w| w.navigator().max_touch_points() > 0) {
+        return 5000;
+    }
+    30_000
+}
+
 pub fn tiles_in_mib(mib: u32) -> usize {
     mib as usize * TILES_PER_MIB
 }

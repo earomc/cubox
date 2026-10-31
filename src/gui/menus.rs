@@ -26,7 +26,6 @@ pub struct Advanced {
     pub search_tries: u32,
     /// spots searched per marker distance, per axis
     pub search_fineness: u32,
-    pub max_overlapping: usize,
     pub max_relief_level: i32,
     pub relief_strength: f32,
     pub fade_seconds: f32,
@@ -38,7 +37,6 @@ impl Default for Advanced {
             marker_size: 22.0,
             search_tries: 8192,
             search_fineness: 2,
-            max_overlapping: 30_000,
             max_relief_level: 5,
             relief_strength: 1.0,
             fade_seconds: 0.15,
@@ -135,10 +133,16 @@ impl Ui {
             ui.checkbox(&mut self.prioritize_rare, "Prioritize rare").on_hover_text(
                 "Where markers compete for space, the rarest kinds get it. Off: every kind has the same chance.",
             );
-            ui.checkbox(&mut self.marker_overlap, "Let markers overlap")
-                .on_hover_text(
-                    "Show what was found even on top of each other, up to a limit. A lot of markers can be slow.",
-                );
+            ui.checkbox(&mut self.marker_overlap, "Let markers overlap").on_hover_text(
+                "As many markers as you allow below, even on top of each other. Without this, as many as there is room for.",
+            );
+            ui.add_enabled_ui(self.marker_overlap, |ui| {
+                ui.horizontal(|ui| {
+                    ui.label("Max markers");
+                    ui.add(egui::Slider::new(&mut self.max_markers, 1000..=200_000).logarithmic(true))
+                        .on_hover_text("How many are looked for and drawn. More takes longer and can make the map slow.");
+                });
+            });
             for kind in self.kinds_here().collect::<Vec<_>>() {
                 ui.horizontal(|ui| {
                     if let Some(icons) = &self.icons {
@@ -311,13 +315,7 @@ impl Ui {
                 ui,
                 "Search detail",
                 egui::Slider::new(&mut advanced.search_fineness, 1..=4),
-                "How many spots are searched per marker distance, per axis. More fills more gaps, with much more work.",
-            );
-            row(
-                ui,
-                "Overlap limit",
-                egui::Slider::new(&mut advanced.max_overlapping, 1000..=200_000).logarithmic(true),
-                "How many markers are drawn at most while they may overlap. Too many can be slow.",
+                "How many candidates are searched for each marker that fits. More fills more gaps, with much more work.",
             );
             row(
                 ui,
