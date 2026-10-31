@@ -239,24 +239,10 @@ impl MapView {
             keys.iter().map(|&key| relief_key(key, detail)).collect()
         });
         // the quick estimate of everything first, shown until the wanted detail is there
-        let mask_key = |key: TileKey| TileKey {
-            layer: Layer::BiomeMask,
-            samples: 1,
-            ..key
-        };
-        let masks: Vec<TileKey> = if settings.highlight {
-            keys.iter().map(|&key| mask_key(key)).collect()
-        } else {
-            Vec::new()
-        };
-        let relief_wanted: Vec<TileKey> = masks
+        let relief_wanted: Vec<TileKey> = keys
             .iter()
-            .copied()
-            .chain(
-                keys.iter()
-                    .filter(|_| relief_detail.is_some_and(|detail| detail != Detail::Estimate))
-                    .map(|&key| relief_key(key, Detail::Estimate)),
-            )
+            .filter(|_| relief_detail.is_some_and(|detail| detail != Detail::Estimate))
+            .map(|&key| relief_key(key, Detail::Estimate))
             .chain(relief.iter().copied())
             .collect();
         tiles.update(&keys, &cover, &relief_wanted, unsettled_for <= 0.0);
@@ -271,6 +257,7 @@ impl MapView {
                 ),
             )
         };
+        let keys_for_masks = keys.clone();
         for key in keys {
             let screen = Rect::from_min_max(
                 self.camera
@@ -298,15 +285,27 @@ impl MapView {
                 out.push(tex, screen, FULL_UV, alpha);
             }
         }
-        for key in masks {
-            let screen = tile_screen(&self.camera, &key);
-            let tile = tiles.get(&key, now);
-            if !tile.as_ref().is_some_and(|(_, alpha)| *alpha >= 1.0) {
-                draw_ancestor(&mut out, tiles, now, key, screen);
-            }
-            if let Some((tex, alpha)) = tile {
-                fading |= alpha < 1.0;
-                out.push(tex, screen, FULL_UV, alpha);
+        if settings.highlight {
+            for &key in &keys_for_masks {
+                let screen = tile_screen(&self.camera, &key);
+                let tile = tiles.get(&key, now);
+                if !tile.as_ref().is_some_and(|(_, alpha)| *alpha >= 1.0)
+                    && let Some((parent, up)) = ancestor(tiles, &key)
+                    && let Some(tex) = tiles.mask(&parent)
+                {
+                    let sub = 1.0 / (1 << up) as f32;
+                    let n = 1 << up;
+                    let uv = Rect::from_min_size(
+                        pos2(key.x.rem_euclid(n) as f32 * sub, key.z.rem_euclid(n) as f32 * sub),
+                        vec2(sub, sub),
+                    );
+                    out.push(tex, screen, uv, 1.0);
+                }
+                if let Some((_, alpha)) = tile
+                    && let Some(tex) = tiles.mask(&key)
+                {
+                    out.push(tex, screen, FULL_UV, alpha);
+                }
             }
         }
         let first_relief_quad = out.quads.len();

@@ -9,7 +9,7 @@ use crate::{
         executor::Executor,
         map_renderer::{MapRenderer, TileTexture},
         resources,
-        world::{Estimates, Task, WorldParams},
+        world::{Biomes, Estimates, Task, WorldParams},
     },
     tile_renderer::{Layer, TileKey},
 };
@@ -26,6 +26,9 @@ struct Entry {
     arrived: f64,
     /// used to build the parent tile
     estimates: Estimates,
+    biomes: Biomes,
+    /// the biome numbers on the GPU, for highlighting
+    mask: Option<Rc<TileTexture>>,
     last_used_frame: u64,
 }
 
@@ -117,17 +120,12 @@ impl TileCache {
         if self.pending.contains(&key) || self.entries.contains_key(&key) {
             return;
         }
-        if let Layer::Relief { .. } | Layer::BiomeMask = key.layer {
+        if matches!(key.layer, Layer::Relief { .. }) {
             if allow_sampling {
-                let task = if key.layer == Layer::BiomeMask {
-                    Task::Mask
-                } else {
-                    Task::Relief
-                };
-                self.queue(key, task);
+                self.queue(key, Task::Relief);
             }
-        } else if let Some(children) = self.finished_children(&key) {
-            self.queue(key, Task::Downsample(children));
+        } else if let Some((children, biomes)) = self.finished_children(&key) {
+            self.queue(key, Task::Downsample(children, biomes));
         } else if self.buildable(&key, MAX_BUILD_DEPTH) {
             for child in children(&key) {
                 self.plan(child, rank, false, ranks);
@@ -161,12 +159,21 @@ impl TileCache {
         Some((entry.texture.clone(), alpha))
     }
 
-    fn finished_children(&self, key: &TileKey) -> Option<[Estimates; 4]> {
+    /// The biome numbers of a tile on the GPU, if it is cached.
+    pub fn mask(&mut self, key: &TileKey) -> Option<Rc<TileTexture>> {
+        self.entries.get(key)?.mask.clone()
+    }
+
+    fn finished_children(&self, key: &TileKey) -> Option<([Estimates; 4], [Biomes; 4])> {
         if key.scale == 0 {
             return None;
         }
-        let [a, b, c, d] = children(key).map(|child| self.entries.get(&child).map(|e| e.estimates.clone()));
-        Some([a?, b?, c?, d?])
+        let [a, b, c, d] = children(key).map(|child| self.entries.get(&child));
+        let [a, b, c, d] = [a?, b?, c?, d?];
+        Some((
+            [a, b, c, d].map(|e| e.estimates.clone()),
+            [a, b, c, d].map(|e| e.biomes.clone()),
+        ))
     }
 
     /// Uploads finished tiles as textures. `now` is the egui time in seconds. Returns true if anything changed.
@@ -182,16 +189,21 @@ impl TileCache {
             // nearest at the finest level so single quarts stay crisp when zoomed in
             let texture = Rc::new(match done.key.layer {
                 Layer::Biome => renderer.create_tile(device, queue, &tile.rgb, TILE_SIZE as u32, done.key.scale == 0),
-                Layer::BiomeMask => renderer.create_mask_tile(device, queue, &tile.rgb, TILE_SIZE as u32),
+
                 Layer::Relief { .. } => renderer.create_rgba_tile(device, queue, &tile.rgb, TILE_SIZE as u32, true),
             });
+            let mask = (done.key.layer == Layer::Biome)
+                .then(|| Rc::new(renderer.create_mask_tile(device, queue, &tile.biomes, TILE_SIZE as u32)));
             let estimates = Arc::new(tile.estimates);
+            let biomes = Arc::new(tile.biomes);
             self.entries.insert(
                 done.key,
                 Entry {
                     texture,
                     arrived: now,
                     estimates,
+                    biomes,
+                    mask,
                     last_used_frame: self.frame,
                 },
             );

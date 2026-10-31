@@ -2,7 +2,9 @@ use std::sync::LazyLock;
 
 use steel_worldgen::biomes::{BiomeSourceKind, ChunkBiomeSampler};
 
-use crate::biome_colors::{biome_color, biome_number};
+use steel_registry::biome::BiomeRef;
+
+use crate::biome_colors::{UNKNOWN_BIOME, biome_color, biome_number};
 
 /// The world border is at ±29,999,984 blocks.
 pub const WORLD_BORDER_QUARTS: i32 = 29_999_984 / 4;
@@ -17,8 +19,6 @@ pub enum Layer {
     Biome,
     /// the hillshade of the terrain, drawn over the biomes, with heights being those of the
     /// `sea_floor` or the water
-    /// the number of the biome at each pixel, to darken the biomes that aren't highlighted
-    BiomeMask,
     Relief {
         detail: Detail,
         sea_floor: bool,
@@ -156,6 +156,8 @@ fn unpack(e: Estimate) -> Lab {
 pub struct Tile {
     pub rgb: Vec<u8>,
     pub estimates: Vec<Estimate>,
+    /// the number of the biome at each pixel, see `biome_number`, for highlighting
+    pub biomes: Vec<u8>,
 }
 
 /// Biome color at a quart position, in Oklab.
@@ -173,6 +175,46 @@ fn average(sampler: &mut ChunkBiomeSampler, x: i32, y: i32, z: i32, offsets: &[i
         }
     }
     sum.map(|s| s / (offsets.len() * offsets.len()) as f32)
+}
+
+/// The number of the biome last asked for, as neighbouring pixels mostly have the same.
+#[derive(Default)]
+struct LastNumber(Option<(BiomeRef, u8)>);
+
+impl LastNumber {
+    fn of(&mut self, biome: BiomeRef) -> u8 {
+        match self.0 {
+            Some((last, number)) if std::ptr::eq(last, biome) => number,
+            _ => {
+                let number = biome_number(&biome.key.path);
+                self.0 = Some((biome, number));
+                number
+            }
+        }
+    }
+}
+
+/// Like `average`, also giving the number of the biome of the first sample.
+fn average_and_number(
+    sampler: &mut ChunkBiomeSampler,
+    last: &mut LastNumber,
+    x: i32,
+    y: i32,
+    z: i32,
+    offsets: &[i32],
+) -> (Lab, u8) {
+    let mut sum = [0f32; 3];
+    let mut number = None;
+    for &oz in offsets {
+        for &ox in offsets {
+            let biome = sampler.sample(x + ox, y, z + oz);
+            number.get_or_insert_with(|| last.of(biome));
+            let c = srgb_to_lab(&biome_color(&biome.key.path));
+            (0..3).for_each(|ch| sum[ch] += c[ch]);
+        }
+    }
+    let lab = sum.map(|s| s / (offsets.len() * offsets.len()) as f32);
+    (lab, number.unwrap_or(UNKNOWN_BIOME))
 }
 
 /// Average color of the whole world at `sample_height`, from 64k samples spread evenly over it.
@@ -300,7 +342,7 @@ fn splitmix(mut x: u64) -> u64 {
 }
 
 /// Shades estimates with `weight` (see `Shading::weight`) into sRGB colors.
-fn shade(estimates: Vec<Estimate>, shading: &Shading, weight: f32) -> Tile {
+fn shade(estimates: Vec<Estimate>, biomes: Vec<u8>, shading: &Shading, weight: f32) -> Tile {
     let mut rgb = vec![0u8; estimates.len() * 3];
     for (pixel, &e) in rgb.as_chunks_mut::<3>().0.iter_mut().zip(&estimates) {
         let avg = unpack(e);
@@ -309,7 +351,7 @@ fn shade(estimates: Vec<Estimate>, shading: &Shading, weight: f32) -> Tile {
             pixel,
         );
     }
-    Tile { rgb, estimates }
+    Tile { rgb, estimates, biomes }
 }
 
 /// Renders one tile, TILE * TILE pixels.
@@ -323,16 +365,30 @@ pub fn render_tile(
     keep_going: &dyn Fn() -> bool,
 ) -> Option<Tile> {
     let size = key.tile_size_px;
-    if shading.is_flat() {
-        return Some(shade(vec![pack(shading.mean); size * size], shading, 0.0));
-    }
     let stride = key.stride();
     let (origin_x, origin_z) = key.origin();
-    let offsets = offsets(stride, key.effective_samples());
     let qy = key.sample_height >> 2; // converting block height to quart height dividing by 4
-
     let mut sampler = source.chunk_sampler();
+    let mut last = LastNumber::default();
+    if shading.is_flat() {
+        // the colors need no sampling here, but highlighting needs to know the biomes
+        let mut biomes = Vec::with_capacity(size * size);
+        for row in 0..size {
+            if !keep_going() {
+                return None;
+            }
+            let pz = origin_z + row as i32 * stride + stride / 2;
+            for col in 0..size {
+                let px = origin_x + col as i32 * stride + stride / 2;
+                biomes.push(last.of(sampler.sample(px, qy, pz)));
+            }
+        }
+        return Some(shade(vec![pack(shading.mean); size * size], biomes, shading, 0.0));
+    }
+    let offsets = offsets(stride, key.effective_samples());
     let mut estimates = Vec::with_capacity(size * size);
+    let mut biomes = Vec::with_capacity(size * size);
+
     for row in 0..size {
         if !keep_going() {
             return None;
@@ -340,35 +396,20 @@ pub fn render_tile(
         let pz = origin_z + row as i32 * stride;
         for col in 0..size {
             let px = origin_x + col as i32 * stride;
-            estimates.push(pack(average(&mut sampler, px, qy, pz, &offsets)));
+            let (lab, number) = average_and_number(&mut sampler, &mut last, px, qy, pz, &offsets);
+            estimates.push(pack(lab));
+            biomes.push(number);
         }
     }
-    Some(shade(estimates, shading, shading.weight(shading.noise)))
+    Some(shade(estimates, biomes, shading, shading.weight(shading.noise)))
 }
 
-/// Samples which biome each pixel of a mask tile is, as a number for the shader. One sample per pixel:
-/// when zoomed out a rare biome is scattered dots, as many as there really are, and not an average.
-pub fn render_mask(source: &BiomeSourceKind, key: TileKey, keep_going: &dyn Fn() -> bool) -> Option<Tile> {
-    let size = key.tile_size_px;
-    let stride = key.stride();
-    let (origin_x, origin_z) = key.origin();
-    let qy = key.sample_height >> 2;
-    let mut sampler = source.chunk_sampler();
-    let mut biomes = Vec::with_capacity(size * size);
-    for row in 0..size {
-        if !keep_going() {
-            return None;
-        }
-        let pz = origin_z + row as i32 * stride + stride / 2;
-        for col in 0..size {
-            let px = origin_x + col as i32 * stride + stride / 2;
-            biomes.push(biome_number(&sampler.sample(px, qy, pz).key.path));
-        }
-    }
-    Some(Tile {
-        rgb: biomes,
-        estimates: Vec::new(),
-    })
+/// One of 0 to 3 that looks random, for a pixel of a tile.
+fn pixel_hash(tile_x: i32, tile_z: i32, x: usize, z: usize) -> usize {
+    let mixed = (x as u64 + (tile_x as u32 as u64) * 131)
+        .wrapping_mul(0x9E37_79B9_7F4A_7C15)
+        .wrapping_add((z as u64 + (tile_z as u32 as u64) * 137).wrapping_mul(0xC2B2_AE3D_27D4_EB4F));
+    (mixed >> 62) as usize
 }
 
 /// Builds a tile from the estimates of its 4 children one scale finer by averaging 2x2 pixels.
@@ -376,13 +417,15 @@ pub fn render_mask(source: &BiomeSourceKind, key: TileKey, keep_going: &dyn Fn()
 /// 4x the samples of a directly rendered tile, so less noise, and are shaded accordingly: they end
 /// up varying just as much as the true averages, like rendered tiles.
 /// `children` are ordered top left, top right, bottom left, bottom right.
-pub fn downsample(children: [&[Estimate]; 4], key: TileKey, shading: &Shading) -> Tile {
+pub fn downsample(children: [&[Estimate]; 4], child_biomes: [&[u8]; 4], key: TileKey, shading: &Shading) -> Tile {
     let size = key.tile_size_px;
     let half = size / 2;
     let mut estimates = Vec::with_capacity(size * size);
+    let mut biomes = Vec::with_capacity(size * size);
     for z in 0..size {
         for x in 0..size {
-            let child = children[(z / half) * 2 + x / half];
+            let which = (z / half) * 2 + x / half;
+            let child = children[which];
             // top left of the 2x2 block in the child
             let (cx, cz) = ((x % half) * 2, (z % half) * 2);
             let mut sum = [0f32; 3];
@@ -391,9 +434,12 @@ pub fn downsample(children: [&[Estimate]; 4], key: TileKey, shading: &Shading) -
                 (0..3).for_each(|ch| sum[ch] += c[ch]);
             }
             estimates.push(pack(sum.map(|s| s * 0.25)));
+            // the biome of one of the 4, by position so that it doesn't look like a pattern
+            let pick = pixel_hash(key.x, key.z, x, z);
+            biomes.push(child_biomes[which][(cz + (pick >> 1)) * size + cx + (pick & 1)]);
         }
     }
-    shade(estimates, shading, shading.weight(shading.noise / 4.0))
+    shade(estimates, biomes, shading, shading.weight(shading.noise / 4.0))
 }
 
 #[cfg(test)]
@@ -405,13 +451,13 @@ mod tests {
     /// Not exactly the same though: the sampler's R-tree lookup starts from the last result,
     /// which breaks ties between equally close biomes depending on the sampling order.
     /// That flips a tiny fraction of samples, so allow a few pixels to differ.
-    use crate::biome_colors::{BIOMES, UNKNOWN_BIOME};
+    use crate::biome_colors::BIOMES;
 
     #[test]
-    fn mask_tiles_say_which_biome_each_pixel_is() {
+    fn tiles_say_which_biome_each_pixel_is() {
         let source = BiomeSourceKind::overworld(12345);
         let key = TileKey {
-            layer: Layer::BiomeMask,
+            layer: Layer::Biome,
             scale: 4,
             sample_height: 256,
             tile_size_px: 16,
@@ -419,16 +465,51 @@ mod tests {
             x: 3,
             z: -2,
         };
-        let tile = render_mask(&source, key, &|| true).unwrap();
-        assert_eq!(tile.rgb.len(), 16 * 16);
+        let exact = Shading::exact([0.5, 0.0, -0.02]);
+        let tile = render_tile(&source, key, &exact, &|| true).unwrap();
+        assert_eq!(tile.biomes.len(), 16 * 16);
         let mut sampler = source.chunk_sampler();
         let (ox, oz) = key.origin();
-        for (i, number) in tile.rgb.iter().enumerate() {
+        for (i, number) in tile.biomes.iter().enumerate() {
             let (x, z) = (ox + (i % 16) as i32 * 16 + 8, oz + (i / 16) as i32 * 16 + 8);
             let biome = sampler.sample(x, 64, z);
             assert_eq!(BIOMES[*number as usize], &*biome.key.path, "pixel {i}");
         }
-        assert!(tile.rgb.iter().any(|n| *n != tile.rgb[0]));
+        assert!(tile.biomes.iter().any(|n| *n != tile.biomes[0]));
+    }
+
+    /// A coarser tile picks among the numbers of its children, the shares of biomes should stay.
+    #[test]
+    fn downsampled_numbers_keep_the_shares_of_biomes() {
+        let size = 128;
+        let child = |n: u8| vec![n; size * size];
+        let (a, b) = (child(1), child(2));
+        let estimates = vec![[0u16; 3]; size * size];
+        let key = TileKey {
+            layer: Layer::Biome,
+            scale: 5,
+            sample_height: 64,
+            tile_size_px: size,
+            samples: 1,
+            x: 0,
+            z: 0,
+        };
+        let exact = Shading::exact([0.5, 0.0, 0.0]);
+        // half of each child is another biome, in a checkerboard
+        let mut mixed = a.clone();
+        for (i, n) in mixed.iter_mut().enumerate() {
+            if ((i % size) + (i / size)) % 2 == 0 {
+                *n = b[0];
+            }
+        }
+        let tile = downsample(
+            [&estimates, &estimates, &estimates, &estimates],
+            [&mixed, &mixed, &mixed, &mixed],
+            key,
+            &exact,
+        );
+        let share = tile.biomes.iter().filter(|n| **n == 2).count() as f64 / tile.biomes.len() as f64;
+        assert!((0.45..0.55).contains(&share), "{share}");
     }
 
     #[test]
@@ -467,7 +548,14 @@ mod tests {
                     render_tile(&source, child, &exact, &|| true).unwrap().estimates
                 })
                 .collect();
-            let down = downsample(std::array::from_fn(|i| children[i].as_slice()), parent, &exact).estimates;
+            let no_biomes = vec![0; size * size];
+            let down = downsample(
+                std::array::from_fn(|i| children[i].as_slice()),
+                std::array::from_fn(|_| no_biomes.as_slice()),
+                parent,
+                &exact,
+            )
+            .estimates;
             let direct = render_tile(&source, parent, &exact, &|| true).unwrap().estimates;
             let differing = down
                 .iter()

@@ -1,7 +1,8 @@
 //! How much of the machine cubox may use, set by the Performance menu.
 
-/// 128x128 tiles are 64 KiB as texture plus 96 KiB of estimates kept for downsampling.
-const TILES_PER_MIB: usize = 6;
+/// 128x128 tiles are 64 KiB as texture plus 96 KiB of estimates kept for downsampling, and their
+/// biome numbers are 16 KiB as texture and 16 KiB kept for downsampling.
+const KIB_PER_TILE: usize = 192;
 
 /// The most threads the slider goes to: all cores.
 #[cfg(not(target_arch = "wasm32"))]
@@ -51,7 +52,7 @@ pub fn default_max_markers() -> usize {
 }
 
 pub fn tiles_in_mib(mib: u32) -> usize {
-    mib as usize * TILES_PER_MIB
+    mib as usize * 1024 / KIB_PER_TILE
 }
 
 /// How threads are divided: `(for tiles, for structures and search)`, never more than `threads`

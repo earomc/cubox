@@ -11,9 +11,7 @@ use steel_worldgen::biomes::BiomeSourceKind;
 use crate::{
     dimension::Dimension,
     terrain::Terrain,
-    tile_renderer::{
-        Estimate, Lab, Layer, Shading, Tile, TileKey, calibrate, downsample, render_mask, render_tile, world_mean,
-    },
+    tile_renderer::{Estimate, Lab, Layer, Shading, Tile, TileKey, calibrate, downsample, render_tile, world_mean},
 };
 
 /// Everything that decides how a tile looks besides its key.
@@ -27,15 +25,15 @@ pub struct WorldParams {
 }
 
 pub type Estimates = Arc<Vec<Estimate>>;
+pub type Biomes = Arc<Vec<u8>>;
 
 /// Work for one tile. The variants are ordered by priority, cheap work first.
 pub enum Task {
     /// average 4 finished children, no sampling needed
-    Downsample([Estimates; 4]),
+    Downsample([Estimates; 4], [Biomes; 4]),
     /// sample the tile
     Render,
-    /// sample the biome numbers of a mask tile
-    Mask,
+
     /// sample the terrain for a relief tile, the most expensive work
     Relief,
 }
@@ -43,10 +41,9 @@ pub enum Task {
 impl Task {
     fn phase(&self) -> u8 {
         match self {
-            Task::Downsample(_) => 0,
+            Task::Downsample(..) => 0,
             Task::Render => 1,
-            Task::Mask => 2,
-            Task::Relief => 3,
+            Task::Relief => 2,
         }
     }
 }
@@ -139,16 +136,19 @@ impl World {
 
     /// Runs a task. `keep_going` is asked while sampling, a tile it says no to is abandoned.
     pub fn run(&self, key: TileKey, task: Task, keep_going: &dyn Fn() -> bool) -> Option<Tile> {
-        match task {
-            Task::Relief => return self.relief(key, keep_going),
-            Task::Mask => return render_mask(&self.source, key, keep_going),
-            _ => {}
+        if matches!(task, Task::Relief) {
+            return self.relief(key, keep_going);
         }
         let shading = self.shading(key);
         match task {
-            Task::Downsample(children) => Some(downsample(children.each_ref().map(|c| c.as_slice()), key, &shading)),
+            Task::Downsample(children, biomes) => Some(downsample(
+                children.each_ref().map(|c| c.as_slice()),
+                biomes.each_ref().map(|b| b.as_slice()),
+                key,
+                &shading,
+            )),
             Task::Render => render_tile(&self.source, key, &shading, keep_going),
-            Task::Mask | Task::Relief => unreachable!(),
+            Task::Relief => unreachable!(),
         }
     }
 
@@ -170,6 +170,7 @@ impl World {
         Some(Tile {
             rgb,
             estimates: Vec::new(),
+            biomes: Vec::new(),
         })
     }
 }

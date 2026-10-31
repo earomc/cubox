@@ -12,8 +12,8 @@ self.onmessage = async (event) => {
       self.postMessage(finder_run(event.data));
       return;
     }
-    const [rgb, estimates] = worker_run(event.data);
-    self.postMessage([rgb, estimates], [rgb.buffer, estimates.buffer]);
+    const [rgb, estimates, biomes] = worker_run(event.data);
+    self.postMessage([rgb, estimates, biomes], [rgb.buffer, estimates.buffer, biomes.buffer]);
   } catch (error) {
     // the main thread frees this worker again and logs it
     self.postMessage({ error: String(error) });
