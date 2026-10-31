@@ -17,6 +17,7 @@ mod map_renderer;
 mod map_view;
 pub(crate) mod menus;
 mod overlays;
+mod resources;
 #[cfg(not(target_arch = "wasm32"))]
 mod script;
 mod tiles;
@@ -252,6 +253,10 @@ struct Ui {
     /// the relief of the sea floor instead of the flat water
     sea_floor: bool,
     zoom_buttons_shown: bool,
+    /// how many threads may work at once
+    threads: usize,
+    /// how much memory finished tiles may take
+    cache_mib: u32,
     /// made when relief is first used, for the height under the cursor
     terrain: Option<Terrain>,
     /// height under the cursor, cached for the quart and the sea floor setting it was sampled at
@@ -387,7 +392,9 @@ impl State {
             icons: None,
             search_filter: String::new(),
             relief: false,
-            relief_quality: ReliefQuality::Medium,
+            relief_quality: ReliefQuality::Auto,
+            threads: resources::default_threads(),
+            cache_mib: resources::CACHE_MIB.2,
             sea_floor: true,
             zoom_buttons_shown: true,
             terrain: None,
@@ -444,6 +451,7 @@ impl State {
                 Command::Structure(which) => ui.script_structure(&which),
                 Command::Relief(on) => ui.relief = on,
                 Command::Quality(quality) => ui.relief_quality = quality,
+                Command::Threads(threads) => ui.threads = threads,
                 Command::SeaFloor(on) => ui.sea_floor = on,
                 Command::ZoomButtons(on) => ui.zoom_buttons_shown = on,
                 Command::ClearSearch => ui.queries.clear_search(),
@@ -469,7 +477,14 @@ impl State {
             return Ok(());
         }
 
-        let raw_input = self.egui_state.take_egui_input(&self.window);
+        #[allow(unused_mut)]
+        let mut raw_input = self.egui_state.take_egui_input(&self.window);
+        // typing on a phone goes through a text field of the page, which takes the focus away from
+        // the canvas. egui would end the editing because of that.
+        #[cfg(target_arch = "wasm32")]
+        if crate::web::keyboard_open() {
+            raw_input.focused = true;
+        }
         let ui = &mut self.ui;
         let full_output = self.egui_ctx.run_ui(raw_input, |root| ui.show(root));
         // a phone only shows its keyboard for a real text field, see web/index.html
@@ -752,9 +767,14 @@ impl Ui {
         let settings = MapSettings {
             sample_height: self.sample_height,
             samples: self.samples,
-            relief_step: (self.relief && self.dimension == Dimension::Overworld).then_some(self.relief_quality.step()),
+            relief: (self.relief && self.dimension == Dimension::Overworld).then_some(self.relief_quality),
             sea_floor: self.sea_floor,
         };
+        let (tile_threads, finder_threads) =
+            resources::share(self.threads, self.tiles.pending() > 0, self.queries.busy());
+        self.tiles.set_thread_limit(tile_threads);
+        self.queries.set_thread_limit(finder_threads);
+        self.tiles.set_max_tiles(resources::tiles_in_mib(self.cache_mib));
         self.quads.clear();
         if self.icons.is_none() {
             self.icons = Some(Icons::load(root.ctx()));
@@ -850,12 +870,18 @@ impl Ui {
             } else {
                 ui.label("");
             }
-            ui.label(format!("Tiles generating: {}", self.tiles.pending()));
+            let relief_tiles = self.tiles.pending_relief();
+            ui.label(format!(
+                "Generating: {} biome, {relief_tiles} height map tiles, {} structure areas",
+                self.tiles.pending() - relief_tiles,
+                self.queries.waiting()
+            ));
             ui.separator();
             self.structures_menu(ui);
             self.search_menu(ui);
             self.terrain_menu(ui, level);
             self.grid_menu(ui);
+            self.performance_menu(ui);
             ui.checkbox(&mut self.zoom_buttons_shown, "Zoom buttons");
         }));
 

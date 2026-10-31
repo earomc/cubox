@@ -15,12 +15,12 @@ use steel_worldgen::{
     biomes::BiomeSourceKind,
     density::{DimensionNoises, NoiseSettings},
     density_functions::overworld::OverworldNoises,
-    noise::LazyAquifer,
+    noise::{LazyAquifer, preliminary_surface_level},
     noise_parameters::get_noise_parameters,
     structure::GenerationContext,
 };
 
-use crate::{dimension::Dimension, seed::generator_seed};
+use crate::{dimension::Dimension, seed::generator_seed, tile_renderer::Detail};
 
 /// The game's registry, which only terrain and structures need, is set up on first use.
 pub(crate) fn init_registry() {
@@ -138,17 +138,24 @@ const FULL_SLOPE_DISTANCE: f32 = 4.0;
 const SEA_LEVEL: i32 = 63;
 
 impl Terrain {
-    /// A hillshade tile of `size * size` pixels, `stride` blocks apart, with a real height sampled
-    /// every `step` pixels and the shading between them interpolated.
+    /// A hillshade tile of `size * size` pixels, `stride` blocks apart. Each height is drawn as one
+    /// square, nothing is made up between them.
     pub fn relief(
         &self,
         origin: [i32; 2],
         stride: i32,
         size: usize,
-        step: usize,
+        detail: Detail,
         ocean_floor: bool,
         keep_going: &dyn Fn() -> bool,
     ) -> Option<Vec<u8>> {
+        let step = match detail {
+            Detail::Estimate => {
+                let heights = self.estimates(origin, stride, size + 2, ocean_floor);
+                return Some(hillshade(&heights, size, 1, stride));
+            }
+            Detail::Exact(step) => step as usize,
+        };
         let distance = stride * step as i32;
         let samples = size / step + 2;
         if !ocean_floor {
@@ -159,6 +166,21 @@ impl Terrain {
         let around = [origin[0] - distance, origin[1] - distance];
         let heights = self.heights(around, distance, samples + 2, true, keep_going)?;
         Some(hillshade(&smooth_sea_floor(&heights, samples), size, step, stride))
+    }
+
+    /// The game's estimate of the surface at `size * size` columns, without looking at the blocks.
+    /// It doesn't know about water, without `ocean_floor` that is added.
+    pub fn estimates(&self, origin: [i32; 2], stride: i32, size: usize, ocean_floor: bool) -> Vec<i32> {
+        let noises = &*self.noises.noises;
+        let mut cache = <OverworldNoises as DimensionNoises>::ColumnCache::default();
+        (0..size * size)
+            .map(|i| {
+                let x = origin[0] + (i % size) as i32 * stride;
+                let z = origin[1] + (i / size) as i32 * stride;
+                let height = preliminary_surface_level(noises, &mut cache, x, z);
+                if ocean_floor { height } else { height.max(SEA_LEVEL) }
+            })
+            .collect()
     }
 }
 
@@ -202,17 +224,8 @@ pub fn hillshade(heights: &[i32], size: usize, step: usize, stride: i32) -> Vec<
     let slope_at = |x: usize, z: usize| (at(x + 1, z) - at(x, z) + at(x, z + 1) - at(x, z)) / (2.0 * distance);
     let mut rgba = Vec::with_capacity(size * size * 4);
     for z in 0..size {
-        let (sample_z, t_z) = (z / step, (z % step) as f32 / step as f32);
         for x in 0..size {
-            let (sample_x, t_x) = (x / step, (x % step) as f32 / step as f32);
-            // exactly the sample if there is one for this pixel
-            let mut slope = slope_at(sample_x, sample_z);
-            if step > 1 {
-                let top = slope + (slope_at(sample_x + 1, sample_z) - slope) * t_x;
-                let left = slope_at(sample_x, sample_z + 1);
-                let bottom = left + (slope_at(sample_x + 1, sample_z + 1) - left) * t_x;
-                slope = top + (bottom - top) * t_z;
-            }
+            let slope = slope_at(x / step, z / step);
             let alpha = (slope.abs() * gain * SHADE_STRENGTH).min(1.0) * MAX_ALPHA;
             let shade = if slope > 0.0 { 255 } else { 0 };
             rgba.extend_from_slice(&[shade, shade, shade, (alpha * 255.0) as u8]);
@@ -236,27 +249,32 @@ mod tests {
     }
 
     #[test]
-    fn sampled_tiles_match_their_samples_and_neighbours() {
+    fn a_height_is_one_square_and_nothing_is_made_up_between() {
+        let heights: Vec<i32> = (0..9 * 9).map(|i: i32| (i * i * 7) % 90).collect();
+        let tile = hillshade(&heights, 28, 4, 8);
+        let at = |x: usize, z: usize| &tile[(z * 28 + x) * 4..(z * 28 + x) * 4 + 4];
+        for (x, z) in [(0, 0), (9, 5), (27, 27)] {
+            assert_eq!(at(x, z), at(x / 4 * 4, z / 4 * 4));
+        }
+    }
+
+    #[test]
+    fn estimates_are_near_the_real_heights() {
         let terrain = Terrain::new(12345);
-        let size = 32;
-        let tile = |x: i32, step| {
-            terrain
-                .relief([1000 + x * size as i32 * 64, 1000], 64, size, step, false, &|| true)
-                .unwrap()
-        };
-        // shading continues over the edge between tiles
-        let (left, right) = (tile(0, 8), tile(1, 8));
-        for z in 0..size {
-            let signed = |rgba: &[u8], x: usize| {
-                let px = &rgba[(z * size + x) * 4..];
-                (if px[0] > 0 { 1.0 } else { -1.0 }) * px[3] as f32
-            };
-            assert!(
-                (signed(&left, size - 1) - signed(&right, 0)).abs() < 40.0,
-                "row {z}: {} {}",
-                signed(&left, size - 1),
-                signed(&right, 0)
-            );
+        let (origin, stride, size) = ([-200_000, -150_000], 3000, 24);
+        for ocean_floor in [false, true] {
+            let exact = terrain.heights(origin, stride, size, ocean_floor, &|| true).unwrap();
+            let estimated = terrain.estimates(origin, stride, size, ocean_floor);
+            let mean = exact.iter().zip(&estimated).map(|(a, b)| (a - b).abs()).sum::<i32>() / exact.len() as i32;
+            println!("off by {mean} on average");
+            assert!(mean < 25, "off by {mean} on average");
+            // land where there is land, sea where there is sea
+            let wrong = exact
+                .iter()
+                .zip(&estimated)
+                .filter(|&(a, b)| (a - 63).abs() > 30 && (a - 63).signum() != (b - 63).signum())
+                .count();
+            assert!(wrong * 20 < exact.len(), "{wrong} of {}", exact.len());
         }
     }
 

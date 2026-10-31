@@ -36,6 +36,7 @@ pub enum Command {
     Structure(String),
     Relief(bool),
     Quality(ReliefQuality),
+    Threads(usize),
     SeaFloor(bool),
     ZoomButtons(bool),
     ClearSearch,
@@ -85,8 +86,9 @@ impl Command {
                 ReliefQuality::ALL
                     .into_iter()
                     .find(|quality| quality.name().eq_ignore_ascii_case(args.first().unwrap_or(&"")))
-                    .context("quality: low, medium, high or full")?,
+                    .context("quality: auto, low, medium, high or full")?,
             ),
+            "threads" => Command::Threads(num(0)? as usize),
             "sea_floor" => Command::SeaFloor(args.first() != Some(&"off")),
             "zoom_buttons" => Command::ZoomButtons(args.first() != Some(&"off")),
             "clear_search" => Command::ClearSearch,

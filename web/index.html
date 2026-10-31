@@ -8,8 +8,12 @@
     <style>
       html, body { margin: 0; height: 100%; overflow: hidden; background: #181818; }
       canvas { display: block; width: 100%; height: 100%; outline: none; touch-action: none; }
-      /* see below. 16px, otherwise iPhones zoom the page when it gets focus */
-      #keyboard { position: fixed; left: 0; bottom: 0; width: 1px; height: 1px; opacity: 0; border: 0; padding: 0; font-size: 16px; }
+      /* see below */
+      #typing { position: fixed; inset: 0 0 auto 0; display: none; gap: 8px; padding: 8px; background: #2a2a2a; }
+      #typing.open { display: flex; }
+      /* 16px, otherwise iPhones zoom the page when it gets focus */
+      #keyboard { flex: 1; min-width: 0; font-size: 16px; padding: 8px; border: 1px solid #666; border-radius: 4px; background: #111; color: #eee; }
+      #done { font-size: 16px; padding: 8px 16px; border: 0; border-radius: 4px; background: #2a6f97; color: #fff; }
       #status {
         position: fixed; inset: 0; display: grid; place-items: center;
         color: #ccc; font: 16px system-ui, sans-serif; pointer-events: none;
@@ -18,32 +22,38 @@
   </head>
   <body>
     <canvas id="cubox" tabindex="0"></canvas>
-    <input id="keyboard" type="text" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" aria-hidden="true">
+    <form id="typing">
+      <input id="keyboard" type="text" placeholder="Type new value" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false">
+      <button id="done" type="submit">Done</button>
+    </form>
     <div id="status">Loading cubox…</div>
     <script type="module">
-      import init, { start, typed } from "./pkg/cubox.js";
+      import init, { start, typed, typed_enter } from "./pkg/cubox.js";
 
-      // A canvas can't open a phone's keyboard, only a real text field can. So one is hidden on the
-      // page, it gets the focus while cubox wants text and passes on what is typed. With a real
-      // keyboard the canvas gets the keys directly and this stays out of the way.
+      // A canvas can't open a phone's keyboard, only a real text field can. So on touch screens a
+      // bar with one shows up while cubox wants text, and what is typed there replaces the text of
+      // the field in cubox. Android opens the keyboard right away. iPhones and iPads only open it
+      // during a tap, there the tap goes on this bar. With a real keyboard and no touch screen the
+      // canvas gets the keys directly and this stays hidden.
+      const typing = document.getElementById("typing");
       const keyboard = document.getElementById("keyboard");
-      const touch = matchMedia("(pointer: coarse)").matches;
-      let open = false;
+      const canvas = document.getElementById("cubox");
+      const touch = navigator.maxTouchPoints > 0 || matchMedia("(pointer: coarse)").matches;
       globalThis.cuboxKeyboard = (wanted) => {
-        open = wanted;
         if (!touch) return;
-        if (wanted) keyboard.focus();
-        else keyboard.blur();
+        typing.classList.toggle("open", wanted);
+        if (wanted) {
+          keyboard.value = "";
+          keyboard.focus();
+        } else {
+          keyboard.blur();
+          canvas.focus();
+        }
       };
-      // iPhones only open it during a touch: if that didn't work above, the next tap does
-      document.addEventListener("touchend", () => { if (touch && open) keyboard.focus(); });
-      keyboard.addEventListener("beforeinput", (event) => {
+      keyboard.addEventListener("input", () => typed(keyboard.value));
+      typing.addEventListener("submit", (event) => {
         event.preventDefault();
-        if (event.inputType.startsWith("delete")) typed(null, "Backspace");
-        else if (event.data) typed(event.data, null);
-      });
-      keyboard.addEventListener("keydown", (event) => {
-        if (event.key === "Enter") typed(null, "Enter");
+        typed_enter();
       });
       const status = document.getElementById("status");
       try {

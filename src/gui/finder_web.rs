@@ -2,7 +2,7 @@
 //! tile workers don't need. They only start when first needed, as each is a copy of the wasm
 //! module. Jobs travel as text, see `Job::encode`.
 
-use std::{cell::RefCell, rc::Rc};
+use std::{cell::RefCell, collections::VecDeque, rc::Rc};
 
 use wasm_bindgen::{JsCast, JsValue, closure::Closure};
 use web_sys::{MessageEvent, Worker, WorkerOptions, WorkerType};
@@ -12,17 +12,11 @@ use crate::{
     gui::finder::{FinderWorld, Job, Reply, WorldQueries},
 };
 
-/// Half of the cores, the others are for the map. Each worker is a copy of the wasm module with
-/// all of the structure data, too much for many on the memory of a phone.
-fn max_workers() -> usize {
-    let Some(navigator) = web_sys::window().map(|w| w.navigator()) else {
-        return 2;
-    };
-    if navigator.max_touch_points() > 0 {
-        return 2;
-    }
-    (navigator.hardware_concurrency() as usize / 2).clamp(2, 4)
-}
+/// Each worker is a copy of the wasm module with all of the structure data, this many are the most
+/// that make sense for its memory.
+const MAX_WORKERS: usize = 8;
+/// Replies are taken once per frame, so workers have this many jobs each not to run dry.
+const JOBS_PER_WORKER: usize = 8;
 
 pub struct Pool {
     inner: Rc<RefCell<Inner>>,
@@ -31,11 +25,14 @@ pub struct Pool {
 struct Inner {
     workers: Vec<Slot>,
     finished: Vec<(u64, Job, Reply)>,
+    /// how many workers may work at once, others only keep their memory until the page is left
+    limit: usize,
 }
 
 struct Slot {
     worker: Worker,
-    busy: Option<(u64, Job)>,
+    /// in the order they were sent, which is the order the replies come in
+    jobs: VecDeque<(u64, Job)>,
 }
 
 impl Pool {
@@ -43,26 +40,41 @@ impl Pool {
         let inner = Rc::new(RefCell::new(Inner {
             workers: Vec::new(),
             finished: Vec::new(),
+            limit: MAX_WORKERS,
         }));
         Self { inner }
     }
 
+    pub fn set_limit(&mut self, threads: usize) {
+        self.inner.borrow_mut().limit = threads.min(MAX_WORKERS);
+    }
+
     pub fn has_idle(&self) -> bool {
         let inner = self.inner.borrow();
-        inner.workers.len() < max_workers() || inner.workers.iter().any(|slot| slot.busy.is_none())
+        inner.workers.len() < inner.limit
+            || inner.workers[..inner.limit]
+                .iter()
+                .any(|slot| slot.jobs.len() < JOBS_PER_WORKER)
     }
 
     pub fn post(&mut self, world: FinderWorld, generation: u64, job: Job) {
-        let all_busy = self.inner.borrow().workers.iter().all(|slot| slot.busy.is_some());
-        if all_busy {
+        let spawn = {
+            let inner = self.inner.borrow();
+            inner.workers.len() < inner.limit && inner.workers.iter().all(|slot| !slot.jobs.is_empty())
+        };
+        if spawn {
             let index = self.inner.borrow().workers.len();
             match spawn_worker(&self.inner, index) {
-                Ok(worker) => self.inner.borrow_mut().workers.push(Slot { worker, busy: None }),
+                Ok(worker) => self.inner.borrow_mut().workers.push(Slot {
+                    worker,
+                    jobs: VecDeque::new(),
+                }),
                 Err(err) => log::error!("starting a finder worker: {err:?}"),
             }
         }
         let mut inner = self.inner.borrow_mut();
-        let Some(slot) = inner.workers.iter_mut().find(|slot| slot.busy.is_none()) else {
+        let limit = inner.limit.min(inner.workers.len());
+        let Some(slot) = inner.workers[..limit].iter_mut().min_by_key(|slot| slot.jobs.len()) else {
             return;
         };
         let message = format!(
@@ -73,7 +85,7 @@ impl Pool {
             job.encode()
         );
         match slot.worker.post_message(&JsValue::from_str(&message)) {
-            Ok(()) => slot.busy = Some((generation, job)),
+            Ok(()) => slot.jobs.push_back((generation, job)),
             Err(err) => log::error!("sending a finder job: {err:?}"),
         }
     }
@@ -91,7 +103,7 @@ fn spawn_worker(inner: &Rc<RefCell<Inner>>, index: usize) -> Result<Worker, JsVa
     let on_message = Closure::<dyn FnMut(MessageEvent)>::new(move |event: MessageEvent| {
         let Some(inner) = weak.upgrade() else { return };
         let mut inner = inner.borrow_mut();
-        let Some((generation, job)) = inner.workers.get_mut(index).and_then(|slot| slot.busy.take()) else {
+        let Some((generation, job)) = inner.workers.get_mut(index).and_then(|slot| slot.jobs.pop_front()) else {
             return;
         };
         // a failed job counts as nothing found, so that it isn't asked again and again

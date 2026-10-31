@@ -42,12 +42,16 @@ cubes/boxes ... so it works in multiple ways I guess ...
 
 - **Structures:** every kind in the game, each with its own icon and switch, off by default. Positions
   come from the game's real generation code, including biome and terrain checks. They show at any zoom: when
-  zoomed far out each spot shows one real structure, and zooming in reveals the rest.
+  zoomed far out, where there are far too many to show, each spot shows one real structure and zooming in reveals
+  the rest. Structures made of jigsaw pieces, like villages, are marked at their center piece.
 - **Search** for the nearest structures or biomes from the middle of the view.
 - **Height map:** the real terrain shaded over the biomes when zoomed in, in the overworld, sea floor included.
-  Choose how many real heights it uses: the higher the quality, the slower.
+  Close up the heights are exact, further out the game's quick estimate is used, about 10 blocks off. The quality
+  setting chooses how many exact heights to use: the higher, the slower.
+- **Performance settings:** how many threads cubox may use and how much memory finished tiles may take.
 - **Distance grid** with block coordinates and a scale bar, with automatic or fixed spacing.
-- **Touch screens:** pinch to zoom, and an on screen keyboard for numbers and seeds in the web version.
+- **Touch screens:** pinch to zoom, and a text bar that opens the on screen keyboard for numbers and seeds in the web
+  version. On iPhones and iPads, tap the bar to open the keyboard.
 
 ## Download
 

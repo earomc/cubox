@@ -5,9 +5,10 @@ use egui::{Color32, Pos2, Rect, Sense, Stroke, StrokeKind, Vec2, pos2, vec2};
 use crate::{
     gui::{
         map_renderer::{Quad, TileTexture},
+        menus::ReliefQuality,
         tiles::{TILE_SIZE, TileCache},
     },
-    tile_renderer::{self, Layer, TileKey},
+    tile_renderer::{self, Detail, Layer, TileKey},
 };
 
 const WORLD_BORDER_QUARTS: f64 = tile_renderer::WORLD_BORDER_QUARTS as f64;
@@ -24,11 +25,8 @@ const MAX_STAND_IN_DOWN: i32 = 3;
 /// coarser with one sample per pixel, 1/16 to 1/64 of the work at the default samples. It keeps up
 /// even while zooming out continuously.
 const COVER_LEVELS: i32 = 2;
-/// The coarsest level with relief. Beyond it the samples are so far apart that the shading is more
-/// noise than terrain.
-pub const MAX_RELIEF_LEVEL: i32 = 3;
-/// Pixels between real heights of the quick relief shown until the wanted quality is there.
-const RELIEF_PREVIEW_STEP: u8 = 8;
+/// The coarsest level with relief. Beyond it the terrain is only noise on this scale.
+pub const MAX_RELIEF_LEVEL: i32 = 5;
 
 pub struct Camera {
     /// world position in the center of the view, in quarts
@@ -64,8 +62,8 @@ impl Camera {
 pub struct MapSettings {
     pub sample_height: i32,
     pub samples: u8,
-    /// draw the terrain over the biomes where possible, with a real height every this many pixels
-    pub relief_step: Option<u8>,
+    /// draw the terrain over the biomes where possible, in this quality
+    pub relief: Option<ReliefQuality>,
     /// the relief is that of the sea floor instead of the water
     pub sea_floor: bool,
 }
@@ -206,25 +204,28 @@ impl MapView {
                 cover.push(coarse);
             }
         }
-        let relief_key = |key: TileKey, step: u8| TileKey {
+        let relief_key = |key: TileKey, detail: Detail| TileKey {
             layer: Layer::Relief {
-                step,
+                detail,
                 sea_floor: settings.sea_floor,
             },
             samples: 1,
             ..key
         };
-        let relief_step = settings.relief_step.filter(|_| level <= MAX_RELIEF_LEVEL);
-        let relief: Vec<TileKey> = relief_step.map_or(Vec::new(), |step| {
-            keys.iter().map(|&key| relief_key(key, step)).collect()
+        let relief_detail = settings
+            .relief
+            .filter(|_| level <= MAX_RELIEF_LEVEL)
+            .map(|quality| quality.detail(level));
+        let relief: Vec<TileKey> = relief_detail.map_or(Vec::new(), |detail| {
+            keys.iter().map(|&key| relief_key(key, detail)).collect()
         });
-        // previews of everything first
-        let relief_preview: Vec<TileKey> = relief_step
-            .filter(|&step| step != RELIEF_PREVIEW_STEP)
-            .map_or(Vec::new(), |_| {
-                keys.iter().map(|&key| relief_key(key, RELIEF_PREVIEW_STEP)).collect()
-            });
-        let relief_wanted: Vec<TileKey> = relief_preview.iter().chain(&relief).copied().collect();
+        // the quick estimate of everything first, shown until the wanted detail is there
+        let relief_wanted: Vec<TileKey> = keys
+            .iter()
+            .filter(|_| relief_detail.is_some_and(|detail| detail != Detail::Estimate))
+            .map(|&key| relief_key(key, Detail::Estimate))
+            .chain(relief.iter().copied())
+            .collect();
         tiles.update(&keys, &cover, &relief_wanted, unsettled_for <= 0.0);
 
         let mut fading = false;
@@ -268,7 +269,7 @@ impl MapView {
             let screen = tile_screen(&self.camera, &key);
             let tile = tiles.get(&key, now);
             if !tile.as_ref().is_some_and(|(_, alpha)| *alpha >= 1.0) {
-                let preview = relief_key(key, RELIEF_PREVIEW_STEP);
+                let preview = relief_key(key, Detail::Estimate);
                 if let Some((tex, alpha)) = tiles.get(&preview, now).filter(|_| preview != key) {
                     fading |= alpha < 1.0;
                     out.push(tex, screen, FULL_UV, alpha);

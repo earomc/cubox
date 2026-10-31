@@ -2,16 +2,22 @@
 
 use crate::{
     dimension::Dimension,
-    gui::{Ui, finder::Target, map_view::MAX_RELIEF_LEVEL, overlays::GridSpacing},
+    gui::{Ui, finder::Target, map_view::MAX_RELIEF_LEVEL, overlays::GridSpacing, resources},
     structures::STRUCTURE_KINDS,
     terrain::Terrain,
+    tile_renderer::Detail,
 };
 
 const ICON_SIZE: f32 = 18.0;
 
-/// How many real heights the height map is made of.
+/// The coarsest level with exact heights at the manual qualities. Beyond it even Full would take
+/// a long time for what are single columns far apart.
+const MAX_EXACT_LEVEL: i32 = 3;
+
+/// How many exact heights the height map is made of.
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum ReliefQuality {
+    Auto,
     Low,
     Medium,
     High,
@@ -19,20 +25,31 @@ pub enum ReliefQuality {
 }
 
 impl ReliefQuality {
-    pub const ALL: [Self; 4] = [Self::Low, Self::Medium, Self::High, Self::Full];
+    pub const ALL: [Self; 5] = [Self::Auto, Self::Low, Self::Medium, Self::High, Self::Full];
 
-    /// Pixels between real heights.
-    pub fn step(self) -> u8 {
-        match self {
+    /// Where the heights of a tile at this level come from.
+    pub fn detail(self, level: i32) -> Detail {
+        let step = match self {
+            Self::Auto => match level {
+                0 => 2,
+                1 => 4,
+                _ => return Detail::Estimate,
+            },
             Self::Low => 8,
             Self::Medium => 4,
             Self::High => 2,
             Self::Full => 1,
+        };
+        if level > MAX_EXACT_LEVEL {
+            Detail::Estimate
+        } else {
+            Detail::Exact(step)
         }
     }
 
     pub fn name(self) -> &'static str {
         match self {
+            Self::Auto => "Auto",
             Self::Low => "Low",
             Self::Medium => "Medium",
             Self::High => "High",
@@ -40,13 +57,14 @@ impl ReliefQuality {
         }
     }
 
-    /// Measured on a desktop core, zoomed out. Close up, Full costs less.
+    /// Measured on a desktop core.
     fn hint(self) -> &'static str {
         match self {
-            Self::Low => "A real height every 8 pixels: 0.3 seconds per tile",
-            Self::Medium => "A real height every 4 pixels: 1 second per tile",
-            Self::High => "A real height every 2 pixels: 3 seconds per tile",
-            Self::Full => "A real height for every pixel: 13 seconds per tile",
+            Self::Auto => "Exact heights close up, the game's quick estimate further out, which shows first everywhere",
+            Self::Low => "An exact height every 8 pixels: 0.3 seconds per tile",
+            Self::Medium => "An exact height every 4 pixels: 1 second per tile",
+            Self::High => "An exact height every 2 pixels: 3 seconds per tile",
+            Self::Full => "An exact height for every pixel: 13 seconds per tile",
         }
     }
 }
@@ -201,7 +219,31 @@ impl Ui {
                 ui.weak("Only in the overworld");
             } else if self.relief && level > MAX_RELIEF_LEVEL {
                 ui.weak("Zoom in to see terrain");
+            } else if self.relief && self.relief_quality.detail(level) == Detail::Estimate {
+                ui.weak("Estimated heights at this zoom, about 10 blocks off");
             }
+        });
+    }
+
+    pub(super) fn performance_menu(&mut self, ui: &mut egui::Ui) {
+        egui::CollapsingHeader::new("Performance").show(ui, |ui| {
+            ui.horizontal(|ui| {
+                ui.label("Threads");
+                ui.add(egui::Slider::new(&mut self.threads, 1..=resources::max_threads()))
+                    .on_hover_text("How many cores cubox uses at most. Fewer leave more for other programs.");
+            });
+            ui.horizontal(|ui| {
+                let (min, max, _) = resources::CACHE_MIB;
+                ui.label("Tile memory");
+                ui.add(
+                    egui::Slider::new(&mut self.cache_mib, min..=max)
+                        .logarithmic(true)
+                        .suffix(" MiB"),
+                )
+                .on_hover_text("Finished tiles kept for going back, the view itself is always kept");
+            });
+            #[cfg(target_arch = "wasm32")]
+            ui.weak("Workers already started keep their memory until the page is reloaded");
         });
     }
 

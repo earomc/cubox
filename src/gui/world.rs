@@ -148,7 +148,7 @@ impl World {
     /// A relief tile: its `rgb` are RGBA pixels and it has no estimates.
     fn relief(&self, key: TileKey, keep_going: &dyn Fn() -> bool) -> Option<Tile> {
         let terrain = self.terrain.get_or_init(|| Terrain::new(self.params.seed));
-        let Layer::Relief { step, sea_floor } = key.layer else {
+        let Layer::Relief { detail, sea_floor } = key.layer else {
             return None;
         };
         let (x, z) = key.origin();
@@ -156,7 +156,7 @@ impl World {
             [x * 4, z * 4],
             key.stride() * 4,
             key.tile_size_px,
-            step as usize,
+            detail,
             sea_floor,
             keep_going,
         )?;

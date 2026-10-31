@@ -67,29 +67,48 @@ pub(crate) fn set_keyboard(open: bool) {
     }
 }
 
+pub(crate) fn keyboard_open() -> bool {
+    WANTS_KEYBOARD.with_borrow(|open| *open)
+}
+
 pub(crate) fn take_typed_events() -> Vec<egui::Event> {
     TYPED.take()
 }
 
-/// Something typed on the on screen keyboard: text, or `Backspace` or `Enter` with `text` null.
+fn press(typed: &mut Vec<egui::Event>, key: egui::Key, modifiers: egui::Modifiers) {
+    for pressed in [true, false] {
+        typed.push(egui::Event::Key {
+            key,
+            physical_key: None,
+            pressed,
+            repeat: false,
+            modifiers,
+        });
+    }
+}
+
+/// The text bar of the page has this text now, which replaces that of the field being edited.
 #[wasm_bindgen]
-pub fn typed(text: Option<String>, key: Option<String>) {
-    TYPED.with_borrow_mut(|typed| match (text, key.as_deref()) {
-        (Some(text), _) => typed.push(egui::Event::Text(text)),
-        (None, Some(name)) => {
-            let Some(key) = egui::Key::from_name(name) else { return };
-            for pressed in [true, false] {
-                typed.push(egui::Event::Key {
-                    key,
-                    physical_key: None,
-                    pressed,
-                    repeat: false,
-                    modifiers: Default::default(),
-                });
-            }
+pub fn typed(text: &str) {
+    TYPED.with_borrow_mut(|typed| {
+        press(typed, egui::Key::A, egui::Modifiers::COMMAND);
+        if text.is_empty() {
+            press(typed, egui::Key::Backspace, egui::Modifiers::NONE);
+        } else {
+            typed.push(egui::Event::Text(text.to_string()));
         }
-        (None, None) => {}
     });
+    draw_again();
+}
+
+/// Editing is done.
+#[wasm_bindgen]
+pub fn typed_enter() {
+    TYPED.with_borrow_mut(|typed| press(typed, egui::Key::Enter, egui::Modifiers::NONE));
+    draw_again();
+}
+
+fn draw_again() {
     WINDOW.with_borrow(|window| {
         if let Some(window) = window {
             window.request_redraw();

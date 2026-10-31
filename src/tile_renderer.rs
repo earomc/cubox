@@ -15,12 +15,40 @@ pub type Lab = [f32; 3];
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum Layer {
     Biome,
-    /// the hillshade of the terrain, drawn over the biomes, with a real height every `step` pixels
-    /// and heights being those of the `sea_floor` or the water
+    /// the hillshade of the terrain, drawn over the biomes, with heights being those of the
+    /// `sea_floor` or the water
     Relief {
-        step: u8,
+        detail: Detail,
         sea_floor: bool,
     },
+}
+
+/// Where a relief tile's heights come from.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub enum Detail {
+    /// the exact height every this many pixels
+    Exact(u8),
+    /// the game's own quick estimate for every pixel, about 10 blocks off on average
+    Estimate,
+}
+
+#[cfg(target_arch = "wasm32")]
+impl Detail {
+    /// A number for web workers that isn't 0, see `gui::executor_web`.
+    pub fn encode(self) -> u8 {
+        match self {
+            Self::Exact(step) => step,
+            Self::Estimate => u8::MAX,
+        }
+    }
+
+    pub fn decode(number: u8) -> Option<Self> {
+        match number {
+            0 => None,
+            u8::MAX => Some(Self::Estimate),
+            step => Some(Self::Exact(step)),
+        }
+    }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]

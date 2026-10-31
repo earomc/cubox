@@ -11,6 +11,7 @@ use std::{
 
 use crate::{
     gui::{
+        resources,
         tiles::TILE_SIZE,
         world::{Finished, Queue, Task, World, WorldParams},
     },
@@ -34,6 +35,9 @@ struct Shared {
     pool: rayon::ThreadPool,
     /// jobs that were spawned but haven't picked a task yet
     idle_workers: AtomicUsize,
+    /// tasks being worked on, and how many may be
+    running: AtomicUsize,
+    limit: AtomicUsize,
     world: Mutex<Arc<World>>,
     tx: mpsc::Sender<Finished>,
 }
@@ -45,10 +49,13 @@ impl Executor {
             shared: Arc::new(Shared {
                 queue: Default::default(),
                 pool: rayon::ThreadPoolBuilder::new()
+                    .num_threads(resources::max_threads())
                     .thread_name(|i| format!("cubox-tiles-{i}"))
                     .build()
                     .expect("creating the tile worker threads"),
                 idle_workers: AtomicUsize::new(0),
+                running: AtomicUsize::new(0),
+                limit: AtomicUsize::new(resources::max_threads()),
                 world: Mutex::new(new_world(params)),
                 tx,
             }),
@@ -63,6 +70,11 @@ impl Executor {
         let mut queue = self.shared.queue.lock().unwrap();
         queue.tasks.clear();
         queue.generation = generation;
+    }
+
+    /// How many tasks may run at once.
+    pub fn set_limit(&mut self, threads: usize) {
+        self.shared.limit.store(threads, Ordering::Relaxed);
     }
 
     pub fn queue(&mut self, key: TileKey, task: Task) {
@@ -118,20 +130,31 @@ impl Shared {
     /// The jobs don't own a task, each one picks the most important task when it starts running.
     fn ensure_workers(this: &Arc<Self>) {
         let tasks = this.queue.lock().unwrap().tasks.len();
-        while this.idle_workers.load(Ordering::Acquire) < tasks {
+        let room = this
+            .limit
+            .load(Ordering::Relaxed)
+            .saturating_sub(this.running.load(Ordering::Relaxed));
+        while this.idle_workers.load(Ordering::Acquire) < tasks.min(room) {
             this.idle_workers.fetch_add(1, Ordering::AcqRel);
             let shared = this.clone();
             this.pool.spawn(move || shared.work());
         }
     }
 
+    /// Works until there is nothing to do or too many are running. A new job per task would only
+    /// start once per frame, which holds up tiles that take less than that.
     fn work(self: Arc<Self>) {
-        let taken = {
-            let mut queue = self.queue.lock().unwrap();
-            self.idle_workers.fetch_sub(1, Ordering::AcqRel);
-            queue.take_best()
-        };
-        let Some((key, task, generation)) = taken else { return };
+        self.idle_workers.fetch_sub(1, Ordering::AcqRel);
+        while self.running.fetch_add(1, Ordering::AcqRel) < self.limit.load(Ordering::Relaxed) {
+            let taken = self.queue.lock().unwrap().take_best();
+            let Some((key, task, generation)) = taken else { break };
+            self.run(key, task, generation);
+            self.running.fetch_sub(1, Ordering::AcqRel);
+        }
+        self.running.fetch_sub(1, Ordering::AcqRel);
+    }
+
+    fn run(&self, key: TileKey, task: Task, generation: u64) {
         // if the seed changed meanwhile this is the new world, but then the result is dropped anyway
         let world = self.world.lock().unwrap().clone();
         // stop as soon as the tile is off screen or the world changed

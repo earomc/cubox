@@ -8,6 +8,7 @@ use crate::{
     gui::{
         executor::Executor,
         map_renderer::{MapRenderer, TileTexture},
+        resources,
         world::{Estimates, Task, WorldParams},
     },
     tile_renderer::{Layer, TileKey},
@@ -17,9 +18,6 @@ use crate::{
 pub const TILE_SIZE: usize = 128;
 /// Seconds a newly arrived texture takes to fade in over whatever was shown before.
 const FADE_SECONDS: f64 = 0.15;
-/// 128x128 tiles are 64 KiB as RGBA texture plus 96 KiB of estimates kept for downsampling,
-/// so this is about 320 MiB. Browsers get less memory.
-const MAX_TILES: usize = if cfg!(target_arch = "wasm32") { 512 } else { 2048 };
 /// How many levels down a tile may be built from cached tiles, through the levels in between.
 const MAX_BUILD_DEPTH: u32 = 4;
 
@@ -41,6 +39,7 @@ pub struct TileCache {
     /// bumped on clear(), so results of tasks for an old seed get dropped
     generation: u64,
     frame: u64,
+    max_tiles: usize,
 }
 
 impl TileCache {
@@ -51,6 +50,7 @@ impl TileCache {
             pending: HashSet::new(),
             generation: 0,
             frame: 0,
+            max_tiles: resources::tiles_in_mib(resources::CACHE_MIB.2),
         }
     }
 
@@ -64,6 +64,23 @@ impl TileCache {
 
     pub fn pending(&self) -> usize {
         self.pending.len()
+    }
+
+    /// Of the tiles waiting or being generated, how many are height map tiles.
+    pub fn pending_relief(&self) -> usize {
+        self.pending
+            .iter()
+            .filter(|key| matches!(key.layer, Layer::Relief { .. }))
+            .count()
+    }
+
+    /// How many tiles may be generated at once.
+    pub fn set_thread_limit(&mut self, threads: usize) {
+        self.executor.set_limit(threads);
+    }
+
+    pub fn set_max_tiles(&mut self, tiles: usize) {
+        self.max_tiles = tiles;
     }
 
     /// Starts a new frame. `visible` are the tiles the map view wants to show, most important
@@ -154,7 +171,7 @@ impl TileCache {
             // nearest at the finest level so single quarts stay crisp when zoomed in
             let texture = Rc::new(match done.key.layer {
                 Layer::Biome => renderer.create_tile(device, queue, &tile.rgb, TILE_SIZE as u32, done.key.scale == 0),
-                Layer::Relief { .. } => renderer.create_rgba_tile(device, queue, &tile.rgb, TILE_SIZE as u32, false),
+                Layer::Relief { .. } => renderer.create_rgba_tile(device, queue, &tile.rgb, TILE_SIZE as u32, true),
             });
             let estimates = Arc::new(tile.estimates);
             self.entries.insert(
@@ -174,12 +191,12 @@ impl TileCache {
 
     /// Removes the least recently used tiles if there are too many.
     fn evict(&mut self) {
-        if self.entries.len() <= MAX_TILES {
+        if self.entries.len() <= self.max_tiles {
             return;
         }
         let mut by_age: Vec<(u64, TileKey)> = self.entries.iter().map(|(k, e)| (e.last_used_frame, *k)).collect();
         by_age.sort_unstable_by_key(|(used, _)| *used);
-        let excess = self.entries.len() - MAX_TILES;
+        let excess = self.entries.len() - self.max_tiles;
         for (used, key) in by_age.into_iter().take(excess) {
             if used == self.frame {
                 break; // never evict what's on screen right now

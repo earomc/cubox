@@ -34,9 +34,11 @@ const BIOME_PATCH: i32 = 512;
 const STRUCTURE_LIMIT: i64 = 300_000;
 /// Results a search ends at.
 const SEARCH_RESULTS: usize = 10;
-/// Structures shown are at least this far apart when zoomed out, in points. What this keeps from
-/// the screen is the work: it stays the same however much of the world is visible.
-const MIN_BIN_POINTS: f64 = 48.0;
+/// When zoomed far out one structure is shown for each square of this many points. The work then
+/// stays the same however much of the world is visible.
+const MIN_BIN_POINTS: f64 = 24.0;
+/// Bins up to this level show everything in them instead of one structure.
+const COMPLETE_LEVEL: u32 = 1;
 /// Bins per axis of a job when zoomed out.
 const FAR_JOB_SIDE: i32 = 4;
 /// The edge of the world in blocks.
@@ -215,7 +217,13 @@ impl WorldQueries {
                     });
                     (*z..z + side)
                         .flat_map(|z| (*x..x + side).map(move |x| (x, z)))
-                        .filter_map(|(x, z)| finder.in_bin(*kind, *level, x, z, budget))
+                        .flat_map(|(x, z)| {
+                            if *level <= COMPLETE_LEVEL {
+                                finder.all_in_bin(*kind, *level, x, z)
+                            } else {
+                                finder.in_bin(*kind, *level, x, z, budget).into_iter().collect()
+                            }
+                        })
                         .collect()
                 });
                 Reply::Found(found)
@@ -343,6 +351,8 @@ pub struct Queries {
     rings: HashMap<usize, Vec<Found>>,
     in_flight: HashSet<Job>,
     pub search: Option<Search>,
+    /// jobs for the view that aren't answered yet
+    waiting: usize,
 }
 
 impl Queries {
@@ -355,7 +365,18 @@ impl Queries {
             rings: HashMap::new(),
             in_flight: HashSet::new(),
             search: None,
+            waiting: 0,
         }
+    }
+
+    /// How many threads may work at once.
+    pub fn set_thread_limit(&mut self, threads: usize) {
+        self.pool.set_limit(threads);
+    }
+
+    /// How many areas of the view structures are being looked for in.
+    pub fn waiting(&self) -> usize {
+        self.waiting
     }
 
     /// Forgets everything if the world changed. The height only changes what biome searches see.
@@ -367,6 +388,7 @@ impl Queries {
         self.world = world;
         self.generation += 1;
         self.in_flight.clear();
+        self.waiting = 0;
         self.search = None;
         if !same_structures {
             self.bins.clear();
@@ -375,7 +397,7 @@ impl Queries {
     }
 
     pub fn busy(&self) -> bool {
-        !self.in_flight.is_empty() || self.search.as_ref().is_some_and(|search| !search.done)
+        self.waiting > 0 || !self.in_flight.is_empty() || self.search.as_ref().is_some_and(|search| !search.done)
     }
 
     pub fn clear_search(&mut self) {
@@ -399,7 +421,11 @@ impl Queries {
         match spread(kind) {
             None => Visible::default(),
             Some(Spread::Rings) => Visible {
-                jobs: vec![Job::Rings { kind }],
+                jobs: if self.rings.contains_key(&kind) {
+                    Vec::new()
+                } else {
+                    vec![Job::Rings { kind }]
+                },
                 known: self.rings.get(&kind).cloned().unwrap_or_default(),
                 sampled: false,
             },
@@ -417,7 +443,7 @@ impl Queries {
                     |&(x, z): &(i64, i64)| (x as f64 + 0.5 - center[0]).powi(2) + (z as f64 + 0.5 - center[1]).powi(2);
                 blocks.sort_by(|a, b| distance(a).total_cmp(&distance(b)));
                 let mut visible = Visible {
-                    sampled: 4u64.saturating_pow(level) > bin_budget(spacing) as u64,
+                    sampled: level > COMPLETE_LEVEL,
                     ..Default::default()
                 };
                 for (x, z) in blocks {
@@ -467,6 +493,7 @@ impl Queries {
     /// Takes the workers' answers and gives idle workers the next jobs: for the search first, then
     /// `wanted`, most important first.
     pub fn update(&mut self, wanted: &[Job]) {
+        self.waiting = wanted.len();
         let replies: Vec<_> = self.pool.finished().collect();
         for (generation, job, reply) in replies {
             if generation != self.generation {
@@ -682,6 +709,30 @@ mod tests {
         assert!(villages.is_sorted_by_key(|r| distance(r) as i64));
         let kind = STRUCTURE_KINDS.iter().position(|kind| kind.id == "stronghold").unwrap();
         assert_eq!(run_search(Target::Structure(kind)).len(), SEARCH_RESULTS);
+    }
+
+    #[test]
+    fn nothing_is_waiting_once_everything_is_answered() {
+        let mut queries = Queries::new(FinderWorld {
+            seed: 12345,
+            dimension: Dimension::Overworld,
+            sample_height: 256,
+        });
+        let stronghold = STRUCTURE_KINDS.iter().position(|kind| kind.id == "stronghold").unwrap();
+        let village = STRUCTURE_KINDS.iter().position(|kind| kind.id == "village").unwrap();
+        let (min, max) = ([-1000.0, -1000.0], [1000.0, 1000.0]);
+        for _ in 0..30_000 {
+            let mut jobs = queries.visible(stronghold, min, max, 16.0).jobs;
+            jobs.extend(queries.visible(village, min, max, 16.0).jobs);
+            queries.update(&jobs);
+            if !queries.busy() {
+                assert_eq!(queries.waiting(), 0);
+                assert_eq!(queries.visible(stronghold, min, max, 16.0).known.len(), 128);
+                return;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+        panic!("still {} waiting", queries.waiting());
     }
 
     #[test]

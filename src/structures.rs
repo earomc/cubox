@@ -159,10 +159,11 @@ pub fn spread(kind: usize) -> Option<Spread> {
     SPREADS[kind]
 }
 
-/// Candidates tried at most per bin of `Finder::in_bin` for a grid of this spacing. Tight grids
-/// have cheap but rarely real candidates.
+/// Candidates tried at most per bin of `Finder::in_bin` for a grid of this spacing. Those that
+/// fail mostly do so at the cheap checks, and the search ends at the first real one. Tight grids
+/// have many candidates of which few are real.
 pub fn bin_budget(spacing: i32) -> u32 {
-    if spacing <= 4 { 256 } else { 16 }
+    if spacing <= 4 { 1024 } else { 128 }
 }
 
 thread_local! {
@@ -184,6 +185,8 @@ pub struct Finder {
     generator: StructureGenerator,
     /// only made when strongholds are wanted
     ring_generator: OnceLock<Option<StructureGenerator>>,
+    /// assemble all pieces like the game, only to test that it comes to the same
+    assemble_all: bool,
     /// the placement of each kind that exists in this dimension
     sets: Vec<KindSet>,
 }
@@ -191,17 +194,32 @@ pub struct Finder {
 struct KindSet {
     kind: usize,
     placement: StructurePlacement,
-    /// the only biomes at which assembling is worth it, see `Finder::might_generate`
+    /// the biomes the game requires, see `Finder::might_generate`, if checking them first is worth it
     biomes: Option<FxHashSet<Identifier>>,
+    /// offsets from the chunk's corner where the game can check the biome, in blocks
+    biome_offsets: &'static [i32],
 }
 
-/// Villages assemble their center before the game checks the biome, 23ms per candidate compared to
-/// under 1ms of other kinds, and most candidates are in the wrong biome.
-const CHECK_BIOME_FIRST: &[&str] = &["village"];
-/// Where the center of a village can be: the middle of the chunk give or take its size, in blocks.
-const CENTER_OFFSETS: [i32; 5] = [-32, -8, 8, 24, 48];
-/// Heights the surface can be at, the biome barely changes between them. In blocks.
-const SURFACE_HEIGHTS: [i32; 4] = [48, 80, 128, 192];
+/// Nearly all candidates of these really generate, a check up front would only cost time.
+const USUALLY_REAL: &[&str] = &["ruined_portal", "ruined_portal_nether", "trial_chambers"];
+/// This checks the biome at a random spot of its chunk, and nearly all of it is one biome anyway.
+const CHECKED_ANYWHERE: &[&str] = &["nether_fossil"];
+/// These check the biome at a piece that can be away from the middle of the chunk.
+const CHECKED_AWAY_FROM_MIDDLE: &[&str] = &[
+    "village",
+    "pillager_outpost",
+    "ancient_city",
+    "trail_ruins",
+    "bastion",
+    "woodland_mansion",
+];
+const MIDDLE: &[i32] = &[8];
+const AROUND_MIDDLE: &[i32] = &[-32, -8, 8, 24, 48];
+/// Heights the game can check the biome at, which depend on terrain it hasn't looked at yet. The
+/// biome changes slowly with the height. In blocks, the likeliest first.
+const CHECK_HEIGHTS: [i32; 21] = [
+    64, 80, 48, 96, 32, 112, 16, 128, 0, 144, -16, 160, -32, 176, -48, 192, -64, 208, 224, 240, 256,
+];
 
 impl Finder {
     pub fn new(seed: i64, dimension: Dimension) -> anyhow::Result<Self> {
@@ -237,7 +255,12 @@ impl Finder {
                 Some(KindSet {
                     kind: index,
                     placement: set.placement.clone(),
-                    biomes: CHECK_BIOME_FIRST.contains(&kind.id).then(|| {
+                    biome_offsets: if CHECKED_AWAY_FROM_MIDDLE.contains(&kind.id) {
+                        AROUND_MIDDLE
+                    } else {
+                        MIDDLE
+                    },
+                    biomes: (!USUALLY_REAL.contains(&kind.id) && !CHECKED_ANYWHERE.contains(&kind.id)).then(|| {
                         REGISTRY
                             .structures
                             .iter()
@@ -254,6 +277,7 @@ impl Finder {
             noises,
             generator,
             ring_generator: OnceLock::new(),
+            assemble_all: false,
             sets,
         })
     }
@@ -282,20 +306,24 @@ impl Finder {
             separation,
             spread_type,
         );
-        if !self.might_generate(set, chunk) {
+        // the cheapest first: this is only a random number for kinds that are rare on purpose
+        if !set.placement.is_structure_chunk(self.seed, chunk.0.x, chunk.0.y, None) || !self.might_generate(set, chunk)
+        {
             return None;
         }
         self.at_chunk(&self.generator, kind, chunk)
     }
 
-    /// False if the kind can't generate in the chunk because of the biome around its middle.
+    /// False if the kind can't generate in the chunk because of the biome around its middle. The
+    /// game finds this out too, but only after scanning heights or assembling pieces, which most
+    /// candidates would be wasted on. `shortcuts_change_nothing` makes sure this comes to the same.
     fn might_generate(&self, set: &KindSet, chunk: ChunkPos) -> bool {
         let Some(biomes) = &set.biomes else { return true };
         let mut sampler = self.source.chunk_sampler();
         let (x, z) = (chunk.0.x * 16, chunk.0.y * 16);
-        CENTER_OFFSETS.iter().any(|dx| {
-            CENTER_OFFSETS.iter().any(|dz| {
-                SURFACE_HEIGHTS
+        set.biome_offsets.iter().any(|dx| {
+            set.biome_offsets.iter().any(|dz| {
+                CHECK_HEIGHTS
                     .iter()
                     .any(|y| biomes.contains(&sampler.sample((x + dx) >> 2, y >> 2, (z + dz) >> 2).key))
             })
@@ -309,10 +337,24 @@ impl Finder {
         let tries = 4u64.saturating_pow(level).min(budget as u64);
         (0..tries).find_map(|index| {
             let (cell_x, cell_z) = bin_candidate(level, x, z, index);
-            // bins at the edge of the world reach past it
-            self.in_cell(kind, cell_x, cell_z)
-                .filter(|found| found.x.abs().max(found.z.abs()) as i64 <= WORLD_BORDER_QUARTS as i64 * 4)
+            self.in_world(kind, cell_x, cell_z)
         })
+    }
+
+    /// All structures of `kind` in a bin of `4^level` grid cells.
+    pub fn all_in_bin(&self, kind: usize, level: u32, x: i32, z: i32) -> Vec<Found> {
+        (0..1u64 << (2 * level))
+            .filter_map(|index| {
+                let (cell_x, cell_z) = bin_candidate(level, x, z, index);
+                self.in_world(kind, cell_x, cell_z)
+            })
+            .collect()
+    }
+
+    /// `in_cell` without what is past the edge of the world, which bins at the edge reach into.
+    fn in_world(&self, kind: usize, cell_x: i32, cell_z: i32) -> Option<Found> {
+        self.in_cell(kind, cell_x, cell_z)
+            .filter(|found| found.x.abs().max(found.z.abs()) as i64 <= WORLD_BORDER_QUARTS as i64 * 4)
     }
 
     /// All structures of a kind with `Spread::Rings`, which really generate.
@@ -343,7 +385,8 @@ impl Finder {
             .collect()
     }
 
-    /// Runs the game's structure start generation for a chunk.
+    /// Runs the game's structure start generation for a chunk. The position of structures made of
+    /// jigsaw pieces is that of their center piece, like a village's meeting point.
     fn at_chunk(&self, generator: &StructureGenerator, kind: usize, chunk: ChunkPos) -> Option<Found> {
         let structures = STRUCTURE_KINDS[kind].structures;
         let starts = match &self.noises {
@@ -373,7 +416,7 @@ impl Finder {
         let mut height_cache = Default::default();
         let mut aquifer = LazyAquifer::new(chunk_x * 16, chunk_z * 16, &noises.splitter, &*noises.noises);
         let (mut surface_y_cache, mut height_cache_grid_ready) = (None, false);
-        let mut ctx = GenerationContext::<'_, '_, N>::new(
+        let ctx = GenerationContext::<'_, '_, N>::new(
             self.seed,
             chunk_x,
             chunk_z,
@@ -388,6 +431,8 @@ impl Finder {
             &mut surface_y_cache,
             &mut height_cache_grid_ready,
         );
+        // a marker needs no more than where it starts
+        let mut ctx = if self.assemble_all { ctx } else { ctx.with_locate_only() };
         generator.generate_starts_for_chunk(&mut ctx, |_| false)
     }
 }
@@ -465,47 +510,88 @@ mod tests {
         });
     }
 
-    /// Compares with the game's code without shortcuts: the full set of structures, no biome check
-    /// up front.
+    /// Compares with the game's code without shortcuts: the full set of structures, no checks up
+    /// front. A lot of candidates, because a check that is wrong now and then would lose structures.
     #[test]
     fn shortcuts_change_nothing() {
+        let threads: Vec<_> = Dimension::ALL
+            .into_iter()
+            .map(|dimension| {
+                std::thread::Builder::new()
+                    .stack_size(16 << 20)
+                    .spawn(move || {
+                        let finder = Finder::new(12345, dimension).unwrap();
+                        let full = POOL.with(|pool| {
+                            StructureGenerator::vanilla(finder.seed, None, &finder.source, pool.as_ref().unwrap())
+                        });
+                        let mut real = 0;
+                        for (kind, def) in STRUCTURE_KINDS.iter().enumerate() {
+                            if def.dimension != dimension {
+                                continue;
+                            }
+                            let Some(Spread::Grid(_)) = spread(kind) else { continue };
+                            let set = finder.set(kind).unwrap();
+                            let PlacementKind::RandomSpread {
+                                spacing,
+                                separation,
+                                spread_type,
+                            } = set.placement.kind
+                            else {
+                                continue;
+                            };
+                            let n = match def.id {
+                                "village" => 40,
+                                "mineshaft" | "buried_treasure" | "nether_fossil" => 30,
+                                _ => 50,
+                            };
+                            for (x, z) in (0..n).flat_map(|x| (0..n).map(move |z| (x, z))) {
+                                let (x, z) = (x * 13 - 200, z * 11 + 50);
+                                let chunk = StructurePlacement::get_potential_structure_chunk(
+                                    finder.seed,
+                                    set.placement.salt,
+                                    x * spacing,
+                                    z * spacing,
+                                    spacing,
+                                    separation,
+                                    spread_type,
+                                );
+                                let ours = finder.in_cell(kind, x, z);
+                                assert_eq!(ours, finder.at_chunk(&full, kind, chunk), "{} at {x} {z}", def.id);
+                                real += ours.is_some() as i32;
+                            }
+                        }
+                        println!("{dimension:?}: {real} real");
+                        assert!(real > 100, "{dimension:?}: {real}");
+                    })
+                    .unwrap()
+            })
+            .collect();
+        for thread in threads {
+            thread.join().unwrap();
+        }
+    }
+
+    #[test]
+    fn stopping_at_the_center_piece_finds_the_same() {
         with_big_stack(|| {
             let finder = Finder::new(12345, Dimension::Overworld).unwrap();
-            let full = POOL
-                .with(|pool| StructureGenerator::vanilla(finder.seed, None, &finder.source, pool.as_ref().unwrap()));
+            let mut whole = Finder::new(12345, Dimension::Overworld).unwrap();
+            whole.assemble_all = true;
             let mut real = 0;
-            for (kind, def) in STRUCTURE_KINDS.iter().enumerate() {
-                if def.dimension != Dimension::Overworld {
-                    continue;
-                }
-                let Some(Spread::Grid(_)) = spread(kind) else { continue };
-                let set = finder.set(kind).unwrap();
-                let PlacementKind::RandomSpread {
-                    spacing,
-                    separation,
-                    spread_type,
-                } = set.placement.kind
-                else {
-                    continue;
-                };
-                let n = if def.id == "village" { 30 } else { 12 };
-                for (x, z) in (0..n).flat_map(|x| (0..n).map(move |z| (x, z))) {
-                    let (x, z) = (x * 13 - 200, z * 11 + 50);
-                    let chunk = StructurePlacement::get_potential_structure_chunk(
-                        finder.seed,
-                        set.placement.salt,
-                        x * spacing,
-                        z * spacing,
-                        spacing,
-                        separation,
-                        spread_type,
-                    );
-                    let ours = finder.in_cell(kind, x, z);
-                    assert_eq!(ours, finder.at_chunk(&full, kind, chunk), "{} at {x} {z}", def.id);
-                    real += ours.is_some() as i32;
+            for id in ["village", "pillager_outpost", "ancient_city", "trail_ruins"] {
+                let kind = STRUCTURE_KINDS.iter().position(|k| k.id == id).unwrap();
+                for (x, z) in (0..14).flat_map(|x| (0..14).map(move |z| (x * 13 - 90, z * 11 + 50))) {
+                    let (center, assembled) = (finder.in_cell(kind, x, z), whole.in_cell(kind, x, z));
+                    assert_eq!(center.is_some(), assembled.is_some(), "{id} at {x} {z}");
+                    if let (Some(center), Some(assembled)) = (center, assembled) {
+                        real += 1;
+                        // no further than a big structure reaches
+                        let distance = (center.x - assembled.x).abs().max((center.z - assembled.z).abs());
+                        assert!(distance < 128, "{id} at {x} {z}: {distance}");
+                    }
                 }
             }
-            assert!(real > 100, "{real}");
+            assert!(real > 20, "{real}");
         });
     }
 

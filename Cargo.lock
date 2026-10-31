@@ -3483,7 +3483,7 @@ checksum = "a2eb9349b6444b326872e140eb1cf5e7c522154d69e7a0ffb0fb81c06b37543f"
 [[package]]
 name = "steel-macros"
 version = "0.15.3+mc26.2"
-source = "git+https://github.com/earomc/SteelMC?rev=8b8f27491e30a134aa1b257247fda36e19e009c8#8b8f27491e30a134aa1b257247fda36e19e009c8"
+source = "git+https://github.com/earomc/SteelMC?rev=36e800c10dc2d2524555126079afedef7a71aa76#36e800c10dc2d2524555126079afedef7a71aa76"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -3493,12 +3493,12 @@ dependencies = [
 [[package]]
 name = "steel-math"
 version = "0.15.3+mc26.2"
-source = "git+https://github.com/earomc/SteelMC?rev=8b8f27491e30a134aa1b257247fda36e19e009c8#8b8f27491e30a134aa1b257247fda36e19e009c8"
+source = "git+https://github.com/earomc/SteelMC?rev=36e800c10dc2d2524555126079afedef7a71aa76#36e800c10dc2d2524555126079afedef7a71aa76"
 
 [[package]]
 name = "steel-registry"
 version = "0.15.3+mc26.2"
-source = "git+https://github.com/earomc/SteelMC?rev=8b8f27491e30a134aa1b257247fda36e19e009c8#8b8f27491e30a134aa1b257247fda36e19e009c8"
+source = "git+https://github.com/earomc/SteelMC?rev=36e800c10dc2d2524555126079afedef7a71aa76#36e800c10dc2d2524555126079afedef7a71aa76"
 dependencies = [
  "bitflags 2.13.2",
  "flate2",
@@ -3523,7 +3523,7 @@ dependencies = [
 [[package]]
 name = "steel-utils"
 version = "0.15.3+mc26.2"
-source = "git+https://github.com/earomc/SteelMC?rev=8b8f27491e30a134aa1b257247fda36e19e009c8#8b8f27491e30a134aa1b257247fda36e19e009c8"
+source = "git+https://github.com/earomc/SteelMC?rev=36e800c10dc2d2524555126079afedef7a71aa76#36e800c10dc2d2524555126079afedef7a71aa76"
 dependencies = [
  "bitflags 2.13.2",
  "chrono",
@@ -3559,7 +3559,7 @@ dependencies = [
 [[package]]
 name = "steel-worldgen"
 version = "0.15.3+mc26.2"
-source = "git+https://github.com/earomc/SteelMC?rev=8b8f27491e30a134aa1b257247fda36e19e009c8#8b8f27491e30a134aa1b257247fda36e19e009c8"
+source = "git+https://github.com/earomc/SteelMC?rev=36e800c10dc2d2524555126079afedef7a71aa76#36e800c10dc2d2524555126079afedef7a71aa76"
 dependencies = [
  "glam",
  "proc-macro2",

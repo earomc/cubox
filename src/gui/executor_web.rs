@@ -15,8 +15,11 @@ use web_sys::{MessageEvent, Worker, WorkerOptions, WorkerType};
 
 use crate::{
     dimension::Dimension,
-    gui::world::{Finished, Queue, Task, World, WorldParams},
-    tile_renderer::{Estimate, Layer, Tile, TileKey},
+    gui::{
+        resources,
+        world::{Finished, Queue, Task, World, WorldParams},
+    },
+    tile_renderer::{Detail, Estimate, Layer, Tile, TileKey},
 };
 
 /// The worker script next to the page, see `web/worker.js`.
@@ -31,6 +34,8 @@ struct Inner {
     params: WorldParams,
     workers: Vec<Slot>,
     finished: Vec<Finished>,
+    /// how many workers may work at once, others only keep their memory until the page is left
+    limit: usize,
 }
 
 struct Slot {
@@ -46,21 +51,8 @@ impl Executor {
             params,
             workers: Vec::new(),
             finished: Vec::new(),
+            limit: resources::default_threads(),
         }));
-        let navigator = web_sys::window().map(|w| w.navigator());
-        let count = navigator.as_ref().map_or(4.0, |n| n.hardware_concurrency()) as usize;
-        // every worker has its own copy of the world, too much for the memory of a phone
-        let max = if navigator.is_some_and(|n| n.max_touch_points() > 0) {
-            4
-        } else {
-            16
-        };
-        for index in 0..count.clamp(1, max) {
-            match spawn_worker(&inner, index) {
-                Ok(worker) => inner.borrow_mut().workers.push(Slot { worker, busy: None }),
-                Err(err) => log::error!("starting a tile worker: {err:?}"),
-            }
-        }
         Self { inner }
     }
 
@@ -77,14 +69,47 @@ impl Executor {
         self.inner.borrow_mut().queue.tasks.insert(key, task);
     }
 
+    /// How many tasks may run at once.
+    pub fn set_limit(&mut self, threads: usize) {
+        self.inner.borrow_mut().limit = threads;
+    }
+
     /// Sets the wanted tiles (see `Queue::set_rank`) and gives idle workers the most important tasks.
     pub fn update(&mut self, rank: HashMap<TileKey, usize>, pending: &mut HashSet<TileKey>) {
         let mut inner = self.inner.borrow_mut();
         inner.queue.set_rank(rank, pending);
+        // workers start when there is work for them, each takes a while and a lot of memory
+        let wanted = inner.limit.min(inner.queue.tasks.len());
+        let count = inner.workers.len();
+        drop(inner);
+        for index in count..wanted {
+            match spawn_worker(&self.inner, index) {
+                Ok(worker) => self.inner.borrow_mut().workers.push(Slot { worker, busy: None }),
+                Err(err) => {
+                    log::error!("starting a tile worker: {err:?}");
+                    break;
+                }
+            }
+        }
+        self.inner.borrow_mut().dispatch();
+    }
+
+    pub fn finished(&mut self) -> impl Iterator<Item = Finished> + '_ {
+        std::mem::take(&mut self.inner.borrow_mut().finished).into_iter()
+    }
+}
+
+impl Inner {
+    fn dispatch(&mut self) {
         let Inner {
-            queue, params, workers, ..
-        } = &mut *inner;
-        for slot in workers.iter_mut().filter(|slot| slot.busy.is_none()) {
+            queue,
+            params,
+            workers,
+            limit,
+            ..
+        } = self;
+        let usable = (*limit).min(workers.len());
+        for slot in workers[..usable].iter_mut().filter(|slot| slot.busy.is_none()) {
             let Some((key, task, generation)) = queue.take_best() else {
                 break;
             };
@@ -94,10 +119,6 @@ impl Executor {
                 Err(err) => log::error!("sending a tile task: {err:?}"),
             }
         }
-    }
-
-    pub fn finished(&mut self) -> impl Iterator<Item = Finished> + '_ {
-        std::mem::take(&mut self.inner.borrow_mut().finished).into_iter()
     }
 }
 
@@ -117,6 +138,8 @@ fn spawn_worker(inner: &Rc<RefCell<Inner>>, index: usize) -> Result<Worker, JsVa
             log::error!("a tile worker failed: {:?}", event.data());
         }
         inner.finished.push(Finished { generation, key, tile });
+        // right away, some tasks take less than a frame
+        inner.dispatch();
     });
     worker.set_onmessage(Some(on_message.as_ref().unchecked_ref()));
     // lives as long as the page, like the worker
@@ -125,7 +148,7 @@ fn spawn_worker(inner: &Rc<RefCell<Inner>>, index: usize) -> Result<Worker, JsVa
 }
 
 /// `[seed, dimension, sample height, samples setting, scale, x, z, tile size, samples, children,
-/// relief step or 0, relief of the sea floor]`.
+/// relief detail or 0, relief of the sea floor]`.
 /// The seed is a string, JavaScript numbers can't hold all 64 bits. `children` are the estimates
 /// of the 4 children for downsampling, or null to sample the tile.
 fn encode_request(params: &WorldParams, key: TileKey, task: &Task) -> (Array, Array) {
@@ -155,7 +178,7 @@ fn encode_request(params: &WorldParams, key: TileKey, task: &Task) -> (Array, Ar
         children,
         match key.layer {
             Layer::Biome => 0.into(),
-            Layer::Relief { step, .. } => step.into(),
+            Layer::Relief { detail, .. } => detail.encode().into(),
         },
         matches!(key.layer, Layer::Relief { sea_floor: true, .. }).into(),
     ]);
@@ -203,16 +226,15 @@ pub fn worker_run(request: &Array) -> Result<Array, JsValue> {
         sample_height: number(2)? as i32,
         samples: number(3)? as u8,
     };
-    let step = number(10)? as u8;
-    let relief = step > 0;
+    let detail = Detail::decode(number(10)? as u8);
+    let relief = detail.is_some();
     let key = TileKey {
-        layer: if relief {
-            Layer::Relief {
-                step,
+        layer: match detail {
+            Some(detail) => Layer::Relief {
+                detail,
                 sea_floor: request.get(11).is_truthy(),
-            }
-        } else {
-            Layer::Biome
+            },
+            None => Layer::Biome,
         },
         scale: number(4)? as u8,
         x: number(5)? as i32,
