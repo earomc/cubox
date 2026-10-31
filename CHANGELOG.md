@@ -8,6 +8,14 @@ The release workflow publishes the section of a version as its release notes.
 
 ## [Unreleased]
 
+### Added
+
+- The distance grid can be drawn over the structure markers.
+
+### Changed
+
+- Samples per pixel moved to the Advanced menu.
+
 ## [0.3.0] - 2026-10-31
 
 ### Added

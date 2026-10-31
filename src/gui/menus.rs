@@ -290,8 +290,20 @@ impl Ui {
         });
     }
 
-    pub(super) fn advanced_menu(&mut self, ui: &mut egui::Ui) {
+    /// Returns whether the tiles have to be generated anew.
+    pub(super) fn advanced_menu(&mut self, ui: &mut egui::Ui) -> bool {
+        let mut changed = false;
         egui::CollapsingHeader::new("Advanced").show(ui, |ui| {
+            ui.horizontal(|ui| {
+                ui.label("Samples / pixel").on_hover_text(
+                    "Biome samples averaged per pixel. Higher shows more of the real detail far out, but is much slower",
+                );
+                for n in [1u8, 2, 4, 8] {
+                    changed |= ui
+                        .selectable_value(&mut self.samples, n, format!("{}", n as u32 * n as u32))
+                        .changed();
+                }
+            });
             let advanced = &mut self.advanced;
             let row = |ui: &mut egui::Ui, name: &str, slider: egui::Slider, hint: &str| {
                 ui.horizontal(|ui| {
@@ -341,8 +353,11 @@ impl Ui {
             );
             if ui.button("Reset").clicked() {
                 *advanced = Advanced::default();
+                changed |= self.samples != 1;
+                self.samples = 1;
             }
         });
+        changed
     }
 
     /// The plus and minus keys zoom the map, like the zoom buttons, unless they are being typed. With
@@ -448,6 +463,7 @@ impl Ui {
                     });
                 }
                 ui.checkbox(&mut self.grid.labels, "Coordinates");
+                ui.checkbox(&mut self.grid.over_markers, "Over markers");
                 ui.horizontal(|ui| {
                     ui.label("Opacity");
                     ui.add(egui::Slider::new(&mut self.grid.opacity, 0.1..=1.0));

@@ -25,11 +25,11 @@ cubes/boxes ... so it works in multiple ways I guess ...
 
 | Height map | Structures |
 |---|---|
-| ![The overworld with the height map and the settings window](docs/media/ui.webp) | ![Structure markers of all kinds on the overworld](docs/media/structures.webp) |
+| ![The overworld with the height map](docs/media/heightmap.webp) | ![Structure markers of all kinds on the overworld](docs/media/structures.webp) |
 | **The whole world** | **Distance grid** |
-| ![The whole 60 million block world with markers of every kind filling the space](docs/media/world.webp) | ![The height map with a grid of block coordinates](docs/media/grid.webp) |
+| ![The whole 60 million block world covered in markers of every kind under a distance grid](docs/media/world.webp) | ![The height map with a grid of block coordinates](docs/media/grid.webp) |
 | **Nether** | **End** |
-| ![The nether with fortresses and bastions](docs/media/nether.webp) | ![The end with end cities, those with a ship marked](docs/media/end.webp) |
+| ![The nether with fortresses and bastions](docs/media/nether.webp) | ![The end with end cities](docs/media/end.webp) |
 
 **The map**
 
@@ -45,8 +45,8 @@ cubes/boxes ... so it works in multiple ways I guess ...
 
 **Finding things**
 
-- **All structures in the game**, 23 kinds with their own icon and switch, even end cities with a ship. Positions come
-  from the game's real generation code, including biome and terrain checks.
+- **All structures in the game**, each with its own icon and switch. Positions come from the game's real generation
+  code, including biome and terrain checks.
 - **At every zoom:** close up all of them, far out a steady number of real ones that fills the screen. You choose the
   space between markers, or let them overlap and set how many to show. Rare kinds come first if you like.
 - **Search** for the nearest structures or biomes from the middle of the view.
@@ -57,8 +57,7 @@ cubes/boxes ... so it works in multiple ways I guess ...
 
 - **Fast:** everything is generated in the background on all cores, centre first, with quick previews while you zoom.
   How many threads and how much memory it may use is up to you.
-- **Runs in the browser** too, through web workers, with pinch to zoom and a text bar for the on screen keyboard on
-  touch screens. On iPhones and iPads, tap the bar to open the keyboard.
+- **Runs in the browser** too, through web workers, with pinch to zoom and an on screen keyboard on touch screens.
 - **Image export** from the command line.
 
 ## Download

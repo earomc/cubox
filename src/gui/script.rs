@@ -9,6 +9,7 @@
 //! structure village      # show a kind of structure, or `all`, or `none`
 //! relief on              # terrain on the map (off to hide it)
 //! grid on                # the distance grid (off to hide it)
+//! grid_over_markers on   # draw it after the structure markers
 //! search village         # search for a kind of structure or a biome from the view center
 //! goto 1000 -500         # center the view on these block coordinates
 //! zoom 6                 # log2 of quarts per screen point, 0 = 1 quart per point
@@ -47,6 +48,7 @@ pub enum Command {
     ZoomButtons(bool),
     ClearSearch,
     Grid(bool),
+    GridOverMarkers(bool),
     Search(String),
     Goto(f64, f64),
     Zoom(f64),
@@ -104,6 +106,7 @@ impl Command {
             "sea_floor" => Command::SeaFloor(args.first() != Some(&"off")),
             "zoom_buttons" => Command::ZoomButtons(args.first() != Some(&"off")),
             "clear_search" => Command::ClearSearch,
+            "grid_over_markers" => Command::GridOverMarkers(args.first() != Some(&"off")),
             "grid" => Command::Grid(args.first() != Some(&"off")),
             "search" => Command::Search(args.first().context("search: for what")?.to_string()),
             "goto" => Command::Goto(num(0)?, num(1)?),

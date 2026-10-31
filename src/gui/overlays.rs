@@ -201,6 +201,8 @@ pub struct Grid {
     pub custom_spacing: i64,
     pub labels: bool,
     pub opacity: f32,
+    /// drawn after the structure markers instead of before them
+    pub over_markers: bool,
 }
 
 impl Default for Grid {
@@ -211,6 +213,7 @@ impl Default for Grid {
             custom_spacing: 1000,
             labels: true,
             opacity: 0.5,
+            over_markers: false,
         }
     }
 }
@@ -267,11 +270,14 @@ impl Ui {
     /// Paints everything over the map, and asks for what is needed of it. `ui` covers the map.
     pub(super) fn show_overlays(&mut self, ui: &mut egui::Ui) {
         let rect = ui.max_rect();
-        if self.grid.enabled {
+        if self.grid.enabled && !self.grid.over_markers {
             self.paint_grid(ui, rect);
         }
         self.update_structures(ui.ctx(), rect);
         self.paint_markers(ui, rect);
+        if self.grid.enabled && self.grid.over_markers {
+            self.paint_grid(ui, rect);
+        }
         if self.zoom_buttons_shown {
             self.zoom_buttons(ui, rect);
         }

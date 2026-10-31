@@ -494,6 +494,7 @@ impl State {
                 Command::ZoomButtons(on) => ui.zoom_buttons_shown = on,
                 Command::ClearSearch => ui.queries.clear_search(),
                 Command::Grid(on) => ui.grid.enabled = on,
+                Command::GridOverMarkers(on) => ui.grid.over_markers = on,
                 Command::Search(what) => ui.script_search(&what),
                 _ => {}
             }
@@ -842,96 +843,105 @@ impl Ui {
             .default_open(!narrow)
             .default_pos(egui::pos2(8.0, 8.0))
             .max_width((screen.x - 16.0).min(360.0))
-            .show(root.ctx(), |ui| egui::ScrollArea::vertical().max_height(screen.y - 60.0).show(ui, |ui| {
-            egui::Grid::new("settings").num_columns(2).show(ui, |ui| {
-                ui.label("Seed").on_hover_text("A number, negative too, or any text like in Minecraft");
-                if ui.text_edit_singleline(&mut self.seed_text).changed()
-                    && let Some(seed) = parse_seed(&self.seed_text)
-                    && seed != self.seed
-                {
-                    self.seed = seed;
-                    self.biome_source = Arc::new(self.dimension.biome_source(seed));
-                    changed = true;
-                }
-                ui.end_row();
-                // text seeds become a number, show which
-                if self.seed_text.trim() != self.seed.to_string() {
-                    ui.label("");
-                    ui.weak(format!("= {}", self.seed));
-                    ui.end_row();
-                }
-
-                ui.label("Dimension");
-                egui::ComboBox::from_id_salt("dimension").selected_text(self.dimension.name()).show_ui(ui, |ui| {
-                    for dimension in Dimension::ALL {
-                        if ui.selectable_label(dimension == self.dimension, dimension.name()).clicked() && dimension != self.dimension {
-                            new_dimension = Some(dimension);
+            .show(root.ctx(), |ui| {
+                egui::ScrollArea::vertical().max_height(screen.y - 60.0).show(ui, |ui| {
+                    egui::Grid::new("settings").num_columns(2).show(ui, |ui| {
+                        ui.label("Seed")
+                            .on_hover_text("A number, negative too, or any text like in Minecraft");
+                        if ui.text_edit_singleline(&mut self.seed_text).changed()
+                            && let Some(seed) = parse_seed(&self.seed_text)
+                            && seed != self.seed
+                        {
+                            self.seed = seed;
+                            self.biome_source = Arc::new(self.dimension.biome_source(seed));
+                            changed = true;
                         }
-                    }
-                });
-                ui.end_row();
+                        ui.end_row();
+                        // text seeds become a number, show which
+                        if self.seed_text.trim() != self.seed.to_string() {
+                            ui.label("");
+                            ui.weak(format!("= {}", self.seed));
+                            ui.end_row();
+                        }
 
-                ui.label("Height (y)");
-                ui.add_enabled_ui(self.dimension != Dimension::End, |ui| {
-                    let range = if self.dimension == Dimension::Nether { 0..=128 } else { -64..=320 };
-                    changed |= ui.add(egui::Slider::new(&mut self.sample_height, range)).changed();
-                });
-                ui.end_row();
+                        ui.label("Dimension");
+                        egui::ComboBox::from_id_salt("dimension")
+                            .selected_text(self.dimension.name())
+                            .show_ui(ui, |ui| {
+                                for dimension in Dimension::ALL {
+                                    if ui
+                                        .selectable_label(dimension == self.dimension, dimension.name())
+                                        .clicked()
+                                        && dimension != self.dimension
+                                    {
+                                        new_dimension = Some(dimension);
+                                    }
+                                }
+                            });
+                        ui.end_row();
 
-                ui.label("Samples / pixel")
-                    .on_hover_text("Biome samples averaged per pixel and axis. Higher shows more of the real detail far out, but is slower");
-                ui.horizontal(|ui| {
-                    for n in [1u8, 2, 4, 8] {
-                        changed |= ui.selectable_value(&mut self.samples, n, format!("{}", n as u32 * n as u32)).changed();
-                    }
-                });
-                ui.end_row();
+                        ui.label("Height (y)");
+                        ui.add_enabled_ui(self.dimension != Dimension::End, |ui| {
+                            let range = if self.dimension == Dimension::Nether {
+                                0..=128
+                            } else {
+                                -64..=320
+                            };
+                            changed |= ui.add(egui::Slider::new(&mut self.sample_height, range)).changed();
+                        });
+                        ui.end_row();
 
-                ui.label("Go to (x z)");
-                ui.horizontal(|ui| {
-                    for v in &mut self.goto {
-                        let response = ui.add(egui::DragValue::new(v).speed(16.0).update_while_editing(false));
-                        go |= response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+                        ui.label("Go to (x z)");
+                        ui.horizontal(|ui| {
+                            for v in &mut self.goto {
+                                let response = ui.add(egui::DragValue::new(v).speed(16.0).update_while_editing(false));
+                                go |= response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+                            }
+                            go |= ui.button("Go").clicked();
+                        });
+                        ui.end_row();
+                    });
+                    ui.separator();
+
+                    let blocks_per_px = 4u64 << level;
+                    ui.label(format!(
+                        "Level {level}: 1 tile pixel = {blocks_per_px}x{blocks_per_px} blocks"
+                    ));
+                    if let Some(q) = self.map.hovered_quart {
+                        if self.hovered_biome.as_ref().is_none_or(|(at, _)| *at != q) {
+                            let biome = self
+                                .biome_source
+                                .chunk_sampler()
+                                .sample(q[0], self.sample_height >> 2, q[1]);
+                            self.hovered_biome = Some((q, biome.key.path.to_string()));
+                        }
+                        let height = self.hovered_height(q);
+                        let name = &self.hovered_biome.as_ref().unwrap().1;
+                        let height = height.map_or(String::new(), |y| format!(" y {y}"));
+                        ui.label(format!("x {} z {}{height}: {name}", q[0] * 4, q[1] * 4));
+                    } else {
+                        ui.label("");
                     }
-                    go |= ui.button("Go").clicked();
-                });
-                ui.end_row();
+                    let relief_tiles = self.tiles.pending_relief();
+                    ui.label(format!(
+                        "Generating: {} biome, {relief_tiles} height map tiles, {} structure areas",
+                        self.tiles.pending() - relief_tiles,
+                        self.queries.waiting()
+                    ));
+                    if !self.markers.is_empty() {
+                        ui.label(format!("{} markers", self.markers.len()));
+                    }
+                    ui.separator();
+                    self.structures_menu(ui);
+                    self.search_menu(ui);
+                    self.terrain_menu(ui, level);
+                    self.grid_menu(ui);
+                    self.performance_menu(ui);
+                    changed |= self.advanced_menu(ui);
+                    ui.checkbox(&mut self.zoom_buttons_shown, "Zoom buttons");
+                    self.license_notice(ui);
+                })
             });
-            ui.separator();
-
-            let blocks_per_px = 4u64 << level;
-            ui.label(format!("Level {level}: 1 tile pixel = {blocks_per_px}x{blocks_per_px} blocks"));
-            if let Some(q) = self.map.hovered_quart {
-                if self.hovered_biome.as_ref().is_none_or(|(at, _)| *at != q) {
-                    let biome = self.biome_source.chunk_sampler().sample(q[0], self.sample_height >> 2, q[1]);
-                    self.hovered_biome = Some((q, biome.key.path.to_string()));
-                }
-                let height = self.hovered_height(q);
-                let name = &self.hovered_biome.as_ref().unwrap().1;
-                let height = height.map_or(String::new(), |y| format!(" y {y}"));
-                ui.label(format!("x {} z {}{height}: {name}", q[0] * 4, q[1] * 4));
-            } else {
-                ui.label("");
-            }
-            let relief_tiles = self.tiles.pending_relief();
-            ui.label(format!(
-                "Generating: {} biome, {relief_tiles} height map tiles, {} structure areas",
-                self.tiles.pending() - relief_tiles,
-                self.queries.waiting()
-            ));
-            if !self.markers.is_empty() {
-                ui.label(format!("{} markers", self.markers.len()));
-            }
-            ui.separator();
-            self.structures_menu(ui);
-            self.search_menu(ui);
-            self.terrain_menu(ui, level);
-            self.grid_menu(ui);
-            self.performance_menu(ui);
-            self.advanced_menu(ui);
-            ui.checkbox(&mut self.zoom_buttons_shown, "Zoom buttons");
-            self.license_notice(ui);
-        }));
 
         if go {
             self.map.camera.center = [self.goto[0] as f64 / 4.0, self.goto[1] as f64 / 4.0];
