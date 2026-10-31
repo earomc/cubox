@@ -10,7 +10,7 @@ use std::{
 };
 
 use crate::seedfind::{
-    engine::{Match, Plan, SeedWorld},
+    engine::{Cells, Match, Plan, SeedWorld},
     spec::Card,
 };
 
@@ -23,6 +23,9 @@ const UPPER_BITS_TRIED: u64 = 1024;
 const LOCATION_STEP: i32 = 512;
 /// How far out spots are tried when searching one seed, in steps.
 const LOCATION_SHELLS: i32 = 1024;
+/// Matches waiting to be looked at. Beyond that threads wait, a hidden window doesn't look at them
+/// and they must not fill the memory.
+const MAX_WAITING_MATCHES: usize = 4096;
 
 /// Where the seeds come from.
 #[derive(Clone, Debug)]
@@ -89,7 +92,7 @@ pub struct Search {
 impl Search {
     pub fn start(cards: &[Card], seeds: Seeds, threads: usize) -> Self {
         let plan = Arc::new(Plan::new(cards));
-        let (tx, results) = mpsc::channel();
+        let (tx, results) = mpsc::sync_channel(MAX_WAITING_MATCHES);
         let search = Self {
             counters: Default::default(),
             results,
@@ -182,7 +185,7 @@ struct Worker {
     seeds: Arc<Seeds>,
     next: Arc<AtomicU64>,
     counters: Arc<Counters>,
-    tx: mpsc::Sender<Match>,
+    tx: mpsc::SyncSender<Match>,
     stop: Arc<AtomicBool>,
     pause: Arc<AtomicBool>,
     threads: Arc<AtomicUsize>,
@@ -236,17 +239,26 @@ impl Worker {
     fn found(&self, found: Option<Match>) {
         if let Some(found) = found {
             self.counters.matches.fetch_add(1, Ordering::Relaxed);
-            // only fails when the search is being dropped
-            let _ = self.tx.send(found);
+            let mut found = found;
+            loop {
+                match self.tx.try_send(found) {
+                    Err(mpsc::TrySendError::Full(again)) if !self.stop.load(Ordering::Relaxed) => {
+                        found = again;
+                        std::thread::sleep(Duration::from_millis(20));
+                    }
+                    // the rest only happens when the search is being dropped
+                    _ => return,
+                }
+            }
         }
     }
 
-    fn check_seed(&self, seed: i64, cells: &mut Vec<([i32; 2], [i32; 2])>) {
+    fn check_seed(&self, seed: i64, cells: &mut Cells) {
         self.counters.seeds.fetch_add(1, Ordering::Relaxed);
         self.found(self.plan.check(&SeedWorld::new(seed), [0, 0], cells));
     }
 
-    fn one_seed(&self, seed: i64, cells: &mut Vec<([i32; 2], [i32; 2])>) {
+    fn one_seed(&self, seed: i64, cells: &mut Cells) {
         self.counters.bases.fetch_add(1, Ordering::Relaxed);
         if self.plan.lower_bits_pass(seed, cells) {
             self.counters.bases_passed.fetch_add(1, Ordering::Relaxed);
@@ -254,7 +266,7 @@ impl Worker {
         }
     }
 
-    fn random_base(&self, random: u64, cells: &mut Vec<([i32; 2], [i32; 2])>) {
+    fn random_base(&self, random: u64, cells: &mut Cells) {
         if !self.plan.has_positional() {
             return self.one_seed(random as i64, cells);
         }
@@ -273,7 +285,7 @@ impl Worker {
         }
     }
 
-    fn spot(&self, spot: [i32; 2], cells: &mut Vec<([i32; 2], [i32; 2])>) {
+    fn spot(&self, spot: [i32; 2], cells: &mut Cells) {
         self.counters.bases.fetch_add(1, Ordering::Relaxed);
         self.counters.bases_passed.fetch_add(1, Ordering::Relaxed);
         self.counters.seeds.fetch_add(1, Ordering::Relaxed);

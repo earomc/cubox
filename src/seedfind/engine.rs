@@ -20,6 +20,9 @@ const MAX_PATCH_SAMPLES: usize = 1 << 16;
 /// How much of a wanted patch the coarse look has to see before the fine one is done.
 const COARSE_SHARE: f64 = 0.5;
 
+/// Room for the grid cells and chunk middles of candidates, see `candidates`.
+pub type Cells = Vec<([i32; 2], [i32; 2])>;
+
 /// Something a card found.
 #[derive(Clone, PartialEq, Debug)]
 pub struct Hit {
@@ -148,7 +151,7 @@ pub fn best_circle(points: &[[i32; 2]], radius: i32) -> (usize, [i32; 2]) {
 }
 
 /// Drops candidates without enough others close enough to share a circle of `radius` with.
-fn keep_clusterable(cells: &mut Vec<([i32; 2], [i32; 2])>, radius: i32, count: u32) {
+fn keep_clusterable(cells: &mut Cells, radius: i32, count: u32) {
     cells.sort_unstable_by_key(|(_, middle)| middle[0]);
     let reach = 2 * radius as i64;
     let middles: Vec<[i32; 2]> = cells.iter().map(|(_, middle)| *middle).collect();
@@ -170,6 +173,13 @@ fn keep_clusterable(cells: &mut Vec<([i32; 2], [i32; 2])>, radius: i32, count: u
         index += 1;
         close >= count as usize
     });
+}
+
+/// Whether `count` of the candidates can be in a circle of `radius`. Drops those that can't.
+fn could_cluster(cells: &mut Cells, radius: i32, count: u32) -> bool {
+    keep_clusterable(cells, radius, count);
+    let middles: Vec<[i32; 2]> = cells.iter().map(|(_, middle)| *middle).collect();
+    best_circle(&middles, radius).0 >= count as usize
 }
 
 /// Spots on a grid in a circle, the closest to the middle first.
@@ -309,7 +319,7 @@ fn check_biome(world: &SeedWorld, biome: &str, test: BiomeTest, radius: i32, cen
 }
 
 impl SeedWorld {
-    fn check(&self, card: &Card, here: [i32; 2], cells: &mut Vec<([i32; 2], [i32; 2])>) -> Option<Passed> {
+    fn check(&self, card: &Card, here: [i32; 2], cells: &mut Cells) -> Option<Passed> {
         match card {
             Card::Structure {
                 kind,
@@ -354,16 +364,11 @@ impl SeedWorld {
                     cells.clear();
                     candidates(self.seed, *kind, center, *within, cells);
                     let margin = crate::structures::marker_margin(*kind);
-                    let could = |cells: &mut Vec<([i32; 2], [i32; 2])>| {
-                        keep_clusterable(cells, radius + margin, *count);
-                        let middles: Vec<[i32; 2]> = cells.iter().map(|(_, middle)| *middle).collect();
-                        best_circle(&middles, radius + margin).0 >= *count as usize
-                    };
-                    if !could(cells) {
+                    if !could_cluster(cells, radius + margin, *count) {
                         return None;
                     }
                     allowed_by_biomes(self.source(STRUCTURE_KINDS[*kind].dimension), *kind, cells);
-                    if !could(cells) {
+                    if !could_cluster(cells, radius + margin, *count) {
                         return None;
                     }
                 }
@@ -519,7 +524,7 @@ impl Plan {
     }
 
     /// False if no seed with the same lower 48 bits can pass. Needs no world, takes nanoseconds.
-    pub fn lower_bits_pass(&self, seed: i64, cells: &mut Vec<([i32; 2], [i32; 2])>) -> bool {
+    pub fn lower_bits_pass(&self, seed: i64, cells: &mut Cells) -> bool {
         self.positional.iter().all(|&i| match &self.cards[i].1 {
             Card::Structure {
                 kind,
@@ -541,16 +546,14 @@ impl Plan {
                 cells.clear();
                 candidates(seed, *kind, [*x, *z], *within, cells);
                 let reach = radius + crate::structures::marker_margin(*kind);
-                keep_clusterable(cells, reach, *count);
-                let middles: Vec<[i32; 2]> = cells.iter().map(|(_, middle)| *middle).collect();
-                best_circle(&middles, reach).0 >= *count as usize
+                could_cluster(cells, reach, *count)
             }
             _ => true,
         })
     }
 
     /// Checks all cards, `here` is what `Anchor::Here` means.
-    pub fn check(&self, world: &SeedWorld, here: [i32; 2], cells: &mut Vec<([i32; 2], [i32; 2])>) -> Option<Match> {
+    pub fn check(&self, world: &SeedWorld, here: [i32; 2], cells: &mut Cells) -> Option<Match> {
         let mut passed = Vec::with_capacity(self.cards.len());
         for (index, card) in &self.cards {
             passed.push((*index, world.check(card, here, cells)?));

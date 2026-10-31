@@ -273,14 +273,7 @@ impl MapView {
         };
         let keys_for_masks = keys.clone();
         for key in keys {
-            let screen = Rect::from_min_max(
-                self.camera
-                    .world_to_screen(rect, [key.x as f64 * tile_quarts, key.z as f64 * tile_quarts]),
-                self.camera.world_to_screen(
-                    rect,
-                    [(key.x + 1) as f64 * tile_quarts, (key.z + 1) as f64 * tile_quarts],
-                ),
-            );
+            let screen = tile_screen(&self.camera, &key);
             let tile = tiles.get(&key, now);
             // stand ins until the tile is there and has faded in: a coarser tile, and on top of it
             // finer ones, which are sharper but might only cover part of it
@@ -489,19 +482,23 @@ fn has_stand_in(tiles: &TileCache, key: &TileKey) -> bool {
         })
 }
 
+/// Where `key` is in the texture of the tile `up` levels above it.
+fn part_of_ancestor(key: &TileKey, up: i32) -> Rect {
+    let n = 1 << up;
+    let sub = 1.0 / n as f32;
+    Rect::from_min_size(
+        pos2(key.x.rem_euclid(n) as f32 * sub, key.z.rem_euclid(n) as f32 * sub),
+        vec2(sub, sub),
+    )
+}
+
 /// Draws the part of the closest cached coarser tile that covers `key`.
 fn draw_ancestor(out: &mut Quads, tiles: &mut TileCache, now: f64, key: TileKey, screen: Rect) {
     let Some((parent, up)) = ancestor(tiles, &key) else {
         return;
     };
     if let Some((tex, _)) = tiles.get(&parent, now) {
-        let n = 1 << up;
-        let sub = 1.0 / n as f32;
-        let uv = Rect::from_min_size(
-            pos2(key.x.rem_euclid(n) as f32 * sub, key.z.rem_euclid(n) as f32 * sub),
-            vec2(sub, sub),
-        );
-        out.push(tex, screen, uv, 1.0);
+        out.push(tex, screen, part_of_ancestor(&key, up), 1.0);
     }
 }
 
@@ -557,13 +554,7 @@ fn draw_mask_stand_ins(out: &mut Quads, tiles: &mut TileCache, key: TileKey, scr
             cached_mask(tiles, parent).map(|tex| (tex, up))
         });
         if let Some((tex, up)) = parent {
-            let n = 1 << up;
-            let sub = 1.0 / n as f32;
-            let uv = Rect::from_min_size(
-                pos2(key.x.rem_euclid(n) as f32 * sub, key.z.rem_euclid(n) as f32 * sub),
-                vec2(sub, sub),
-            );
-            out.push(tex, screen, uv, alpha);
+            out.push(tex, screen, part_of_ancestor(&key, up), alpha);
         } else if let Some(tex) = tiles.unknown_mask() {
             out.push(tex, screen, FULL_UV, alpha);
         }
@@ -577,12 +568,7 @@ fn draw_descendants(out: &mut Quads, tiles: &mut TileCache, now: f64, key: TileK
     }
     let half = screen.size() / 2.0;
     for (dx, dz) in [(0, 0), (1, 0), (0, 1), (1, 1)] {
-        let child = TileKey {
-            scale: key.scale - 1,
-            x: key.x * 2 + dx,
-            z: key.z * 2 + dz,
-            ..key
-        };
+        let child = child_of(key, dx, dz);
         let child_screen = Rect::from_min_size(screen.min + vec2(dx as f32 * half.x, dz as f32 * half.y), half);
         match cached(tiles, child).and_then(|child| tiles.get(&child, now)) {
             Some((tex, _)) => out.push(tex, child_screen, FULL_UV, 1.0),

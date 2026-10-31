@@ -50,6 +50,7 @@ cubes/boxes ... so it works in multiple ways I guess ...
   code, including biome and terrain checks.
 - **At every zoom:** close up all of them, far out a steady number of real ones that fills the screen. Markers may
   overlap, set how many to show, or keep a space between them. Rare kinds come first if you like.
+- **Noise** overlays show temperature, humidity, continentalness, erosion, weirdness or depth, the values biomes are chosen with.
 - **Seed search** finds seeds or locations with what you ask for: huge mushroom islands, witch huts close together, a village by spawn. On the desktop and with [`cubox find`](docs/seed-search.md).
 - **Seeds like in Minecraft:** numbers, negative ones too, or any text, turned into the same seed the game uses.
 - **Go to coordinates**, and the biome and height under the cursor.
