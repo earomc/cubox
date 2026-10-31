@@ -117,9 +117,14 @@ impl TileCache {
         if self.pending.contains(&key) || self.entries.contains_key(&key) {
             return;
         }
-        if matches!(key.layer, Layer::Relief { .. }) {
+        if let Layer::Relief { .. } | Layer::BiomeMask = key.layer {
             if allow_sampling {
-                self.queue(key, Task::Relief);
+                let task = if key.layer == Layer::BiomeMask {
+                    Task::Mask
+                } else {
+                    Task::Relief
+                };
+                self.queue(key, task);
             }
         } else if let Some(children) = self.finished_children(&key) {
             self.queue(key, Task::Downsample(children));
@@ -177,6 +182,7 @@ impl TileCache {
             // nearest at the finest level so single quarts stay crisp when zoomed in
             let texture = Rc::new(match done.key.layer {
                 Layer::Biome => renderer.create_tile(device, queue, &tile.rgb, TILE_SIZE as u32, done.key.scale == 0),
+                Layer::BiomeMask => renderer.create_mask_tile(device, queue, &tile.rgb, TILE_SIZE as u32),
                 Layer::Relief { .. } => renderer.create_rgba_tile(device, queue, &tile.rgb, TILE_SIZE as u32, true),
             });
             let estimates = Arc::new(tile.estimates);

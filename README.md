@@ -41,14 +41,15 @@ cubes/boxes ... so it works in multiple ways I guess ...
 - **Overworld, nether and end**, with the height to sample biomes at (sample below the surface to find caves).
 - **Height map** of the terrain in the overworld, sea floor included, with one visible square per height. It uses the
   game's quick estimate of the surface, usually 5 to 15 blocks off, and can switch to exact heights when zoomed in.
-- **Distance grid** with block coordinates and a scale bar, with automatic or fixed spacing.
+- **Highlight biomes:** check the ones you are looking for and the others are darkened.
+- **Distance grid** with block coordinates and a scale bar, with spacing that adapts to the zoom or stays fixed.
 
 **Finding things**
 
 - **All structures in the game**, each with its own icon and switch. Positions come from the game's real generation
   code, including biome and terrain checks.
-- **At every zoom:** close up all of them, far out a steady number of real ones that fills the screen. You choose the
-  space between markers, or let them overlap and set how many to show. Rare kinds come first if you like.
+- **At every zoom:** close up all of them, far out a steady number of real ones that fills the screen. Markers may
+  overlap, set how many to show, or keep a space between them. Rare kinds come first if you like.
 - **Search** for the nearest structures or biomes from the middle of the view.
 - **Seeds like in Minecraft:** numbers, negative ones too, or any text, turned into the same seed the game uses.
 - **Go to coordinates**, and the biome and height under the cursor.

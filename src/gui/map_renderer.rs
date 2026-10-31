@@ -8,6 +8,8 @@ const QUAD_FLOATS: usize = 9;
 /// A tile uploaded to the GPU. The texture is freed when the last `Rc` is dropped.
 pub struct TileTexture {
     bind_group: wgpu::BindGroup,
+    /// a biome mask, which is drawn by its own pipeline
+    mask: bool,
 }
 
 /// One textured rectangle of the map.
@@ -24,6 +26,13 @@ pub struct Quad {
 pub struct MapRenderer {
     pipeline: wgpu::RenderPipeline,
     tile_layout: wgpu::BindGroupLayout,
+    /// for highlighting biomes, only used while some are
+    mask_pipeline: wgpu::RenderPipeline,
+    mask_layout: wgpu::BindGroupLayout,
+    /// how much each biome is darkened, in the alpha of a 256x1 texture
+    darkening: wgpu::Texture,
+    darkening_view: wgpu::TextureView,
+    last_darkening: [u8; 256],
     linear_sampler: wgpu::Sampler,
     nearest_sampler: wgpu::Sampler,
     screen_buffer: wgpu::Buffer,
@@ -111,6 +120,72 @@ impl MapRenderer {
             cache: None,
         });
 
+        let mask_entry = |binding| wgpu::BindGroupLayoutEntry {
+            binding,
+            visibility: wgpu::ShaderStages::FRAGMENT,
+            ty: wgpu::BindingType::Texture {
+                sample_type: wgpu::TextureSampleType::Float { filterable: false },
+                view_dimension: wgpu::TextureViewDimension::D2,
+                multisampled: false,
+            },
+            count: None,
+        };
+        let mask_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("biome mask"),
+            entries: &[mask_entry(2), mask_entry(3)],
+        });
+        let mask_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("biome masks"),
+            bind_group_layouts: &[Some(&screen_layout), Some(&mask_layout)],
+            immediate_size: 0,
+        });
+        let mask_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("biome masks"),
+            layout: Some(&mask_pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &shader,
+                entry_point: Some("vs_tile"),
+                compilation_options: Default::default(),
+                buffers: &[Some(wgpu::VertexBufferLayout {
+                    array_stride: (QUAD_FLOATS * 4) as u64,
+                    step_mode: wgpu::VertexStepMode::Instance,
+                    attributes: &wgpu::vertex_attr_array![0 => Float32x4, 1 => Float32x4, 2 => Float32],
+                })],
+            },
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleStrip,
+                ..Default::default()
+            },
+            depth_stencil: None,
+            multisample: Default::default(),
+            fragment: Some(wgpu::FragmentState {
+                module: &shader,
+                entry_point: Some("fs_mask"),
+                compilation_options: Default::default(),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: surface_format,
+                    blend: Some(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+            }),
+            multiview_mask: None,
+            cache: None,
+        });
+        let darkening = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("biome darkening"),
+            size: wgpu::Extent3d {
+                width: 256,
+                height: 1,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::R8Unorm,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        });
+        let darkening_view = darkening.create_view(&Default::default());
         let sampler = |filter| {
             device.create_sampler(&wgpu::SamplerDescriptor {
                 mag_filter: filter,
@@ -136,6 +211,12 @@ impl MapRenderer {
         Self {
             pipeline,
             tile_layout,
+            mask_pipeline,
+            mask_layout,
+            darkening,
+            darkening_view,
+            // never what is asked for the first time, so it gets written then
+            last_darkening: [1; 256],
             linear_sampler: sampler(wgpu::FilterMode::Linear),
             nearest_sampler: sampler(wgpu::FilterMode::Nearest),
             screen_buffer,
@@ -236,7 +317,93 @@ impl MapRenderer {
                 },
             ],
         });
-        TileTexture { bind_group }
+        TileTexture {
+            bind_group,
+            mask: false,
+        }
+    }
+
+    /// Uploads a tile of biome numbers.
+    pub fn create_mask_tile(
+        &self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        biomes: &[u8],
+        size: u32,
+    ) -> TileTexture {
+        let extent = wgpu::Extent3d {
+            width: size,
+            height: size,
+            depth_or_array_layers: 1,
+        };
+        let texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("biome mask"),
+            size: extent,
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::R8Unorm,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        });
+        queue.write_texture(
+            wgpu::TexelCopyTextureInfo {
+                texture: &texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            biomes,
+            wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(size),
+                rows_per_image: None,
+            },
+            extent,
+        );
+        let view = texture.create_view(&Default::default());
+        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("biome mask"),
+            layout: &self.mask_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: wgpu::BindingResource::TextureView(&view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 3,
+                    resource: wgpu::BindingResource::TextureView(&self.darkening_view),
+                },
+            ],
+        });
+        TileTexture { bind_group, mask: true }
+    }
+
+    /// Sets how much pixels of each biome number are darkened. Only uploads what changed.
+    pub fn set_darkening(&mut self, queue: &wgpu::Queue, darkening: &[u8; 256]) {
+        if self.last_darkening == *darkening {
+            return;
+        }
+        self.last_darkening = *darkening;
+        queue.write_texture(
+            wgpu::TexelCopyTextureInfo {
+                texture: &self.darkening,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            darkening,
+            wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(256),
+                rows_per_image: None,
+            },
+            wgpu::Extent3d {
+                width: 256,
+                height: 1,
+                depth_or_array_layers: 1,
+            },
+        );
     }
 
     /// Clears `target` to the background and draws `quads` in order on it.
@@ -297,8 +464,17 @@ impl MapRenderer {
         pass.set_pipeline(&self.pipeline);
         pass.set_bind_group(0, &self.screen_bind_group, &[]);
         pass.set_vertex_buffer(0, self.instances.slice(..));
+        let mut drawing_mask = false;
         for (i, quad) in quads.iter().enumerate() {
             let i = i as u32;
+            if quad.tex.mask != drawing_mask {
+                drawing_mask = quad.tex.mask;
+                pass.set_pipeline(if drawing_mask {
+                    &self.mask_pipeline
+                } else {
+                    &self.pipeline
+                });
+            }
             pass.set_bind_group(1, &quad.tex.bind_group, &[]);
             pass.draw(0..4, i..i + 1);
         }

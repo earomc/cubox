@@ -14,14 +14,14 @@ use crate::{
     tile_renderer::WORLD_BORDER_QUARTS,
 };
 
-/// Auto grid lines stay at least this far apart, in points.
-const MIN_LINE_DISTANCE: f64 = 80.0;
-/// Fixed grid spacings get coarser when lines would be closer than this, in points.
-const MIN_FIXED_LINE_DISTANCE: f64 = 12.0;
+/// Grid lines fade out from this far apart in points, and aren't drawn at all from the second.
+const LINE_FADE_POINTS: [f64; 2] = [12.0, 4.0];
+/// Coordinates of grid lines keep this far apart in points, the lines between go without.
+const LABEL_POINTS: f64 = 70.0;
 const SEARCH_COLOR: Color32 = Color32::from_rgb(255, 225, 60);
 
 /// The space between markers, in points.
-pub const MARKER_GAPS: std::ops::RangeInclusive<f32> = 1.0..=100.0;
+pub const MARKER_GAPS: std::ops::RangeInclusive<f32> = 0.0..=100.0;
 pub const DEFAULT_MARKER_GAP: f32 = 2.0;
 
 /// While answers come in, markers are placed anew at most this often per marker, and after at most
@@ -188,17 +188,16 @@ impl Icons {
 pub enum GridSpacing {
     /// round numbers fitting the zoom
     Auto,
-    /// 16 blocks
-    Chunks,
-    /// 512 blocks
-    Regions,
-    Custom,
+    /// the same at every zoom
+    Fixed,
 }
 
 pub struct Grid {
     pub enabled: bool,
     pub spacing: GridSpacing,
-    pub custom_spacing: i64,
+    pub fixed_spacing: i64,
+    /// how far apart in points auto lines are at least
+    pub min_distance: f64,
     pub labels: bool,
     pub opacity: f32,
     /// drawn after the structure markers instead of before them
@@ -210,7 +209,8 @@ impl Default for Grid {
         Self {
             enabled: false,
             spacing: GridSpacing::Auto,
-            custom_spacing: 1000,
+            fixed_spacing: 512,
+            min_distance: 80.0,
             labels: true,
             opacity: 0.5,
             over_markers: false,
@@ -233,21 +233,40 @@ fn round_spacing(blocks_per_point: f64, min_points: f64) -> i64 {
 }
 
 impl Grid {
-    /// Blocks between lines at this zoom. Fixed spacings are multiplied when zoomed out too far to
-    /// show them, the scale bar shows what it is then.
+    /// Blocks between lines at this zoom.
     fn spacing_at(&self, blocks_per_point: f64) -> i64 {
-        let fixed = match self.spacing {
-            GridSpacing::Auto => return round_spacing(blocks_per_point, MIN_LINE_DISTANCE),
-            GridSpacing::Chunks => 16,
-            GridSpacing::Regions => 512,
-            GridSpacing::Custom => self.custom_spacing.max(1),
-        };
-        let mut spacing = fixed;
-        while (spacing as f64 / blocks_per_point) < MIN_FIXED_LINE_DISTANCE {
-            spacing *= 2;
+        match self.spacing {
+            GridSpacing::Auto => round_spacing(blocks_per_point, self.min_distance),
+            GridSpacing::Fixed => self.fixed_spacing.max(1),
         }
-        spacing
     }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn set_fixed_spacing(&mut self, blocks: i64) {
+        self.spacing = GridSpacing::Fixed;
+        self.fixed_spacing = blocks;
+    }
+}
+
+/// How visible grid lines this many points apart are drawn, from 1 to 0 where they would only be a
+/// blur.
+pub fn line_visibility(points: f64) -> f32 {
+    let [full, none] = LINE_FADE_POINTS;
+    ((points - none) / (full - none)).clamp(0.0, 1.0) as f32
+}
+
+/// Scale of the markers: past where the whole world is visible they don't get further apart in
+/// the world, or fewer would fit the less of the screen the world takes. In blocks per point.
+fn marker_blocks_per_point(blocks_per_point: f64, view_points: [f32; 2]) -> f64 {
+    let whole_world = WORLD_BORDER_QUARTS as f64 * 8.0 / view_points[0].min(view_points[1]).max(1.0) as f64;
+    blocks_per_point.min(whole_world)
+}
+
+/// How many markers fit in the world between `min` and `max` in blocks, `distance` apart in blocks.
+fn markers_that_fit(min: [f64; 2], max: [f64; 2], distance: f64) -> f64 {
+    let edge = WORLD_BORDER_QUARTS as f64 * 4.0;
+    let side = |lo: f64, hi: f64| (hi.min(edge) - lo.max(-edge)).max(0.0);
+    side(min[0], max[0]) * side(min[1], max[1]) / (distance * distance)
 }
 
 /// `1 500` for 1500: coordinates get long and these are read at a glance.
@@ -287,6 +306,7 @@ impl Ui {
         let (min, max) = self.map.visible_blocks(rect);
         let blocks_per_point = self.map.blocks_per_point();
         let distance_points = (self.advanced.marker_size + self.marker_gap) as f64;
+        let marker_scale = marker_blocks_per_point(blocks_per_point, rect.size().into());
         // what is just off the screen can still be in the way of what is on it
         let margin = distance_points * blocks_per_point;
         let (min, max) = (min.map(|v| v - margin), max.map(|v| v + margin));
@@ -300,9 +320,7 @@ impl Ui {
             self.max_markers as f64 / kinds.max(1) as f64
         } else {
             // what fits on the part of the screen with world on it, and some more to choose from
-            let edge = WORLD_BORDER_QUARTS as f64 * 4.0;
-            let side = |lo: f64, hi: f64| (hi.min(edge) - lo.max(-edge)).max(0.0) / blocks_per_point;
-            let fit = side(min[0], max[0]) * side(min[1], max[1]) / (distance_points * distance_points);
+            let fit = markers_that_fit(min, max, distance_points * marker_scale);
             let choice = (self.advanced.search_fineness * self.advanced.search_fineness) as f64;
             // with more kinds the others fill the gaps: half the work for 2% fewer markers
             fit * if kinds >= 3 { choice / 2.0 } else { choice }
@@ -315,7 +333,7 @@ impl Ui {
             dimension: self.dimension,
             overlap: self.marker_overlap,
             rare_first: self.prioritize_rare,
-            distance: distance_points * blocks_per_point,
+            distance: distance_points * marker_scale,
             max_tries: self.advanced.search_tries,
             max_markers: self.max_markers,
         };
@@ -415,7 +433,11 @@ impl Ui {
         let spacing = self.grid.spacing_at(blocks_per_point);
         let border = (WORLD_BORDER_QUARTS as f64 * 4.0).min(i32::MAX as f64);
         let (min, max) = self.map.visible_blocks(rect);
-        let line_alpha = (self.grid.opacity * 255.0) as u8;
+        let points = spacing as f64 / blocks_per_point;
+        let visibility = line_visibility(points);
+        let line_alpha = (self.grid.opacity * visibility * 255.0) as u8;
+        // only every so many get their coordinates when they are close together
+        let label_every = (LABEL_POINTS / points).ceil().max(1.0) as i64;
         let line = Color32::from_white_alpha(line_alpha);
         let axis = Stroke::new(2.0, Color32::from_white_alpha(line_alpha.saturating_add(60)));
         let thin = Stroke::new(1.0, line);
@@ -439,21 +461,34 @@ impl Ui {
             painter.rect_filled(background.expand(1.0), 2.0, Color32::from_black_alpha(140));
             painter.galley(background.min, shape, Color32::WHITE);
         };
-        for i in range(min[0], max[0]) {
+        // past where lines are drawn there is only the scale bar, however many they would be
+        let lines = |lo: f64, hi: f64| {
+            let all = range(lo, hi);
+            if visibility > 0.0 {
+                all
+            } else {
+                *all.end() + 1..=*all.end()
+            }
+        };
+        for i in lines(min[0], max[0]) {
             let block = i * spacing;
             let x = self.map.block_to_screen(rect, [block as f64, 0.0]).x;
             let stroke = if block == 0 { axis } else { thin };
-            painter.line_segment([pos2(x, lo_y), pos2(x, hi_y)], stroke);
-            if self.grid.labels {
+            if visibility > 0.0 {
+                painter.line_segment([pos2(x, lo_y), pos2(x, hi_y)], stroke);
+            }
+            if self.grid.labels && visibility > 0.0 && i.rem_euclid(label_every) == 0 {
                 label(pos2(x + 2.0, lo_y + 2.0), Align2::LEFT_TOP, format_blocks(block));
             }
         }
-        for i in range(min[1], max[1]) {
+        for i in lines(min[1], max[1]) {
             let block = i * spacing;
             let y = self.map.block_to_screen(rect, [0.0, block as f64]).y;
             let stroke = if block == 0 { axis } else { thin };
-            painter.line_segment([pos2(lo_x, y), pos2(hi_x, y)], stroke);
-            if self.grid.labels {
+            if visibility > 0.0 {
+                painter.line_segment([pos2(lo_x, y), pos2(hi_x, y)], stroke);
+            }
+            if self.grid.labels && visibility > 0.0 && i.rem_euclid(label_every) == 0 {
                 label(pos2(lo_x + 2.0, y + 2.0), Align2::LEFT_TOP, format_blocks(block));
             }
         }
@@ -569,6 +604,19 @@ mod tests {
     }
 
     #[test]
+    fn markers_can_touch_but_not_overlap() {
+        let (a, touching, overlapping) = (
+            found("village", 0, 0),
+            found("village", 100, 0),
+            found("village", 99, 300),
+        );
+        assert_eq!(Placed::new(vec![a, touching], 100.0, true, 100).markers.len(), 2);
+        let near = Placed::new(vec![a, found("village", 99, 0)], 100.0, true, 100).markers;
+        assert_eq!(near.len(), 1);
+        assert_eq!(Placed::new(vec![a, overlapping], 100.0, true, 100).markers.len(), 2);
+    }
+
+    #[test]
     fn only_as_rare_markers_stop_looking_further() {
         let placed = Placed::new(vec![found("village", 50, 50)], 100.0, true, 100);
         let village = rarity(found("village", 0, 0).kind);
@@ -591,13 +639,35 @@ mod tests {
     }
 
     #[test]
-    fn fixed_spacing_gets_coarser_only_when_needed() {
+    fn fixed_spacing_stays_the_same_and_lines_fade_when_too_close() {
         let grid = Grid {
-            spacing: GridSpacing::Regions,
+            spacing: GridSpacing::Fixed,
+            fixed_spacing: 512,
             ..Default::default()
         };
-        assert_eq!(grid.spacing_at(1.0), 512);
-        assert_eq!(grid.spacing_at(100.0), 2048);
+        for blocks_per_point in [0.1, 1.0, 100.0, 100_000.0] {
+            assert_eq!(grid.spacing_at(blocks_per_point), 512);
+        }
+        assert_eq!(line_visibility(100.0), 1.0);
+        assert!((0.0..1.0).contains(&line_visibility(8.0)));
+        assert_eq!(line_visibility(2.0), 0.0);
+    }
+
+    #[test]
+    fn past_the_whole_world_as_many_markers_fit() {
+        let view = [1000.0, 700.0];
+        let whole_world = WORLD_BORDER_QUARTS as f64 * 8.0 / 700.0;
+        let number = |blocks_per_point: f64| {
+            let half = [500.0 * blocks_per_point, 350.0 * blocks_per_point];
+            let scale = marker_blocks_per_point(blocks_per_point, view);
+            markers_that_fit([-half[0], -half[1]], [half[0], half[1]], 24.0 * scale)
+        };
+        let at_whole_world = number(whole_world);
+        for further in [1.01, 1.5, 4.0] {
+            assert!((number(whole_world * further) - at_whole_world).abs() < at_whole_world * 1e-9);
+        }
+        // before that more than one screen of world is what fits
+        assert!(number(whole_world / 2.0) > 1000.0);
     }
 
     #[test]

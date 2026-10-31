@@ -23,7 +23,7 @@ mod script;
 mod tiles;
 pub(crate) mod world;
 
-use std::{path::Path, sync::Arc, time::Duration};
+use std::{collections::HashSet, path::Path, sync::Arc, time::Duration};
 
 use steel_worldgen::biomes::BiomeSourceKind;
 use web_time::Instant;
@@ -48,7 +48,7 @@ use crate::{
         tiles::TileCache,
         world::WorldParams,
     },
-    seed::parse_seed,
+    seed::{parse_seed, random_seed},
     structures::{Found, STRUCTURE_KINDS},
     terrain::Terrain,
 };
@@ -249,6 +249,11 @@ struct Ui {
     marker_gap: f32,
     /// show everything even on top of each other
     marker_overlap: bool,
+    /// per dimension the biomes that stay bright while the others are darkened
+    highlighted: [HashSet<&'static str>; 3],
+    /// how dark the others get
+    dim_others: f32,
+    biome_filter: String,
     /// where markers compete for space, the rarest kinds get it
     prioritize_rare: bool,
     advanced: Advanced,
@@ -409,7 +414,10 @@ impl State {
             markers: Vec::new(),
             placed: Placed::default(),
             marker_gap: overlays::DEFAULT_MARKER_GAP,
-            marker_overlap: false,
+            marker_overlap: true,
+            highlighted: Default::default(),
+            dim_others: 0.75,
+            biome_filter: String::new(),
             prioritize_rare: true,
             advanced: Advanced::default(),
             max_markers: resources::default_max_markers(),
@@ -489,6 +497,8 @@ impl State {
                 Command::MarkerOverlap(on) => ui.marker_overlap = on,
                 Command::MaxMarkers(markers) => ui.max_markers = markers,
                 Command::PrioritizeRare(on) => ui.prioritize_rare = on,
+                Command::Highlight(biome) => ui.script_highlight(&biome),
+                Command::GridSpacing(blocks) => ui.grid.set_fixed_spacing(blocks),
                 Command::Threads(threads) => ui.threads = threads,
                 Command::SeaFloor(on) => ui.sea_floor = on,
                 Command::ZoomButtons(on) => ui.zoom_buttons_shown = on,
@@ -687,6 +697,7 @@ impl State {
             .egui_input_mut()
             .events
             .extend(crate::web::take_typed_events());
+        self.map_renderer.set_darkening(&self.queue, &self.ui.darkening());
         let now = self.egui_ctx.input(|i| i.time);
         if self.ui.tiles.poll(now, &self.device, &self.queue, &self.map_renderer) {
             self.window.request_redraw();
@@ -808,6 +819,7 @@ impl Ui {
             samples: self.samples,
             relief: (self.relief && self.dimension == Dimension::Overworld).then_some(self.relief_quality),
             relief_exact: self.relief_exact,
+            highlight: !self.highlighted[self.dimension as usize].is_empty(),
             max_relief_level: self.advanced.max_relief_level,
             relief_strength: self.advanced.relief_strength,
             sea_floor: self.sea_floor,
@@ -848,8 +860,19 @@ impl Ui {
                     egui::Grid::new("settings").num_columns(2).show(ui, |ui| {
                         ui.label("Seed")
                             .on_hover_text("A number, negative too, or any text like in Minecraft");
-                        if ui.text_edit_singleline(&mut self.seed_text).changed()
-                            && let Some(seed) = parse_seed(&self.seed_text)
+                        let mut new_seed = None;
+                        ui.horizontal(|ui| {
+                            let edit = egui::TextEdit::singleline(&mut self.seed_text).desired_width(175.0);
+                            if ui.add(edit).changed() {
+                                new_seed = parse_seed(&self.seed_text);
+                            }
+                            if ui.button("Random").on_hover_text("A random seed").clicked() {
+                                let seed = random_seed();
+                                self.seed_text = seed.to_string();
+                                new_seed = Some(seed);
+                            }
+                        });
+                        if let Some(seed) = new_seed
                             && seed != self.seed
                         {
                             self.seed = seed;
@@ -933,6 +956,7 @@ impl Ui {
                     }
                     ui.separator();
                     self.structures_menu(ui);
+                    self.biomes_menu(ui);
                     self.search_menu(ui);
                     self.terrain_menu(ui, level);
                     self.grid_menu(ui);

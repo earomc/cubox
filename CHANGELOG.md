@@ -10,11 +10,16 @@ The release workflow publishes the section of a version as its release notes.
 
 ### Added
 
+- Highlight biomes: choose any in the Biomes menu and the others are darkened, with no cost while none are.
+- A button for a random seed.
 - The distance grid can be drawn over the structure markers.
 
 ### Changed
 
 - Samples per pixel moved to the Advanced menu.
+- Fixed grid spacing stays the same at every zoom, where lines get too close they fade out.
+- Markers may overlap by default. Without overlap their number doesn't drop past seeing the whole world, the
+  space between them is set in pixels and can be 0.
 
 ## [0.3.0] - 2026-10-31
 

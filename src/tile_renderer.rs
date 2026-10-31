@@ -2,7 +2,7 @@ use std::sync::LazyLock;
 
 use steel_worldgen::biomes::{BiomeSourceKind, ChunkBiomeSampler};
 
-use crate::biome_colors::biome_color;
+use crate::biome_colors::{biome_color, biome_number};
 
 /// The world border is at ±29,999,984 blocks.
 pub const WORLD_BORDER_QUARTS: i32 = 29_999_984 / 4;
@@ -17,6 +17,8 @@ pub enum Layer {
     Biome,
     /// the hillshade of the terrain, drawn over the biomes, with heights being those of the
     /// `sea_floor` or the water
+    /// the number of the biome at each pixel, to darken the biomes that aren't highlighted
+    BiomeMask,
     Relief {
         detail: Detail,
         sea_floor: bool,
@@ -344,6 +346,31 @@ pub fn render_tile(
     Some(shade(estimates, shading, shading.weight(shading.noise)))
 }
 
+/// Samples which biome each pixel of a mask tile is, as a number for the shader. One sample per pixel:
+/// when zoomed out a rare biome is scattered dots, as many as there really are, and not an average.
+pub fn render_mask(source: &BiomeSourceKind, key: TileKey, keep_going: &dyn Fn() -> bool) -> Option<Tile> {
+    let size = key.tile_size_px;
+    let stride = key.stride();
+    let (origin_x, origin_z) = key.origin();
+    let qy = key.sample_height >> 2;
+    let mut sampler = source.chunk_sampler();
+    let mut biomes = Vec::with_capacity(size * size);
+    for row in 0..size {
+        if !keep_going() {
+            return None;
+        }
+        let pz = origin_z + row as i32 * stride + stride / 2;
+        for col in 0..size {
+            let px = origin_x + col as i32 * stride + stride / 2;
+            biomes.push(biome_number(&sampler.sample(px, qy, pz).key.path));
+        }
+    }
+    Some(Tile {
+        rgb: biomes,
+        estimates: Vec::new(),
+    })
+}
+
 /// Builds a tile from the estimates of its 4 children one scale finer by averaging 2x2 pixels.
 /// That is exactly what a mipmap level is, and costs no biome sampling at all. The averages have
 /// 4x the samples of a directly rendered tile, so less noise, and are shaded accordingly: they end
@@ -378,6 +405,41 @@ mod tests {
     /// Not exactly the same though: the sampler's R-tree lookup starts from the last result,
     /// which breaks ties between equally close biomes depending on the sampling order.
     /// That flips a tiny fraction of samples, so allow a few pixels to differ.
+    use crate::biome_colors::{BIOMES, UNKNOWN_BIOME};
+
+    #[test]
+    fn mask_tiles_say_which_biome_each_pixel_is() {
+        let source = BiomeSourceKind::overworld(12345);
+        let key = TileKey {
+            layer: Layer::BiomeMask,
+            scale: 4,
+            sample_height: 256,
+            tile_size_px: 16,
+            samples: 1,
+            x: 3,
+            z: -2,
+        };
+        let tile = render_mask(&source, key, &|| true).unwrap();
+        assert_eq!(tile.rgb.len(), 16 * 16);
+        let mut sampler = source.chunk_sampler();
+        let (ox, oz) = key.origin();
+        for (i, number) in tile.rgb.iter().enumerate() {
+            let (x, z) = (ox + (i % 16) as i32 * 16 + 8, oz + (i / 16) as i32 * 16 + 8);
+            let biome = sampler.sample(x, 64, z);
+            assert_eq!(BIOMES[*number as usize], &*biome.key.path, "pixel {i}");
+        }
+        assert!(tile.rgb.iter().any(|n| *n != tile.rgb[0]));
+    }
+
+    #[test]
+    fn every_possible_biome_has_a_number() {
+        for dimension in crate::dimension::Dimension::ALL {
+            for biome in dimension.biome_source(1).possible_biome_refs() {
+                assert_ne!(biome_number(&biome.key.path), UNKNOWN_BIOME, "{}", biome.key.path);
+            }
+        }
+    }
+
     #[test]
     fn downsample_matches_direct_render() {
         let source = BiomeSourceKind::overworld(12345);

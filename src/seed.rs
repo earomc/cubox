@@ -24,6 +24,18 @@ pub fn generator_seed(seed: i64) -> u64 {
     seed as u64
 }
 
+/// A random seed, like Minecraft picks when the seed is left empty.
+pub fn random_seed() -> i64 {
+    let mut bytes = [0; 8];
+    match getrandom::fill(&mut bytes) {
+        Ok(()) => i64::from_le_bytes(bytes),
+        Err(err) => {
+            log::error!("getting a random seed: {err}");
+            0
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -67,5 +79,12 @@ mod tests {
     #[test]
     fn negative_seeds_keep_their_bits() {
         assert_eq!(generator_seed(-1), u64::MAX);
+    }
+
+    #[test]
+    fn random_seeds_differ_and_can_be_typed_back() {
+        let (a, b) = (random_seed(), random_seed());
+        assert_ne!(a, b);
+        assert_eq!(parse_seed(&a.to_string()), Some(a));
     }
 }

@@ -11,7 +11,9 @@ use steel_worldgen::biomes::BiomeSourceKind;
 use crate::{
     dimension::Dimension,
     terrain::Terrain,
-    tile_renderer::{Estimate, Lab, Layer, Shading, Tile, TileKey, calibrate, downsample, render_tile, world_mean},
+    tile_renderer::{
+        Estimate, Lab, Layer, Shading, Tile, TileKey, calibrate, downsample, render_mask, render_tile, world_mean,
+    },
 };
 
 /// Everything that decides how a tile looks besides its key.
@@ -32,6 +34,8 @@ pub enum Task {
     Downsample([Estimates; 4]),
     /// sample the tile
     Render,
+    /// sample the biome numbers of a mask tile
+    Mask,
     /// sample the terrain for a relief tile, the most expensive work
     Relief,
 }
@@ -41,7 +45,8 @@ impl Task {
         match self {
             Task::Downsample(_) => 0,
             Task::Render => 1,
-            Task::Relief => 2,
+            Task::Mask => 2,
+            Task::Relief => 3,
         }
     }
 }
@@ -134,14 +139,16 @@ impl World {
 
     /// Runs a task. `keep_going` is asked while sampling, a tile it says no to is abandoned.
     pub fn run(&self, key: TileKey, task: Task, keep_going: &dyn Fn() -> bool) -> Option<Tile> {
-        if matches!(task, Task::Relief) {
-            return self.relief(key, keep_going);
+        match task {
+            Task::Relief => return self.relief(key, keep_going),
+            Task::Mask => return render_mask(&self.source, key, keep_going),
+            _ => {}
         }
         let shading = self.shading(key);
         match task {
             Task::Downsample(children) => Some(downsample(children.each_ref().map(|c| c.as_slice()), key, &shading)),
             Task::Render => render_tile(&self.source, key, &shading, keep_going),
-            Task::Relief => unreachable!(),
+            Task::Mask | Task::Relief => unreachable!(),
         }
     }
 

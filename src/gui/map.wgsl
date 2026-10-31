@@ -51,3 +51,17 @@ fn fs_tile(in: TileOut) -> @location(0) vec4<f32> {
     let alpha = texel.a * in.alpha;
     return vec4<f32>(c * alpha, alpha); // premultiplied
 }
+
+// Darkens what isn't highlighted, only drawn while biomes are. The number of the biome at each pixel
+// looks up how much in a table, so changing which biomes needs no new tiles.
+@group(1) @binding(2) var mask_tex: texture_2d<f32>;
+@group(1) @binding(3) var darkening_tex: texture_2d<f32>;
+
+@fragment
+fn fs_mask(in: TileOut) -> @location(0) vec4<f32> {
+    let size = vec2<i32>(textureDimensions(mask_tex));
+    let texel = clamp(vec2<i32>(in.uv * vec2<f32>(size)), vec2<i32>(0), size - vec2<i32>(1));
+    let number = i32(textureLoad(mask_tex, texel, 0).r * 255.0 + 0.5);
+    let darkening = textureLoad(darkening_tex, vec2<i32>(number, 0), 0).r * in.alpha;
+    return vec4<f32>(0.0, 0.0, 0.0, darkening); // premultiplied
+}

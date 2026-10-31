@@ -64,6 +64,8 @@ pub struct MapSettings {
     pub relief: Option<ReliefQuality>,
     /// use exact heights in that quality instead of only the estimate
     pub relief_exact: bool,
+    /// darken the biomes that aren't highlighted
+    pub highlight: bool,
     /// the coarsest level with relief
     pub max_relief_level: i32,
     /// how strongly relief is drawn, 1 is normal
@@ -237,10 +239,24 @@ impl MapView {
             keys.iter().map(|&key| relief_key(key, detail)).collect()
         });
         // the quick estimate of everything first, shown until the wanted detail is there
-        let relief_wanted: Vec<TileKey> = keys
+        let mask_key = |key: TileKey| TileKey {
+            layer: Layer::BiomeMask,
+            samples: 1,
+            ..key
+        };
+        let masks: Vec<TileKey> = if settings.highlight {
+            keys.iter().map(|&key| mask_key(key)).collect()
+        } else {
+            Vec::new()
+        };
+        let relief_wanted: Vec<TileKey> = masks
             .iter()
-            .filter(|_| relief_detail.is_some_and(|detail| detail != Detail::Estimate))
-            .map(|&key| relief_key(key, Detail::Estimate))
+            .copied()
+            .chain(
+                keys.iter()
+                    .filter(|_| relief_detail.is_some_and(|detail| detail != Detail::Estimate))
+                    .map(|&key| relief_key(key, Detail::Estimate)),
+            )
             .chain(relief.iter().copied())
             .collect();
         tiles.update(&keys, &cover, &relief_wanted, unsettled_for <= 0.0);
@@ -276,6 +292,17 @@ impl MapView {
                     out.push(tex, screen, FULL_UV, 1.0);
                 }
                 draw_descendants(&mut out, tiles, now, key, screen, MAX_STAND_IN_DOWN);
+            }
+            if let Some((tex, alpha)) = tile {
+                fading |= alpha < 1.0;
+                out.push(tex, screen, FULL_UV, alpha);
+            }
+        }
+        for key in masks {
+            let screen = tile_screen(&self.camera, &key);
+            let tile = tiles.get(&key, now);
+            if !tile.as_ref().is_some_and(|(_, alpha)| *alpha >= 1.0) {
+                draw_ancestor(&mut out, tiles, now, key, screen);
             }
             if let Some((tex, alpha)) = tile {
                 fading |= alpha < 1.0;

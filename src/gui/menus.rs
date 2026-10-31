@@ -1,11 +1,12 @@
 //! The sub menus of the settings window.
 
 use crate::{
+    biome_colors::{BIOMES, biome_color, biome_number},
     dimension::Dimension,
     gui::{
         Ui,
         finder::Target,
-        overlays::{GridSpacing, MARKER_GAPS},
+        overlays::{GridSpacing, MARKER_GAPS, line_visibility},
         resources,
     },
     structures::STRUCTURE_KINDS,
@@ -123,12 +124,12 @@ impl Ui {
                     ui.add(
                         egui::Slider::new(&mut self.marker_gap, MARKER_GAPS)
                             .logarithmic(true)
+.smallest_positive(1.0)
                             .fixed_decimals(0)
-                            .suffix(" pt"),
+                            .suffix(" px"),
                     )
                     .on_hover_text(
-                        "The space between markers at least. Where there is room and a structure, it is shown, \
-                         the rarest kinds first.",
+                        "The space between markers at least, 0 is touching. Where there is room and a structure, it is shown. At 100% interface scale these are screen pixels.",
                     );
                 });
             });
@@ -316,7 +317,7 @@ impl Ui {
                 "Marker size",
                 egui::Slider::new(&mut advanced.marker_size, 10.0..=64.0)
                     .fixed_decimals(0)
-                    .suffix(" pt"),
+                    .suffix(" px"),
                 "How big markers are on the screen",
             );
             row(
@@ -437,30 +438,128 @@ impl Ui {
         });
     }
 
+    /// The darkening per biome number for the shader. Nothing while no biome is highlighted, then the
+    /// table isn't even read.
+    pub(super) fn darkening(&self) -> [u8; 256] {
+        let highlighted = &self.highlighted[self.dimension as usize];
+        let mut darkening = [0; 256];
+        if !highlighted.is_empty() {
+            darkening.fill((self.dim_others * 255.0) as u8);
+            for name in highlighted {
+                darkening[biome_number(name) as usize] = 0;
+            }
+        }
+        darkening
+    }
+
+    pub(super) fn biomes_menu(&mut self, ui: &mut egui::Ui) {
+        egui::CollapsingHeader::new("Biomes").show(ui, |ui| {
+            let mut biomes: Vec<&'static str> = self
+                .biome_source
+                .possible_biome_refs()
+                .iter()
+                .filter_map(|biome| BIOMES.iter().copied().find(|name| *name == &*biome.key.path))
+                .collect();
+            biomes.sort();
+            biomes.dedup();
+            ui.add(
+                egui::TextEdit::singleline(&mut self.biome_filter)
+                    .hint_text("Filter")
+                    .desired_width(f32::INFINITY),
+            );
+            let highlighted = &mut self.highlighted[self.dimension as usize];
+            ui.horizontal(|ui| {
+                if ui.button("All").clicked() {
+                    highlighted.extend(biomes.iter().copied());
+                }
+                if ui.button("None").clicked() {
+                    highlighted.clear();
+                }
+            });
+            ui.horizontal(|ui| {
+                ui.label("Dim others");
+                ui.add(egui::Slider::new(&mut self.dim_others, 0.2..=1.0));
+            });
+            let filter = self.biome_filter.trim().to_lowercase();
+            egui::ScrollArea::vertical()
+                .id_salt("biome list")
+                .max_height(220.0)
+                .show(ui, |ui| {
+                    for biome in biomes {
+                        let name = biome.replace('_', " ");
+                        if !name.contains(&filter) {
+                            continue;
+                        }
+                        ui.horizontal(|ui| {
+                            let [r, g, b] = biome_color(biome);
+                            let (swatch, _) =
+                                ui.allocate_exact_size(egui::vec2(ICON_SIZE, ICON_SIZE), egui::Sense::hover());
+                            ui.painter().rect_filled(swatch, 3.0, egui::Color32::from_rgb(r, g, b));
+                            let mut on = highlighted.contains(biome);
+                            if ui.checkbox(&mut on, name).changed() {
+                                if on {
+                                    highlighted.insert(biome);
+                                } else {
+                                    highlighted.remove(biome);
+                                }
+                            }
+                        });
+                    }
+                });
+        });
+    }
+
+    /// `highlight` of a script.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(super) fn script_highlight(&mut self, biome: &str) {
+        let highlighted = &mut self.highlighted[self.dimension as usize];
+        match BIOMES.iter().find(|name| **name == biome) {
+            Some(name) => {
+                highlighted.insert(name);
+            }
+            None if biome == "none" => highlighted.clear(),
+            None => log::error!("no biome {biome}"),
+        }
+    }
+
     pub(super) fn grid_menu(&mut self, ui: &mut egui::Ui) {
         egui::CollapsingHeader::new("Grid").show(ui, |ui| {
             ui.checkbox(&mut self.grid.enabled, "Show grid");
             ui.add_enabled_ui(self.grid.enabled, |ui| {
                 ui.horizontal(|ui| {
-                    ui.label("Lines every");
-                    for (spacing, name) in [
-                        (GridSpacing::Auto, "auto"),
-                        (GridSpacing::Chunks, "chunk"),
-                        (GridSpacing::Regions, "region"),
-                        (GridSpacing::Custom, "custom"),
-                    ] {
-                        ui.selectable_value(&mut self.grid.spacing, spacing, name);
-                    }
+                    ui.label("Spacing");
+                    ui.selectable_value(&mut self.grid.spacing, GridSpacing::Auto, "Auto")
+                        .on_hover_text("Round distances that adapt to the zoom");
+                    ui.selectable_value(&mut self.grid.spacing, GridSpacing::Fixed, "Fixed")
+                        .on_hover_text("The same distance at every zoom");
                 });
-                if self.grid.spacing == GridSpacing::Custom {
-                    ui.horizontal(|ui| {
-                        ui.label("Blocks");
-                        ui.add(
-                            egui::DragValue::new(&mut self.grid.custom_spacing)
-                                .range(1..=10_000_000)
-                                .speed(16.0),
-                        );
-                    });
+                match self.grid.spacing {
+                    GridSpacing::Auto => {
+                        ui.horizontal(|ui| {
+                            ui.label("Lines at least");
+                            ui.add(egui::Slider::new(&mut self.grid.min_distance, 20.0..=300.0).suffix(" px apart"));
+                        });
+                    }
+                    GridSpacing::Fixed => {
+                        ui.horizontal(|ui| {
+                            ui.label("Every");
+                            ui.add(
+                                egui::DragValue::new(&mut self.grid.fixed_spacing)
+                                    .range(1..=10_000_000)
+                                    .speed(16.0)
+                                    .suffix(" blocks"),
+                            );
+                            if ui.button("Chunk").clicked() {
+                                self.grid.fixed_spacing = 16;
+                            }
+                            if ui.button("Region").clicked() {
+                                self.grid.fixed_spacing = 512;
+                            }
+                        });
+                        if line_visibility(self.grid.fixed_spacing as f64 / self.map.blocks_per_point()) <= 0.0 {
+                            ui.weak("Lines too close at this zoom");
+                        }
+                    }
                 }
                 ui.checkbox(&mut self.grid.labels, "Coordinates");
                 ui.checkbox(&mut self.grid.over_markers, "Over markers");

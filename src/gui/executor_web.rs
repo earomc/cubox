@@ -148,13 +148,13 @@ fn spawn_worker(inner: &Rc<RefCell<Inner>>, index: usize) -> Result<Worker, JsVa
 }
 
 /// `[seed, dimension, sample height, samples setting, scale, x, z, tile size, samples, children,
-/// relief detail or 0, relief of the sea floor]`.
+/// relief detail or 0, relief of the sea floor, biome mask]`.
 /// The seed is a string, JavaScript numbers can't hold all 64 bits. `children` are the estimates
 /// of the 4 children for downsampling, or null to sample the tile.
 fn encode_request(params: &WorldParams, key: TileKey, task: &Task) -> (Array, Array) {
     let transfer = Array::new();
     let children = match task {
-        Task::Render | Task::Relief => JsValue::NULL,
+        Task::Render | Task::Mask | Task::Relief => JsValue::NULL,
         Task::Downsample(children) => {
             let array = Array::new();
             for child in children {
@@ -177,10 +177,11 @@ fn encode_request(params: &WorldParams, key: TileKey, task: &Task) -> (Array, Ar
         key.samples.into(),
         children,
         match key.layer {
-            Layer::Biome => 0.into(),
+            Layer::Biome | Layer::BiomeMask => 0.into(),
             Layer::Relief { detail, .. } => detail.encode().into(),
         },
         matches!(key.layer, Layer::Relief { sea_floor: true, .. }).into(),
+        (key.layer == Layer::BiomeMask).into(),
     ]);
     (request, transfer)
 }
@@ -234,6 +235,7 @@ pub fn worker_run(request: &Array) -> Result<Array, JsValue> {
                 detail,
                 sea_floor: request.get(11).is_truthy(),
             },
+            None if request.get(12).is_truthy() => Layer::BiomeMask,
             None => Layer::Biome,
         },
         scale: number(4)? as u8,
@@ -246,6 +248,8 @@ pub fn worker_run(request: &Array) -> Result<Array, JsValue> {
     let children = request.get(9);
     let task = if relief {
         Task::Relief
+    } else if key.layer == Layer::BiomeMask {
+        Task::Mask
     } else if children.is_null() {
         Task::Render
     } else {
