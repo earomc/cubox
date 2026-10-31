@@ -151,6 +151,7 @@ icon_files![
     "ancient_city",
     "trail_ruins",
     "trial_chambers",
+    "abandoned_camp",
     "fortress",
     "bastion",
     "nether_fossil",

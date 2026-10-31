@@ -108,6 +108,31 @@ pub const STRUCTURE_KINDS: &[StructureKind] = &[
     kind("ancient_city", "Ancient city", Overworld, &["ancient_city"]),
     kind("trail_ruins", "Trail ruins", Overworld, &["trail_ruins"]),
     kind("trial_chambers", "Trial chambers", Overworld, &["trial_chambers"]),
+    kind(
+        "abandoned_camp",
+        "Abandoned camp",
+        Overworld,
+        &[
+            "abandoned_camp_bamboo_jungle",
+            "abandoned_camp_birch_forest",
+            "abandoned_camp_cherry_grove",
+            "abandoned_camp_dappled_forest",
+            "abandoned_camp_flower_forest",
+            "abandoned_camp_forest",
+            "abandoned_camp_meadow",
+            "abandoned_camp_old_growth_birch_forest",
+            "abandoned_camp_old_growth_pine_taiga",
+            "abandoned_camp_old_growth_spruce_taiga",
+            "abandoned_camp_pale_garden",
+            "abandoned_camp_savanna",
+            "abandoned_camp_snowy_taiga",
+            "abandoned_camp_sparse_jungle",
+            "abandoned_camp_swamp",
+            "abandoned_camp_taiga",
+            "abandoned_camp_windswept_forest",
+            "abandoned_camp_wooded_badlands",
+        ],
+    ),
     kind("fortress", "Nether fortress", Nether, &["fortress"]),
     kind("bastion", "Bastion remnant", Nether, &["bastion_remnant"]),
     kind("nether_fossil", "Nether fossil", Nether, &["nether_fossil"]),
@@ -189,6 +214,7 @@ const RARITY_ORDER: &[&str] = &[
     "ocean_monument",
     "trail_ruins",
     "village",
+    "abandoned_camp",
     "shipwreck",
     "ruined_portal",
     "ocean_ruin",
@@ -205,7 +231,7 @@ const RARITY_ORDER: &[&str] = &[
 /// How many of a grid's candidates really generate, measured over thousands of cells on several
 /// seeds. Depends a little on the seed, it is used to know how many to look for.
 const REAL_RATES: &[(&str, f64)] = &[
-    ("village", 0.239),
+    ("village", 0.233),
     ("pillager_outpost", 0.032),
     ("mineshaft", 0.0037),
     ("desert_pyramid", 0.012),
@@ -221,12 +247,13 @@ const REAL_RATES: &[(&str, f64)] = &[
     ("ancient_city", 0.028),
     ("trail_ruins", 0.11),
     ("trial_chambers", 0.96),
+    ("abandoned_camp", 0.34),
     ("fortress", 0.49),
     ("bastion", 0.51),
     ("nether_fossil", 0.083),
     ("ruined_portal_nether", 1.0),
-    ("end_city", 0.089),
-    ("end_city_ship", 0.051),
+    ("end_city", 0.097),
+    ("end_city_ship", 0.054),
 ];
 
 /// How many of a kind's grid candidates really generate.
@@ -292,6 +319,7 @@ const CHECKED_AWAY_FROM_MIDDLE: &[&str] = &[
     "pillager_outpost",
     "ancient_city",
     "trail_ruins",
+    "abandoned_camp",
     "bastion",
     "woodland_mansion",
 ];

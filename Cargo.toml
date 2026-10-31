@@ -61,14 +61,14 @@ console_error_panic_hook = "0.1"
 getrandom = { version = "0.4", features = ["wasm_js"] }
 uuid = { version = "1", features = ["js"] }
 
-# SteelMC with the changes to build for browsers (branch cubox-locate-only of earomc/SteelMC, based on
-# the SteelMC commit cubox was using), until they are upstream
+# SteelMC with one commit on top of upstream, until it is merged: a way to only locate jigsaw
+# structures (branch cubox-locate-only-26.3 of earomc/SteelMC). Then this whole section can go.
 [patch."https://github.com/Steel-Foundation/SteelMC"]
-steel-worldgen = { git = "https://github.com/earomc/SteelMC", rev = "36e800c10dc2d2524555126079afedef7a71aa76" }
-steel-utils = { git = "https://github.com/earomc/SteelMC", rev = "36e800c10dc2d2524555126079afedef7a71aa76" }
-steel-registry = { git = "https://github.com/earomc/SteelMC", rev = "36e800c10dc2d2524555126079afedef7a71aa76" }
-steel-math = { git = "https://github.com/earomc/SteelMC", rev = "36e800c10dc2d2524555126079afedef7a71aa76" }
-steel-macros = { git = "https://github.com/earomc/SteelMC", rev = "36e800c10dc2d2524555126079afedef7a71aa76" }
+steel-worldgen = { git = "https://github.com/earomc/SteelMC", rev = "fb1a3a494e13ef839b5bf302e5ae6f3d351eeab7" }
+steel-utils = { git = "https://github.com/earomc/SteelMC", rev = "fb1a3a494e13ef839b5bf302e5ae6f3d351eeab7" }
+steel-registry = { git = "https://github.com/earomc/SteelMC", rev = "fb1a3a494e13ef839b5bf302e5ae6f3d351eeab7" }
+steel-math = { git = "https://github.com/earomc/SteelMC", rev = "fb1a3a494e13ef839b5bf302e5ae6f3d351eeab7" }
+steel-macros = { git = "https://github.com/earomc/SteelMC", rev = "fb1a3a494e13ef839b5bf302e5ae6f3d351eeab7" }
 
 [profile.release]
 strip = true

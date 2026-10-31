@@ -110,6 +110,13 @@ impl MapView {
         self.camera.zoom = (self.camera.zoom + delta).clamp(MIN_ZOOM, MAX_ZOOM);
     }
 
+    /// Moves the view by this many screen points.
+    pub fn pan_by(&mut self, points: [f64; 2]) {
+        let quarts = self.camera.quarts_per_point();
+        self.camera.center[0] += points[0] * quarts;
+        self.camera.center[1] += points[1] * quarts;
+    }
+
     /// Blocks per screen point.
     pub fn blocks_per_point(&self) -> f64 {
         self.camera.quarts_per_point() * 4.0

@@ -49,7 +49,7 @@ cubes/boxes ... so it works in multiple ways I guess ...
 - **Height map:** the real terrain shaded over the biomes when zoomed in, in the overworld, sea floor included.
   It uses the game's quick estimate of the surface, usually 5 to 15 blocks off. Exact heights can be switched on
   for when zoomed in, with a quality setting: the higher, the slower.
-- **Keyboard:** + and - zoom the map, Ctrl and + or - scale the interface.
+- **Keyboard:** arrow keys pan, + and - zoom the map, Ctrl and + or - scale the interface.
 - **Performance settings:** how many threads cubox may use and how much memory finished tiles may take.
 - **Distance grid** with block coordinates and a scale bar, with automatic or fixed spacing.
 - **Touch screens:** pinch to zoom, and a text bar that opens the on screen keyboard for numbers and seeds in the web
@@ -175,7 +175,8 @@ GitHub Pages on every tag and every push to main: the latest release at the root
 
 ## Roadmap
 
-- **Terrain further out:** true heights get too slow past 8 blocks per pixel, the game's fast estimate is about 10 blocks off.
+- **Features** like lava lakes, geodes and ores as markers when zoomed in. SteelMC only places them while building real
+  chunks, in a part of it that doesn't build for browsers, and most positions can't be known without that.
 - **Large biomes** worlds, once SteelMC's world generator supports them.
 - macOS app bundle and code signing, and a Windows build without a console window.
 
@@ -186,5 +187,8 @@ GitHub Pages on every tag and every push to main: the latest release at the root
   [amidst](https://github.com/toolbox4minecraft/amidst) and [chunkbase](https://www.chunkbase.com/apps/seed-map).
 
 ## License
+
+Hosting cubox? Keep the license notice in its settings window. If you changed anything, offer your changes to its users
+too: set `repository` in `Cargo.toml` to your source, the notice links to it.
 
 cubox is free software under the [GNU Affero General Public License v3.0 or later](LICENSE), like SteelMC.

@@ -14,6 +14,8 @@ use crate::{
 };
 
 const ICON_SIZE: f32 = 18.0;
+/// How fast the arrow keys pan the map.
+const ARROW_POINTS_PER_SECOND: f64 = 600.0;
 
 /// The coarsest level with exact heights at the manual qualities. Beyond it even Full would take
 /// a long time for what are single columns far apart.
@@ -87,14 +89,14 @@ impl ReliefQuality {
         }
     }
 
-    /// Measured on a desktop core.
+    /// The work follows from how many heights there are.
     fn hint(self) -> &'static str {
         match self {
             Self::Auto => "Exact heights close up, the estimate further out",
-            Self::Low => "An exact height every 8 pixels: 0.3 seconds per tile",
-            Self::Medium => "An exact height every 4 pixels: 1 second per tile",
-            Self::High => "An exact height every 2 pixels: 3 seconds per tile",
-            Self::Full => "An exact height for every pixel: 13 seconds per tile",
+            Self::Low => "An exact height every 8 pixels: the fastest",
+            Self::Medium => "An exact height every 4 pixels: about 4x the work of Low",
+            Self::High => "An exact height every 2 pixels: about 16x the work of Low",
+            Self::Full => "An exact height for every pixel: about 64x the work of Low",
         }
     }
 }
@@ -356,6 +358,46 @@ impl Ui {
         if pressed(egui::Key::Minus) {
             self.map.zoom_by(1.0);
         }
+        // these move the cursor in the text field or change the slider that has the focus
+        if ctx.memory(|memory| memory.focused().is_some()) {
+            return;
+        }
+        let (held, seconds) = ctx.input(|input| {
+            let axis = |less, more| (input.key_down(more) as i32 - input.key_down(less) as i32) as f64;
+            let held = [
+                axis(egui::Key::ArrowLeft, egui::Key::ArrowRight),
+                axis(egui::Key::ArrowUp, egui::Key::ArrowDown),
+            ];
+            (held, input.stable_dt as f64)
+        });
+        if held != [0.0, 0.0] {
+            self.map
+                .pan_by(held.map(|axis| axis * ARROW_POINTS_PER_SECOND * seconds));
+            ctx.request_repaint();
+        }
+    }
+
+    /// What the license asks an interface to show, and where the source is. Links follow `repository`
+    /// in `Cargo.toml`, a hosted modified copy has to point to its own source.
+    pub(super) fn license_notice(&self, ui: &mut egui::Ui) {
+        let repository = env!("CARGO_PKG_REPOSITORY");
+        ui.separator();
+        ui.horizontal_wrapped(|ui| {
+            ui.spacing_mut().item_spacing.x = 4.0;
+            let link = |ui: &mut egui::Ui, text: &str, url: String| {
+                ui.add(
+                    egui::Hyperlink::from_label_and_url(egui::RichText::new(text).small(), url).open_in_new_tab(true),
+                );
+            };
+            ui.label(
+                egui::RichText::new(concat!("cubox ", env!("CARGO_PKG_VERSION"), ", no warranty,"))
+                    .small()
+                    .weak(),
+            );
+            link(ui, "AGPL-3.0-or-later", format!("{repository}/blob/main/LICENSE"));
+            ui.label(egui::RichText::new("·").small().weak());
+            link(ui, "Source code", repository.to_string());
+        });
     }
 
     pub(super) fn performance_menu(&mut self, ui: &mut egui::Ui) {

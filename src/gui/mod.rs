@@ -930,6 +930,7 @@ impl Ui {
             self.performance_menu(ui);
             self.advanced_menu(ui);
             ui.checkbox(&mut self.zoom_buttons_shown, "Zoom buttons");
+            self.license_notice(ui);
         }));
 
         if go {

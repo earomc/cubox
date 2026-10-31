@@ -20,12 +20,17 @@ The release workflow publishes the section of a version as its release notes.
 - A height map of the real terrain when zoomed in, in the overworld, off by default, with a quality
   setting and the sea floor shown under water. Each height is one visible square. It uses the game's own
   quick estimate of the surface, and exact heights can be switched on for when zoomed in.
-- + and - zoom the map, and an Advanced menu has more values to adjust.
+- Arrow keys pan and + and - zoom the map, and an Advanced menu has more values to adjust.
 - A Performance menu with how many threads cubox may use and how much memory finished tiles may take.
 - The status line says how many biome tiles, height map tiles and structure areas are being generated.
 - A nightly web version of the newest commit on main, at `/nightly/`.
 - A distance grid with coordinates and a scale bar, with automatic or fixed spacing, off by default.
 - Zoom buttons that can be hidden, and tapping the map shows the biome on touch screens.
+
+### Changed
+
+- Maps now match Minecraft 26.3, which adds abandoned camps as a structure kind.
+- The settings window shows the license and links to the source code.
 
 ### Fixed
 
