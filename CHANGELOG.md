@@ -8,6 +8,11 @@ The release workflow publishes the section of a version as its release notes.
 
 ## [Unreleased]
 
+### Added
+
+- `cubox find` searches for seeds: structures near a spot or spawn, structures close together, biomes with a
+  minimum size or share of an area, and noise values. See `docs/seed-search.md`.
+
 ## [0.4.2] - 2026-10-31
 
 ### Fixed

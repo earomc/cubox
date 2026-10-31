@@ -113,8 +113,106 @@ fn main() {
             }
             img.save("map.png").unwrap();
         }
+        Some(("find", matches)) => find(matches),
         // started without arguments, e.g. by double clicking it
         _ => run_gui(0, Dimension::Overworld, None),
+    }
+}
+
+/// `cubox find`: matches on stdout as they come, one per line, how it is going on stderr.
+#[cfg(not(target_arch = "wasm32"))]
+fn find(matches: &clap::ArgMatches) {
+    use cubox::seedfind::{
+        engine::Match,
+        run::{Search, Seeds},
+        spec,
+    };
+    use std::{sync::atomic::Ordering, time::Duration};
+
+    let fail = |message: String| -> ! {
+        eprintln!("error: {message}");
+        std::process::exit(2);
+    };
+    let text = match matches.get_one::<std::path::PathBuf>("file") {
+        Some(path) => {
+            std::fs::read_to_string(path).unwrap_or_else(|err| fail(format!("reading {}: {err}", path.display())))
+        }
+        None => matches.get_one::<String>("cards").cloned().unwrap_or_default(),
+    };
+    let cards = spec::parse(&text).unwrap_or_else(|err| fail(err));
+    if cards.is_empty() {
+        fail("no conditions".to_owned());
+    }
+    let seeds = if let Some(seed) = matches.get_one::<i64>("in-seed") {
+        Seeds::Locations(*seed)
+    } else if let Some(from) = matches.get_one::<i64>("from") {
+        Seeds::From(*from)
+    } else if let Some(path) = matches.get_one::<std::path::PathBuf>("seeds") {
+        let text =
+            std::fs::read_to_string(path).unwrap_or_else(|err| fail(format!("reading {}: {err}", path.display())));
+        Seeds::List(
+            text.split_whitespace()
+                .map(|word| word.parse().unwrap_or_else(|_| fail(format!("`{word}` is not a seed"))))
+                .collect(),
+        )
+    } else {
+        Seeds::Random(cubox::seed::random_seed() as u64)
+    };
+    let threads = matches
+        .get_one::<usize>("threads")
+        .copied()
+        .unwrap_or_else(|| std::thread::available_parallelism().map_or(4, |n| n.get()));
+    let limit = *matches.get_one::<u64>("limit").unwrap();
+    let tested = matches.get_one::<u64>("tested").copied();
+    let top = *matches.get_one::<usize>("top").unwrap();
+
+    let line = |found: &Match| {
+        let score = found.score.map_or("-".to_owned(), |score| format!("{score:.0}"));
+        let hits: Vec<String> = found.hits.iter().map(|hit| format!("{},{}", hit.x, hit.z)).collect();
+        format!("{} {score} {}", found.seed, hits.join(" "))
+    };
+    let search = Search::start(&cards, seeds, threads);
+    let start = Instant::now();
+    let (mut shown, mut last_report, mut kept): (u64, _, Vec<Match>) = (0, Instant::now(), Vec::new());
+    let done = |search: &Search, ended: bool, shown: u64| {
+        ended || tested.map_or(shown >= limit, |tested| search.counters.covered() >= tested)
+    };
+    loop {
+        let mut ended = false;
+        match search.results.recv_timeout(Duration::from_millis(100)) {
+            Ok(found) => {
+                shown += 1;
+                if tested.is_some() {
+                    kept.push(found);
+                } else {
+                    println!("{}", line(&found));
+                }
+            }
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
+            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => ended = true,
+        }
+        if last_report.elapsed() >= Duration::from_secs(2) {
+            last_report = Instant::now();
+            let covered = search.counters.covered();
+            let rate = covered as f64 / start.elapsed().as_secs_f64();
+            let odds = match search.counters.one_in() {
+                Some(one_in) => format!("about 1 in {one_in:.0}, {:.0} s each", one_in / rate),
+                None => format!("rarer than 1 in {:.0} so far", search.counters.at_least_one_in()),
+            };
+            eprintln!(
+                "{covered} seeds, {rate:.0}/s, {} checked with a world, {shown} matches, {odds}, at {}",
+                search.counters.seeds.load(Ordering::Relaxed),
+                search.counters.position.load(Ordering::Relaxed),
+            );
+        }
+        if done(&search, ended, shown) {
+            break;
+        }
+    }
+    search.stop();
+    kept.sort_by(|a, b| b.score.unwrap_or(f64::MIN).total_cmp(&a.score.unwrap_or(f64::MIN)));
+    for found in kept.iter().take(top) {
+        println!("{}", line(found));
     }
 }
 

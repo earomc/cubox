@@ -5,6 +5,7 @@ pub mod biome_colors;
 pub mod dimension;
 pub mod gui;
 pub mod seed;
+pub mod seedfind;
 pub mod structures;
 pub mod terrain;
 pub mod tile_renderer;

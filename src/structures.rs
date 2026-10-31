@@ -196,6 +196,58 @@ pub fn spread(kind: usize) -> Option<Spread> {
     SPREADS[kind]
 }
 
+/// Whether a kind is a structure of the game, unlike the spawn point.
+pub fn is_structure(kind: usize) -> bool {
+    !STRUCTURE_KINDS[kind].structures.is_empty()
+}
+
+/// How far from the middle of its chunk a structure's marker can be, in blocks. See the test
+/// `markers_stay_within_their_margin`.
+pub fn marker_margin(kind: usize) -> i32 {
+    match STRUCTURE_KINDS[kind].id {
+        "swamp_hut" => 16,
+        "desert_pyramid" | "jungle_temple" | "igloo" | "buried_treasure" | "ocean_monument" => 64,
+        _ => 512,
+    }
+}
+
+/// Where a kind might be around a spot, from the seed alone: the grid cell and middle of the
+/// chunk of each candidate within `radius` blocks of `center` or `marker_margin` further. A kind
+/// that isn't on a grid has none. This depends on nothing but the lower 48 bits of the seed.
+pub fn candidates(seed: i64, kind: usize, center: [i32; 2], radius: i32, out: &mut Vec<([i32; 2], [i32; 2])>) {
+    let Some(set) = &kind_sets()[kind] else { return };
+    let placement = &set.placement;
+    let PlacementKind::RandomSpread {
+        spacing,
+        separation,
+        spread_type,
+    } = placement.kind
+    else {
+        return;
+    };
+    let reach = radius as i64 + marker_margin(kind) as i64;
+    let cell_of = |block: i64| block.div_euclid(spacing as i64 * 16) as i32;
+    let cells = |middle: i32| cell_of(middle as i64 - reach)..=cell_of(middle as i64 + reach);
+    for cell_z in cells(center[1]) {
+        for cell_x in cells(center[0]) {
+            let chunk = StructurePlacement::get_potential_structure_chunk(
+                seed,
+                placement.salt,
+                cell_x * spacing,
+                cell_z * spacing,
+                spacing,
+                separation,
+                spread_type,
+            );
+            let middle = [chunk.0.x * 16 + 8, chunk.0.y * 16 + 8];
+            let (dx, dz) = ((middle[0] - center[0]) as i64, (middle[1] - center[1]) as i64);
+            if dx * dx + dz * dz <= reach * reach && placement.is_structure_chunk(seed, chunk.0.x, chunk.0.y, None) {
+                out.push(([cell_x, cell_z], middle));
+            }
+        }
+    }
+}
+
 /// How many candidates of a bin are tried by the end of each round of looking for a structure, for
 /// a grid of this spacing and up to about `max_tries`. Those that fail mostly do so at the cheap checks. Tight grids have many
 /// candidates of which few are real.
@@ -305,17 +357,69 @@ pub struct Finder {
     ring_generator: OnceLock<Option<StructureGenerator>>,
     /// assemble all pieces like the game, only to test that it comes to the same
     assemble_all: bool,
-    /// the placement of each kind that exists in this dimension
-    sets: Vec<KindSet>,
+    dimension: Dimension,
 }
 
 struct KindSet {
-    kind: usize,
     placement: StructurePlacement,
-    /// the biomes the game requires, see `Finder::might_generate`, if checking them first is worth it
+    /// the biomes the game requires, see `biome_allows`, if checking them first is worth it
     biomes: Option<FxHashSet<Identifier>>,
     /// offsets from the chunk's corner where the game can check the biome, in blocks
     biome_offsets: &'static [i32],
+}
+
+/// What is known about each kind without a seed.
+fn kind_sets() -> &'static [Option<KindSet>] {
+    static SETS: LazyLock<Vec<Option<KindSet>>> = LazyLock::new(|| {
+        init_registry();
+        let sets = load_vanilla_structure_sets();
+        STRUCTURE_KINDS
+            .iter()
+            .map(|kind| {
+                let (_, set) = sets.iter().find(|(_, set)| kind.is_in(set))?;
+                Some(KindSet {
+                    placement: set.placement.clone(),
+                    biome_offsets: if CHECKED_AWAY_FROM_MIDDLE.contains(&kind.id) {
+                        AROUND_MIDDLE
+                    } else {
+                        MIDDLE
+                    },
+                    biomes: (!USUALLY_REAL.contains(&kind.id) && !CHECKED_ANYWHERE.contains(&kind.id)).then(|| {
+                        REGISTRY
+                            .structures
+                            .iter()
+                            .filter(|(_, structure)| kind.structures.contains(&&*structure.key.path))
+                            .flat_map(|(_, structure)| structure.allowed_biomes.iter().cloned())
+                            .collect()
+                    }),
+                })
+            })
+            .collect()
+    });
+    &SETS
+}
+
+/// False if `kind` can't generate in the chunk because of the biome around its middle. The game
+/// finds this out too, but only after scanning heights or assembling pieces, which most candidates
+/// would be wasted on. `shortcuts_change_nothing` makes sure this comes to the same.
+fn biome_allows(source: &BiomeSourceKind, set: &KindSet, chunk: [i32; 2]) -> bool {
+    let Some(biomes) = &set.biomes else { return true };
+    let mut sampler = source.chunk_sampler();
+    let (x, z) = (chunk[0] * 16, chunk[1] * 16);
+    set.biome_offsets.iter().any(|dx| {
+        set.biome_offsets.iter().any(|dz| {
+            CHECK_HEIGHTS
+                .iter()
+                .any(|y| biomes.contains(&sampler.sample((x + dx) >> 2, y >> 2, (z + dz) >> 2).key))
+        })
+    })
+}
+
+/// Which of `candidates` of `kind` the biomes allow, from the world's biomes alone.
+pub fn allowed_by_biomes(source: &BiomeSourceKind, kind: usize, cells: &mut Vec<([i32; 2], [i32; 2])>) {
+    if let Some(set) = &kind_sets()[kind] {
+        cells.retain(|(_, middle)| biome_allows(source, set, [(middle[0] - 8) / 16, (middle[1] - 8) / 16]));
+    }
 }
 
 /// Nearly all candidates of these really generate, a check up front would only cost time.
@@ -364,32 +468,6 @@ impl Finder {
             Dimension::Nether => AnyNoises::Nether(Noises::new(seed)),
             Dimension::End => AnyNoises::End(Noises::new(seed)),
         };
-        let sets = load_vanilla_structure_sets();
-        let sets = STRUCTURE_KINDS
-            .iter()
-            .enumerate()
-            .filter(|(_, kind)| kind.dimension == dimension)
-            .filter_map(|(index, kind)| {
-                let (_, set) = sets.iter().find(|(_, set)| kind.is_in(set))?;
-                Some(KindSet {
-                    kind: index,
-                    placement: set.placement.clone(),
-                    biome_offsets: if CHECKED_AWAY_FROM_MIDDLE.contains(&kind.id) {
-                        AROUND_MIDDLE
-                    } else {
-                        MIDDLE
-                    },
-                    biomes: (!USUALLY_REAL.contains(&kind.id) && !CHECKED_ANYWHERE.contains(&kind.id)).then(|| {
-                        REGISTRY
-                            .structures
-                            .iter()
-                            .filter(|(_, structure)| kind.structures.contains(&&*structure.key.path))
-                            .flat_map(|(_, structure)| structure.allowed_biomes.iter().cloned())
-                            .collect()
-                    }),
-                })
-            })
-            .collect();
         Ok(Self {
             seed: raw_seed as i64,
             source,
@@ -397,12 +475,14 @@ impl Finder {
             generator,
             ring_generator: OnceLock::new(),
             assemble_all: false,
-            sets,
+            dimension,
         })
     }
 
     fn set(&self, kind: usize) -> Option<&KindSet> {
-        self.sets.iter().find(|set| set.kind == kind)
+        kind_sets()[kind]
+            .as_ref()
+            .filter(|_| STRUCTURE_KINDS[kind].dimension == self.dimension)
     }
 
     /// The structure of `kind` in a grid cell of its `Spread::Grid`, if one really generates.
@@ -426,27 +506,30 @@ impl Finder {
             spread_type,
         );
         // the cheapest first: this is only a random number for kinds that are rare on purpose
-        if !set.placement.is_structure_chunk(self.seed, chunk.0.x, chunk.0.y, None) || !self.might_generate(set, chunk)
+        if !set.placement.is_structure_chunk(self.seed, chunk.0.x, chunk.0.y, None)
+            || !biome_allows(&self.source, set, [chunk.0.x, chunk.0.y])
         {
             return None;
         }
         self.at_chunk(&self.generator, kind, chunk)
     }
 
-    /// False if the kind can't generate in the chunk because of the biome around its middle. The
-    /// game finds this out too, but only after scanning heights or assembling pieces, which most
-    /// candidates would be wasted on. `shortcuts_change_nothing` makes sure this comes to the same.
-    fn might_generate(&self, set: &KindSet, chunk: ChunkPos) -> bool {
-        let Some(biomes) = &set.biomes else { return true };
-        let mut sampler = self.source.chunk_sampler();
-        let (x, z) = (chunk.0.x * 16, chunk.0.y * 16);
-        set.biome_offsets.iter().any(|dx| {
-            set.biome_offsets.iter().any(|dz| {
-                CHECK_HEIGHTS
-                    .iter()
-                    .any(|y| biomes.contains(&sampler.sample((x + dx) >> 2, y >> 2, (z + dz) >> 2).key))
-            })
-        })
+    /// All structures of `kind` within `radius` blocks of `center`.
+    pub fn around(&self, kind: usize, center: [i32; 2], radius: i32) -> Vec<Found> {
+        let is_near = |found: &Found| {
+            let (dx, dz) = ((found.x - center[0]) as i64, (found.z - center[1]) as i64);
+            dx * dx + dz * dz <= radius as i64 * radius as i64
+        };
+        if spread(kind) == Some(Spread::Rings) {
+            return self.rings(kind).into_iter().filter(is_near).collect();
+        }
+        let mut cells = Vec::new();
+        candidates(self.seed, kind, center, radius, &mut cells);
+        cells
+            .into_iter()
+            .filter_map(|(cell, _)| self.in_world(kind, cell[0], cell[1]))
+            .filter(is_near)
+            .collect()
     }
 
     /// One structure of `kind` in a square bin of `4^level` grid cells, if one of the candidates
@@ -656,6 +739,46 @@ mod tests {
 
     /// Compares with the game's code without shortcuts: the full set of structures, no checks up
     /// front. A lot of candidates, because a check that is wrong now and then would lose structures.
+    #[test]
+    fn markers_stay_within_their_margin() {
+        with_big_stack(|| {
+            for dimension in Dimension::ALL {
+                let finder = Finder::new(12345, dimension).unwrap();
+                for (kind, def) in STRUCTURE_KINDS.iter().enumerate() {
+                    if def.dimension != dimension || spread(kind) == Some(Spread::Rings) {
+                        continue;
+                    }
+                    let mut cells = Vec::new();
+                    candidates(finder.seed, kind, [0, 0], 40_000, &mut cells);
+                    let mut real = 0;
+                    for (cell, middle) in cells.into_iter().take(1500) {
+                        if let Some(found) = finder.in_cell(kind, cell[0], cell[1]) {
+                            let (dx, dz) = ((found.x - middle[0]) as i64, (found.z - middle[1]) as i64);
+                            let margin = marker_margin(kind) as i64;
+                            assert!(dx * dx + dz * dz <= margin * margin, "{} {dx} {dz}", def.id);
+                            real += 1;
+                        }
+                    }
+                    assert!(real > 0, "{}", def.id);
+                }
+            }
+        });
+    }
+
+    #[test]
+    fn candidates_depend_on_the_lower_48_bits_only() {
+        for (kind, _) in STRUCTURE_KINDS.iter().enumerate() {
+            for seed in 0..20i64 {
+                let seed = seed.wrapping_mul(0x5DEE_CE66_D123_4567u64 as i64);
+                let other = seed ^ (seed.rotate_left(13) << 48) ^ (1 << 63);
+                let (mut a, mut b) = (Vec::new(), Vec::new());
+                candidates(seed, kind, [0, 0], 5000, &mut a);
+                candidates(other, kind, [0, 0], 5000, &mut b);
+                assert_eq!(a, b, "{}", STRUCTURE_KINDS[kind].id);
+            }
+        }
+    }
+
     #[test]
     fn shortcuts_change_nothing() {
         let threads: Vec<_> = Dimension::ALL
