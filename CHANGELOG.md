@@ -13,13 +13,14 @@ The release workflow publishes the section of a version as its release notes.
 - Structures on the map: a sub menu with a switch and an icon for every kind, all off by default.
   Their positions come from the game's real generation code.
   End cities with a ship have their own switch and icon. They show at every zoom, all of them until they
-  get very dense and a sample beyond that. Markers don't overlap, with a slider for
-  their spacing: where there is room and a structure it is shown, the rarest kinds first, and free spots keep
+  get very dense and a sample beyond that. Markers don't overlap unless you let them, with a
+  slider for the space between them: where there is room and a structure it is shown, the rarest kinds first, and free spots keep
   being searched in rounds.
 - A search for the nearest structures and biomes.
 - A height map of the real terrain when zoomed in, in the overworld, off by default, with a quality
   setting and the sea floor shown under water. Each height is one visible square. It uses the game's own
   quick estimate of the surface, and exact heights can be switched on for when zoomed in.
+- + and - zoom the map, and an Advanced menu has more values to adjust.
 - A Performance menu with how many threads cubox may use and how much memory finished tiles may take.
 - The status line says how many biome tiles, height map tiles and structure areas are being generated.
 - A nightly web version of the newest commit on main, at `/nightly/`.

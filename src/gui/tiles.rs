@@ -16,8 +16,7 @@ use crate::{
 
 /// Small tiles pop in quickly one by one and waste little work on parts outside the screen.
 pub const TILE_SIZE: usize = 128;
-/// Seconds a newly arrived texture takes to fade in over whatever was shown before.
-const FADE_SECONDS: f64 = 0.15;
+
 /// How many levels down a tile may be built from cached tiles, through the levels in between.
 const MAX_BUILD_DEPTH: u32 = 4;
 
@@ -40,6 +39,8 @@ pub struct TileCache {
     generation: u64,
     frame: u64,
     max_tiles: usize,
+    /// seconds a newly arrived texture takes to fade in over whatever was shown before
+    fade_seconds: f64,
 }
 
 impl TileCache {
@@ -50,7 +51,8 @@ impl TileCache {
             pending: HashSet::new(),
             generation: 0,
             frame: 0,
-            max_tiles: resources::tiles_in_mib(resources::CACHE_MIB.2),
+            max_tiles: resources::tiles_in_mib(resources::default_cache_mib()),
+            fade_seconds: 0.15,
         }
     }
 
@@ -77,6 +79,10 @@ impl TileCache {
     /// How many tiles may be generated at once.
     pub fn set_thread_limit(&mut self, threads: usize) {
         self.executor.set_limit(threads);
+    }
+
+    pub fn set_fade_seconds(&mut self, seconds: f64) {
+        self.fade_seconds = seconds.max(0.001);
     }
 
     pub fn set_max_tiles(&mut self, tiles: usize) {
@@ -146,7 +152,7 @@ impl TileCache {
     pub fn get(&mut self, key: &TileKey, now: f64) -> Option<(Rc<TileTexture>, f32)> {
         let entry = self.entries.get_mut(key)?;
         entry.last_used_frame = self.frame;
-        let alpha = ((now - entry.arrived) / FADE_SECONDS).clamp(0.0, 1.0) as f32;
+        let alpha = ((now - entry.arrived) / self.fade_seconds).clamp(0.0, 1.0) as f32;
         Some((entry.texture.clone(), alpha))
     }
 

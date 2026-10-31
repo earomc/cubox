@@ -25,8 +25,6 @@ const MAX_STAND_IN_DOWN: i32 = 3;
 /// coarser with one sample per pixel, 1/16 to 1/64 of the work at the default samples. It keeps up
 /// even while zooming out continuously.
 const COVER_LEVELS: i32 = 2;
-/// The coarsest level with relief. Beyond it the terrain is only noise on this scale.
-pub const MAX_RELIEF_LEVEL: i32 = 5;
 
 pub struct Camera {
     /// world position in the center of the view, in quarts
@@ -66,6 +64,10 @@ pub struct MapSettings {
     pub relief: Option<ReliefQuality>,
     /// use exact heights in that quality instead of only the estimate
     pub relief_exact: bool,
+    /// the coarsest level with relief
+    pub max_relief_level: i32,
+    /// how strongly relief is drawn, 1 is normal
+    pub relief_strength: f32,
     /// the relief is that of the sea floor instead of the water
     pub sea_floor: bool,
 }
@@ -214,13 +216,16 @@ impl MapView {
             samples: 1,
             ..key
         };
-        let relief_detail = settings.relief.filter(|_| level <= MAX_RELIEF_LEVEL).map(|quality| {
-            if settings.relief_exact {
-                quality.detail(level)
-            } else {
-                Detail::Estimate
-            }
-        });
+        let relief_detail = settings
+            .relief
+            .filter(|_| level <= settings.max_relief_level)
+            .map(|quality| {
+                if settings.relief_exact {
+                    quality.detail(level)
+                } else {
+                    Detail::Estimate
+                }
+            });
         let relief: Vec<TileKey> = relief_detail.map_or(Vec::new(), |detail| {
             keys.iter().map(|&key| relief_key(key, detail)).collect()
         });
@@ -270,6 +275,7 @@ impl MapView {
                 out.push(tex, screen, FULL_UV, alpha);
             }
         }
+        let first_relief_quad = out.quads.len();
         for key in relief {
             let screen = tile_screen(&self.camera, &key);
             let tile = tiles.get(&key, now);
@@ -286,6 +292,9 @@ impl MapView {
                 fading |= alpha < 1.0;
                 out.push(tex, screen, FULL_UV, alpha);
             }
+        }
+        for quad in &mut out.quads[first_relief_quad..] {
+            quad.alpha *= settings.relief_strength;
         }
         if fading {
             ui.ctx().request_repaint();

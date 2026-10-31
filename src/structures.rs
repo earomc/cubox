@@ -167,10 +167,10 @@ pub fn spread(kind: usize) -> Option<Spread> {
 }
 
 /// How many candidates of a bin are tried by the end of each round of looking for a structure, for
-/// a grid of this spacing. Those that fail mostly do so at the cheap checks. Tight grids have many
+/// a grid of this spacing and up to about `max_tries`. Those that fail mostly do so at the cheap checks. Tight grids have many
 /// candidates of which few are real.
-pub fn bin_rounds(spacing: i32) -> [u32; 4] {
-    let tries = [16, 128, 1024, 8192];
+pub fn bin_rounds(spacing: i32, max_tries: u32) -> [u32; 5] {
+    let tries = [16, 128, 1024, 8192, 65536].map(|tries: u32| tries.min(max_tries));
     if spacing <= 4 { tries.map(|n| n * 8) } else { tries }
 }
 

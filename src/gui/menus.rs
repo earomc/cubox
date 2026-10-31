@@ -5,8 +5,7 @@ use crate::{
     gui::{
         Ui,
         finder::Target,
-        map_view::MAX_RELIEF_LEVEL,
-        overlays::{GridSpacing, MAX_MARKER_SPACING, OVERLAP_SPACING},
+        overlays::{GridSpacing, MARKER_GAPS},
         resources,
     },
     structures::STRUCTURE_KINDS,
@@ -19,6 +18,33 @@ const ICON_SIZE: f32 = 18.0;
 /// The coarsest level with exact heights at the manual qualities. Beyond it even Full would take
 /// a long time for what are single columns far apart.
 const MAX_EXACT_LEVEL: i32 = 3;
+
+/// Values most people never need to change.
+pub struct Advanced {
+    pub marker_size: f32,
+    /// candidates an empty spot is given
+    pub search_tries: u32,
+    /// spots searched per marker distance, per axis
+    pub search_fineness: u32,
+    pub max_overlapping: usize,
+    pub max_relief_level: i32,
+    pub relief_strength: f32,
+    pub fade_seconds: f32,
+}
+
+impl Default for Advanced {
+    fn default() -> Self {
+        Self {
+            marker_size: 22.0,
+            search_tries: 8192,
+            search_fineness: 2,
+            max_overlapping: 30_000,
+            max_relief_level: 5,
+            relief_strength: 1.0,
+            fade_seconds: 0.15,
+        }
+    }
+}
 
 /// How many exact heights the height map is made of.
 #[derive(Clone, Copy, PartialEq, Debug)]
@@ -91,24 +117,28 @@ impl Ui {
                     kinds.iter().for_each(|&kind| self.shown_kinds[kind] = false);
                 }
             });
-            ui.horizontal(|ui| {
-                ui.label("Spacing");
-                ui.add(
-                    egui::Slider::new(&mut self.marker_spacing, OVERLAP_SPACING..=MAX_MARKER_SPACING).custom_formatter(
-                        |points, _| {
-                            if points as f32 <= OVERLAP_SPACING {
-                                "overlap".to_string()
-                            } else {
-                                format!("{points:.0} pt")
-                            }
-                        },
-                    ),
-                )
-                .on_hover_text(
-                    "How far apart markers are at least. Where there is room and a structure, it is shown, \
-                     the rarest kinds first. Far left: markers may overlap.",
-                );
+            ui.add_enabled_ui(!self.marker_overlap, |ui| {
+                ui.horizontal(|ui| {
+                    ui.label("Spacing");
+                    ui.add(
+                        egui::Slider::new(&mut self.marker_gap, MARKER_GAPS)
+                            .logarithmic(true)
+                            .fixed_decimals(0)
+                            .suffix(" pt"),
+                    )
+                    .on_hover_text(
+                        "The space between markers at least. Where there is room and a structure, it is shown, \
+                         the rarest kinds first.",
+                    );
+                });
             });
+            ui.checkbox(&mut self.prioritize_rare, "Prioritize rare").on_hover_text(
+                "Where markers compete for space, the rarest kinds get it. Off: every kind has the same chance.",
+            );
+            ui.checkbox(&mut self.marker_overlap, "Let markers overlap")
+                .on_hover_text(
+                    "Show what was found even on top of each other, up to a limit. A lot of markers can be slow.",
+                );
             for kind in self.kinds_here().collect::<Vec<_>>() {
                 ui.horizontal(|ui| {
                     if let Some(icons) = &self.icons {
@@ -246,12 +276,88 @@ impl Ui {
             });
             if self.dimension != Dimension::Overworld {
                 ui.weak("Only in the overworld");
-            } else if self.relief && level > MAX_RELIEF_LEVEL {
+            } else if self.relief && level > self.advanced.max_relief_level {
                 ui.weak("Zoom in to see terrain");
             } else if self.relief && (!self.relief_exact || self.relief_quality.detail(level) == Detail::Estimate) {
                 ui.weak("Estimated heights, usually 5 to 15 blocks off");
             }
         });
+    }
+
+    pub(super) fn advanced_menu(&mut self, ui: &mut egui::Ui) {
+        egui::CollapsingHeader::new("Advanced").show(ui, |ui| {
+            let advanced = &mut self.advanced;
+            let row = |ui: &mut egui::Ui, name: &str, slider: egui::Slider, hint: &str| {
+                ui.horizontal(|ui| {
+                    ui.label(name);
+                    ui.add(slider).on_hover_text(hint);
+                });
+            };
+            row(
+                ui,
+                "Marker size",
+                egui::Slider::new(&mut advanced.marker_size, 10.0..=64.0)
+                    .fixed_decimals(0)
+                    .suffix(" pt"),
+                "How big markers are on the screen",
+            );
+            row(
+                ui,
+                "Search tries",
+                egui::Slider::new(&mut advanced.search_tries, 16..=65536).logarithmic(true),
+                "How many candidates an empty spot is given to find a structure. More fills more gaps, more slowly.",
+            );
+            row(
+                ui,
+                "Search detail",
+                egui::Slider::new(&mut advanced.search_fineness, 1..=4),
+                "How many spots are searched per marker distance, per axis. More fills more gaps, with much more work.",
+            );
+            row(
+                ui,
+                "Overlap limit",
+                egui::Slider::new(&mut advanced.max_overlapping, 1000..=200_000).logarithmic(true),
+                "How many markers are drawn at most while they may overlap. Too many can be slow.",
+            );
+            row(
+                ui,
+                "Height map zoom",
+                egui::Slider::new(&mut advanced.max_relief_level, 0..=10).prefix("level "),
+                "The furthest zoom level with a height map. From about level 6 on it is mostly noise.",
+            );
+            row(
+                ui,
+                "Height map strength",
+                egui::Slider::new(&mut advanced.relief_strength, 0.1..=1.8).fixed_decimals(1),
+                "How strongly the height map is drawn over the biomes",
+            );
+            row(
+                ui,
+                "Tile fade",
+                egui::Slider::new(&mut advanced.fade_seconds, 0.0..=1.0)
+                    .fixed_decimals(2)
+                    .suffix(" s"),
+                "How long new tiles take to fade in",
+            );
+            if ui.button("Reset").clicked() {
+                *advanced = Advanced::default();
+            }
+        });
+    }
+
+    /// The plus and minus keys zoom the map, like the zoom buttons, unless they are being typed. With
+    /// Ctrl they are egui's, which scale the interface.
+    pub(super) fn zoom_shortcuts(&mut self, ctx: &egui::Context) {
+        if ctx.egui_wants_keyboard_input() {
+            return;
+        }
+        let pressed = |key| ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, key));
+        if pressed(egui::Key::Plus) || pressed(egui::Key::Equals) {
+            self.map.zoom_by(-1.0);
+        }
+        if pressed(egui::Key::Minus) {
+            self.map.zoom_by(1.0);
+        }
     }
 
     pub(super) fn performance_menu(&mut self, ui: &mut egui::Ui) {
@@ -262,7 +368,7 @@ impl Ui {
                     .on_hover_text("How many cores cubox uses at most. Fewer leave more for other programs.");
             });
             ui.horizontal(|ui| {
-                let (min, max, _) = resources::CACHE_MIB;
+                let (min, max) = resources::CACHE_MIB;
                 ui.label("Tile memory");
                 ui.add(
                     egui::Slider::new(&mut self.cache_mib, min..=max)

@@ -40,6 +40,8 @@ const COMPLETE_LEVEL: u32 = 1;
 /// Bins per axis of a job at that level. Beyond it a job is one bin, as each one is looked through
 /// for as long as it takes to find something.
 const NEAR_JOB_SIDE: i32 = 4;
+/// Bins remembered at most, about 100 bytes each. Beyond that they are looked for again if needed.
+const MAX_BINS: usize = 1_000_000;
 /// The edge of the world in blocks.
 const WORLD_EDGE: f64 = 30_000_000.0;
 
@@ -291,6 +293,16 @@ fn job_side_at(level: u32, spacing: i32) -> i32 {
     }
 }
 
+/// How markers are looked for at this zoom.
+#[derive(Clone, Copy)]
+pub struct MarkerSearch {
+    pub blocks_per_point: f64,
+    /// at most one structure is looked for in each square of this many points, when zoomed out
+    pub bin_points: f64,
+    /// how many candidates a square is given
+    pub max_tries: u32,
+}
+
 /// What a job for bins has found so far.
 #[derive(Default)]
 struct BinState {
@@ -438,15 +450,13 @@ impl Queries {
         });
     }
 
-    /// The visible part of a kind with a structure shown for each square of `bin_points`. `min` and
-    /// `max` are in blocks.
+    /// The visible part of a kind. `min` and `max` are in blocks.
     pub fn visible(
         &self,
         kind: usize,
         min: [f64; 2],
         max: [f64; 2],
-        blocks_per_point: f64,
-        bin_points: f64,
+        search: MarkerSearch,
         occupied: &dyn Occupied,
     ) -> Visible {
         match spread(kind) {
@@ -461,7 +471,7 @@ impl Queries {
                 sampled: false,
             },
             Some(Spread::Grid(spacing)) => {
-                let level = bin_level(spacing, blocks_per_point, bin_points);
+                let level = bin_level(spacing, search.blocks_per_point, search.bin_points);
                 let side = job_side_at(level, spacing);
                 let block = spacing as f64 * (1i64 << level) as f64 * side as f64 * 16.0;
                 let range = |lo: f64, hi: f64| {
@@ -477,7 +487,7 @@ impl Queries {
                     sampled: level > COMPLETE_LEVEL,
                     ..Default::default()
                 };
-                let rounds = bin_rounds(spacing);
+                let rounds = bin_rounds(spacing, search.max_tries);
                 let candidates = 4u64.saturating_pow(level);
                 let rarity = rarity(kind);
                 for (x, z) in blocks {
@@ -620,6 +630,9 @@ impl Queries {
                 },
                 Reply::Found(found),
             ) => {
+                if self.bins.len() >= MAX_BINS {
+                    self.bins.clear();
+                }
                 let state = self.bins.entry((kind, level, x, z)).or_default();
                 state.found.extend(found);
                 state.tried = state.tried.max(tries.end);
@@ -745,6 +758,14 @@ fn shell_blocks(shell: i32) -> Vec<(i32, i32)> {
 mod tests {
     use super::*;
 
+    fn near(blocks_per_point: f64) -> MarkerSearch {
+        MarkerSearch {
+            blocks_per_point,
+            bin_points: 24.0,
+            max_tries: 8192,
+        }
+    }
+
     struct Empty;
 
     impl Occupied for Empty {
@@ -766,7 +787,7 @@ mod tests {
         let (min, max, zoom) = ([-300_000.0, -300_000.0], [300_000.0, 300_000.0], 1000.0);
         let mut seen = HashSet::new();
         for _ in 0..200_000 {
-            let jobs = queries.visible(kind, min, max, zoom, 24.0, occupied).jobs.concat();
+            let jobs = queries.visible(kind, min, max, near(zoom), occupied).jobs.concat();
             seen.extend(jobs.iter().cloned());
             queries.update(&jobs);
             if !queries.busy() {
@@ -788,7 +809,7 @@ mod tests {
         let bins = |round: usize, queries: &Queries, occupied: &dyn Occupied| {
             let (min, max) = ([-300_000.0, -300_000.0], [300_000.0, 300_000.0]);
             queries
-                .visible(kind, min, max, 1000.0, 24.0, occupied)
+                .visible(kind, min, max, near(1000.0), occupied)
                 .jobs
                 .get(round)
                 .map_or(0, Vec::len)
@@ -801,7 +822,7 @@ mod tests {
         assert_eq!(full, first_round);
         assert_eq!(
             queries
-                .visible(kind, [-300_000.0; 2], [300_000.0; 2], 1000.0, 24.0, &Full)
+                .visible(kind, [-300_000.0; 2], [300_000.0; 2], near(1000.0), &Full)
                 .jobs
                 .concat()
                 .len(),
@@ -811,7 +832,7 @@ mod tests {
         let later = bins(1, &queries, &Empty);
         assert!(later > 0 && later < first_round, "{later} of {first_round}");
         let found = queries
-            .visible(kind, [-300_000.0; 2], [300_000.0; 2], 1000.0, 24.0, &Empty)
+            .visible(kind, [-300_000.0; 2], [300_000.0; 2], near(1000.0), &Empty)
             .known
             .len();
         assert_eq!(later + found, first_round);
@@ -892,13 +913,13 @@ mod tests {
         let village = STRUCTURE_KINDS.iter().position(|kind| kind.id == "village").unwrap();
         let (min, max) = ([-1000.0, -1000.0], [1000.0, 1000.0]);
         for _ in 0..30_000 {
-            let mut jobs = queries.visible(stronghold, min, max, 16.0, 24.0, &Empty).jobs;
-            jobs.extend(queries.visible(village, min, max, 16.0, 24.0, &Empty).jobs);
+            let mut jobs = queries.visible(stronghold, min, max, near(16.0), &Empty).jobs;
+            jobs.extend(queries.visible(village, min, max, near(16.0), &Empty).jobs);
             queries.update(&jobs.concat());
             if !queries.busy() {
                 assert_eq!(queries.waiting(), 0);
                 assert_eq!(
-                    queries.visible(stronghold, min, max, 16.0, 24.0, &Empty).known.len(),
+                    queries.visible(stronghold, min, max, near(16.0), &Empty).known.len(),
                     128
                 );
                 return;

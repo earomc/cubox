@@ -7,25 +7,22 @@ use egui::{Align2, Color32, FontId, Pos2, Rect, Stroke, TextureHandle, pos2, vec
 use crate::{
     gui::{
         Ui,
-        finder::{Job, Occupied},
+        finder::{Job, MarkerSearch, Occupied},
     },
     structures::{Found, STRUCTURE_KINDS, rarity},
     tile_renderer::WORLD_BORDER_QUARTS,
 };
 
-/// Markers are this big on the screen whatever the zoom, in points.
-const MARKER_SIZE: f32 = 22.0;
 /// Auto grid lines stay at least this far apart, in points.
 const MIN_LINE_DISTANCE: f64 = 80.0;
 /// Fixed grid spacings get coarser when lines would be closer than this, in points.
 const MIN_FIXED_LINE_DISTANCE: f64 = 12.0;
 const SEARCH_COLOR: Color32 = Color32::from_rgb(255, 225, 60);
 
-/// Marker spacing at which markers may overlap, the left end of its slider, in points.
-pub const OVERLAP_SPACING: f32 = 16.0;
-pub const MAX_MARKER_SPACING: f32 = 120.0;
-/// Just more than the size of a marker.
-pub const DEFAULT_MARKER_SPACING: f32 = MARKER_SIZE + 2.0;
+/// The space between markers, in points.
+pub const MARKER_GAPS: std::ops::RangeInclusive<f32> = 1.0..=100.0;
+pub const DEFAULT_MARKER_GAP: f32 = 2.0;
+
 /// Squares of the screen a structure is shown for while markers may overlap, in points.
 const OVERLAP_BIN_POINTS: f64 = 24.0;
 
@@ -40,16 +37,25 @@ pub struct Placed {
 }
 
 impl Placed {
-    /// `distance` is in blocks, 0 keeps everything but exact duplicates.
-    pub fn new(mut candidates: Vec<Found>, distance: f64) -> Self {
+    /// `distance` is in blocks. 0 lets them overlap, which keeps all but exact duplicates, up to
+    /// `max_overlapping`. Without `rare_first` all kinds have the same chance at a spot.
+    pub fn new(mut candidates: Vec<Found>, distance: f64, rare_first: bool, max_overlapping: usize) -> Self {
+        let rank = |found: &Found| if rare_first { rarity(found.kind) } else { 0 };
         let hash = |found: &Found| {
             (found.x as u32 as u64)
                 .wrapping_mul(0x9E37_79B9_7F4A_7C15)
                 .wrapping_add((found.z as u32 as u64).wrapping_mul(0xC2B2_AE3D_27D4_EB4F))
         };
-        candidates.sort_unstable_by_key(|found| (rarity(found.kind), hash(found), found.x, found.z));
+        candidates.sort_unstable_by_key(|found| (rank(found), hash(found), found.x, found.z, found.kind));
         candidates.dedup();
-        let cell = distance.max(1.0);
+        if distance <= 0.0 {
+            candidates.truncate(max_overlapping);
+            return Self {
+                markers: candidates,
+                ..Default::default()
+            };
+        }
+        let cell = distance;
         let at = |x: f64, z: f64| ((x / cell).floor() as i64, (z / cell).floor() as i64);
         let mut placed = Self {
             markers: Vec::with_capacity(candidates.len()),
@@ -58,22 +64,17 @@ impl Placed {
         };
         for found in candidates {
             let (cx, cz) = at(found.x as f64, found.z as f64);
-            let free = distance <= 0.0
-                || (cx - 1..=cx + 1).all(|x| {
-                    (cz - 1..=cz + 1).all(|z| {
-                        placed.grid.get(&(x, z)).is_none_or(|near| {
-                            near.iter().all(|(_, other)| {
-                                ((other.x - found.x).abs().max((other.z - found.z).abs()) as f64) >= distance
-                            })
+            let free = (cx - 1..=cx + 1).all(|x| {
+                (cz - 1..=cz + 1).all(|z| {
+                    placed.grid.get(&(x, z)).is_none_or(|near| {
+                        near.iter().all(|(_, other)| {
+                            ((other.x - found.x).abs().max((other.z - found.z).abs()) as f64) >= distance
                         })
                     })
-                });
+                })
+            });
             if free {
-                placed
-                    .grid
-                    .entry((cx, cz))
-                    .or_default()
-                    .push((rarity(found.kind), found));
+                placed.grid.entry((cx, cz)).or_default().push((rank(&found), found));
                 placed.markers.push(found);
             }
         }
@@ -83,6 +84,10 @@ impl Placed {
 
 impl Occupied for Placed {
     fn has_marker(&self, rarity: usize, min: [f64; 2], max: [f64; 2]) -> bool {
+        // markers may overlap, nothing is in the way of any other
+        if self.grid.is_empty() {
+            return false;
+        }
         let range = |lo: f64, hi: f64| (lo / self.cell).floor() as i64..=(hi / self.cell).floor() as i64;
         range(min[0], max[0]).any(|x| {
             range(min[1], max[1]).any(|z| {
@@ -256,10 +261,19 @@ impl Ui {
     fn update_structures(&mut self, rect: Rect) {
         let (min, max) = self.map.visible_blocks(rect);
         let blocks_per_point = self.map.blocks_per_point();
-        let overlap = self.marker_spacing <= OVERLAP_SPACING;
-        let spacing = self.marker_spacing as f64;
-        // finer than the spacing: a structure too close to another leaves room for one in the next square
-        let bin_points = if overlap { OVERLAP_BIN_POINTS } else { spacing / 2.0 };
+        let overlap = self.marker_overlap;
+        let spacing = (self.advanced.marker_size + self.marker_gap) as f64;
+        // finer than the distance: a structure too close to another leaves room for one in the next square
+        let bin_points = if overlap {
+            OVERLAP_BIN_POINTS
+        } else {
+            spacing / self.advanced.search_fineness as f64
+        };
+        let search = MarkerSearch {
+            blocks_per_point,
+            bin_points,
+            max_tries: self.advanced.search_tries,
+        };
         // what is just off the screen can still be in the way of what is on it
         let margin = spacing * blocks_per_point;
         let (min, max) = (min.map(|v| v - margin), max.map(|v| v + margin));
@@ -270,9 +284,7 @@ impl Ui {
             if !self.shown_kinds[kind] || def.dimension != self.dimension {
                 continue;
             }
-            let visible = self
-                .queries
-                .visible(kind, min, max, blocks_per_point, bin_points, &self.placed);
+            let visible = self.queries.visible(kind, min, max, search, &self.placed);
             self.sampled[kind] = visible.sampled;
             known.extend(visible.known);
             for (round, jobs) in visible.jobs.into_iter().enumerate() {
@@ -296,13 +308,14 @@ impl Ui {
         }
         self.queries.update(&jobs);
         let distance = if overlap { 0.0 } else { spacing * blocks_per_point };
-        self.placed = Placed::new(known, distance);
+        self.placed = Placed::new(known, distance, self.prioritize_rare, self.advanced.max_overlapping);
         self.markers.clear();
         self.markers.extend_from_slice(&self.placed.markers);
     }
 
     fn paint_markers(&self, ui: &egui::Ui, rect: Rect) {
         let Some(icons) = &self.icons else { return };
+        let size = self.advanced.marker_size;
         let painter = ui.painter_at(rect);
         // a mouse or the last touch shows what is under it
         let pointer = ui.input(|i| i.pointer.latest_pos());
@@ -310,11 +323,11 @@ impl Ui {
         // the rarest last, on top if they overlap
         for found in self.markers.iter().rev() {
             let at = self.map.block_to_screen(rect, [found.x as f64, found.z as f64]);
-            if !rect.expand(MARKER_SIZE).contains(at) {
+            if !rect.expand(size).contains(at) {
                 continue;
             }
-            let marker = Rect::from_center_size(at, vec2(MARKER_SIZE, MARKER_SIZE));
-            icons.image(found.kind, MARKER_SIZE).paint_at(ui, marker);
+            let marker = Rect::from_center_size(at, vec2(size, size));
+            icons.image(found.kind, size).paint_at(ui, marker);
             if pointer.is_some_and(|p| marker.contains(p)) {
                 let text = format!("{}\nx {} z {}", STRUCTURE_KINDS[found.kind].name, found.x, found.z);
                 label = Some((marker.right_top(), text));
@@ -323,7 +336,7 @@ impl Ui {
         if let Some(search) = &self.queries.search {
             for result in &search.results {
                 let at = self.map.block_to_screen(rect, [result[0] as f64, result[1] as f64]);
-                painter.circle_stroke(at, MARKER_SIZE * 0.75, Stroke::new(2.5, SEARCH_COLOR));
+                painter.circle_stroke(at, size * 0.75, Stroke::new(2.5, SEARCH_COLOR));
             }
         }
         if let Some((at, text)) = label {
@@ -435,7 +448,7 @@ mod tests {
             .map(|i: i32| found("village", i.wrapping_mul(7919) % 4000, i.wrapping_mul(104_729) % 4000))
             .collect();
         let distance = 100.0;
-        let placed = Placed::new(candidates.clone(), distance).markers;
+        let placed = Placed::new(candidates.clone(), distance, true, 100).markers;
         for (i, a) in placed.iter().enumerate() {
             for b in &placed[i + 1..] {
                 assert!((a.x - b.x).abs().max((a.z - b.z).abs()) as f64 >= distance);
@@ -452,22 +465,51 @@ mod tests {
         // the same whatever order they come in
         let mut reversed = candidates;
         reversed.reverse();
-        assert_eq!(Placed::new(reversed, distance).markers, placed);
+        assert_eq!(Placed::new(reversed, distance, true, 100).markers, placed);
     }
 
     #[test]
     fn the_rare_kind_wins_the_space_but_far_apart_both_stay() {
         let (rare, common) = (found("woodland_mansion", 0, 0), found("village", 10, 10));
-        assert_eq!(Placed::new(vec![common, rare], 100.0).markers, vec![rare]);
+        assert_eq!(Placed::new(vec![common, rare], 100.0, true, 100).markers, vec![rare]);
         let far = found("village", 500, 500);
-        assert_eq!(Placed::new(vec![far, rare], 100.0).markers, vec![rare, far]);
+        assert_eq!(Placed::new(vec![far, rare], 100.0, true, 100).markers, vec![rare, far]);
         // may overlap
-        assert_eq!(Placed::new(vec![common, rare], 0.0).markers.len(), 2);
+        assert_eq!(Placed::new(vec![common, rare], 0.0, true, 100).markers.len(), 2);
+    }
+
+    #[test]
+    fn overlapping_markers_are_limited_and_stop_nothing() {
+        let many: Vec<Found> = (0..3100).map(|i| found("village", i, 0)).collect();
+        let placed = Placed::new(many, 0.0, true, 3000);
+        assert_eq!(placed.markers.len(), 3000);
+        // a whole world of a search: quickly, however far apart the corners are
+        assert!(!placed.has_marker(0, [-3e7; 2], [3e7; 2]));
+    }
+
+    #[test]
+    fn without_priority_all_kinds_get_their_share() {
+        let candidates: Vec<Found> = (0..400)
+            .flat_map(|i: i32| {
+                let (x, z) = (i.wrapping_mul(7919) % 3000, i.wrapping_mul(104_729) % 3000);
+                [found("woodland_mansion", x, z), found("village", x + 7, z + 3)]
+            })
+            .collect();
+        let share = |rare_first| {
+            let placed = Placed::new(candidates.clone(), 100.0, rare_first, 100).markers;
+            let villages = placed.iter().filter(|p| p.kind == found("village", 0, 0).kind).count();
+            villages as f64 / placed.len() as f64
+        };
+        assert!(share(true) < 0.1, "{}", share(true));
+        assert!((0.3..0.7).contains(&share(false)), "{}", share(false));
+        // and markers of any kind stop the looking then
+        let placed = Placed::new(vec![found("village", 50, 50)], 100.0, false, 100);
+        assert!(placed.has_marker(0, [0.0; 2], [100.0; 2]));
     }
 
     #[test]
     fn only_as_rare_markers_stop_looking_further() {
-        let placed = Placed::new(vec![found("village", 50, 50)], 100.0);
+        let placed = Placed::new(vec![found("village", 50, 50)], 100.0, true, 100);
         let village = rarity(found("village", 0, 0).kind);
         let mansion = rarity(found("woodland_mansion", 0, 0).kind);
         assert!(placed.has_marker(village, [0.0; 2], [100.0; 2]));

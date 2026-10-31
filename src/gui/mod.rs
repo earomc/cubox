@@ -43,7 +43,7 @@ use crate::{
         finder::{FinderWorld, Queries},
         map_renderer::{MapRenderer, Quad},
         map_view::{MapSettings, MapView},
-        menus::ReliefQuality,
+        menus::{Advanced, ReliefQuality},
         overlays::{Grid, Icons, Placed},
         tiles::TileCache,
         world::WorldParams,
@@ -245,8 +245,13 @@ struct Ui {
     markers: Vec<Found>,
     /// the last placement of them
     placed: Placed,
-    /// how far apart markers are at least, in points
-    marker_spacing: f32,
+    /// the space between markers at least, in points
+    marker_gap: f32,
+    /// show everything even on top of each other
+    marker_overlap: bool,
+    /// where markers compete for space, the rarest kinds get it
+    prioritize_rare: bool,
+    advanced: Advanced,
     /// kinds of which only some are shown at this zoom
     sampled: Vec<bool>,
     icons: Option<Icons>,
@@ -395,7 +400,10 @@ impl State {
             shown_kinds: vec![false; STRUCTURE_KINDS.len()],
             markers: Vec::new(),
             placed: Placed::default(),
-            marker_spacing: overlays::DEFAULT_MARKER_SPACING,
+            marker_gap: overlays::DEFAULT_MARKER_GAP,
+            marker_overlap: false,
+            prioritize_rare: true,
+            advanced: Advanced::default(),
             sampled: vec![false; STRUCTURE_KINDS.len()],
             icons: None,
             search_filter: String::new(),
@@ -403,7 +411,7 @@ impl State {
             relief_exact: false,
             relief_quality: ReliefQuality::Auto,
             threads: resources::default_threads(),
-            cache_mib: resources::CACHE_MIB.2,
+            cache_mib: resources::default_cache_mib(),
             sea_floor: true,
             zoom_buttons_shown: true,
             terrain: None,
@@ -461,7 +469,9 @@ impl State {
                 Command::Relief(on) => ui.relief = on,
                 Command::Quality(quality) => ui.relief_quality = quality,
                 Command::Exact(on) => ui.relief_exact = on,
-                Command::MarkerSpacing(points) => ui.marker_spacing = points,
+                Command::MarkerGap(points) => ui.marker_gap = points,
+                Command::MarkerOverlap(on) => ui.marker_overlap = on,
+                Command::PrioritizeRare(on) => ui.prioritize_rare = on,
                 Command::Threads(threads) => ui.threads = threads,
                 Command::SeaFloor(on) => ui.sea_floor = on,
                 Command::ZoomButtons(on) => ui.zoom_buttons_shown = on,
@@ -780,6 +790,8 @@ impl Ui {
             samples: self.samples,
             relief: (self.relief && self.dimension == Dimension::Overworld).then_some(self.relief_quality),
             relief_exact: self.relief_exact,
+            max_relief_level: self.advanced.max_relief_level,
+            relief_strength: self.advanced.relief_strength,
             sea_floor: self.sea_floor,
         };
         let (tile_threads, finder_threads) =
@@ -787,6 +799,8 @@ impl Ui {
         self.tiles.set_thread_limit(tile_threads);
         self.queries.set_thread_limit(finder_threads);
         self.tiles.set_max_tiles(resources::tiles_in_mib(self.cache_mib));
+        self.tiles.set_fade_seconds(self.advanced.fade_seconds as f64);
+        self.zoom_shortcuts(root.ctx());
         self.quads.clear();
         if self.icons.is_none() {
             self.icons = Some(Icons::load(root.ctx()));
@@ -897,6 +911,7 @@ impl Ui {
             self.terrain_menu(ui, level);
             self.grid_menu(ui);
             self.performance_menu(ui);
+            self.advanced_menu(ui);
             ui.checkbox(&mut self.zoom_buttons_shown, "Zoom buttons");
         }));
 

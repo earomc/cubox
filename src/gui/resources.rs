@@ -25,12 +25,21 @@ pub fn default_threads() -> usize {
     max_threads()
 }
 
-/// The range of the memory slider and where it starts, in MiB. Browsers get less.
-pub const CACHE_MIB: (u32, u32, u32) = if cfg!(target_arch = "wasm32") {
-    (32, 2048, 80)
+/// The range of the memory slider in MiB. A page can't use much more than this.
+pub const CACHE_MIB: (u32, u32) = if cfg!(target_arch = "wasm32") {
+    (32, 2048)
 } else {
-    (64, 16384, 320)
+    (64, 16384)
 };
+
+/// Where the memory slider starts, in MiB: phones and tablets can't spare that much.
+pub fn default_cache_mib() -> u32 {
+    #[cfg(target_arch = "wasm32")]
+    if web_sys::window().is_some_and(|w| w.navigator().max_touch_points() > 0) {
+        return 128;
+    }
+    1024
+}
 
 pub fn tiles_in_mib(mib: u32) -> usize {
     mib as usize * TILES_PER_MIB
