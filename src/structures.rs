@@ -166,11 +166,51 @@ pub fn spread(kind: usize) -> Option<Spread> {
     SPREADS[kind]
 }
 
-/// Candidates tried at most per bin of `Finder::in_bin` for a grid of this spacing. Those that
-/// fail mostly do so at the cheap checks, and the search ends at the first real one. Tight grids
-/// have many candidates of which few are real.
-pub fn bin_budget(spacing: i32) -> u32 {
-    if spacing <= 4 { 1024 } else { 128 }
+/// How many candidates of a bin are tried by the end of each round of looking for a structure, for
+/// a grid of this spacing. Those that fail mostly do so at the cheap checks. Tight grids have many
+/// candidates of which few are real.
+pub fn bin_rounds(spacing: i32) -> [u32; 4] {
+    let tries = [16, 128, 1024, 8192];
+    if spacing <= 4 { tries.map(|n| n * 8) } else { tries }
+}
+
+/// All kinds, the rarest in the world first, measured as real structures per area on a seed. Where
+/// markers compete for space the rare ones are placed first, the others would crowd them out.
+const RARITY_ORDER: &[&str] = &[
+    "stronghold",
+    "woodland_mansion",
+    "buried_treasure",
+    "swamp_hut",
+    "desert_pyramid",
+    "jungle_temple",
+    "pillager_outpost",
+    "igloo",
+    "ancient_city",
+    "ocean_monument",
+    "trail_ruins",
+    "village",
+    "shipwreck",
+    "ruined_portal",
+    "ocean_ruin",
+    "trial_chambers",
+    "mineshaft",
+    "fortress",
+    "bastion",
+    "ruined_portal_nether",
+    "nether_fossil",
+    "end_city_ship",
+    "end_city",
+];
+
+/// The place of a kind in `RARITY_ORDER`, lower is rarer.
+pub fn rarity(kind: usize) -> usize {
+    static RANKS: LazyLock<Vec<usize>> = LazyLock::new(|| {
+        STRUCTURE_KINDS
+            .iter()
+            .map(|kind| RARITY_ORDER.iter().position(|id| *id == kind.id).unwrap_or(usize::MAX))
+            .collect()
+    });
+    RANKS[kind]
 }
 
 thread_local! {
@@ -337,13 +377,12 @@ impl Finder {
         })
     }
 
-    /// One structure of `kind` in a square bin of `4^level` grid cells, if one of the first `budget`
-    /// candidates really generates. The candidates of a bin are spread over all of it, and those in
-    /// a part of it are in the same order as that part's own, so that part finds the same structure.
-    pub fn in_bin(&self, kind: usize, level: u32, x: i32, z: i32, budget: u32) -> Option<Found> {
-        let tries = 4u64.saturating_pow(level).min(budget as u64);
-        (0..tries).find_map(|index| {
-            let (cell_x, cell_z) = bin_candidate(level, x, z, index);
+    /// One structure of `kind` in a square bin of `4^level` grid cells, if one of the candidates
+    /// `tries` really generates. The candidates of a bin are spread over all of it, and those in a
+    /// part of it are in the same order as that part's own, so that part finds the same structure.
+    pub fn in_bin(&self, kind: usize, level: u32, x: i32, z: i32, tries: std::ops::Range<u32>) -> Option<Found> {
+        tries.into_iter().find_map(|index| {
+            let (cell_x, cell_z) = bin_candidate(level, x, z, index as u64);
             self.in_world(kind, cell_x, cell_z)
         })
     }
@@ -511,14 +550,14 @@ mod tests {
             let kind = STRUCTURE_KINDS.iter().position(|k| k.id == "shipwreck").unwrap();
             let mut found = 0;
             for (x, z) in (-8..8).flat_map(|x| (-8..8).map(move |z| (x, z))) {
-                let Some(far) = finder.in_bin(kind, 3, x, z, 16) else {
+                let Some(far) = finder.in_bin(kind, 3, x, z, 0..16) else {
                     continue;
                 };
                 found += 1;
                 // whichever part it is in finds it too
                 let at_part = (0..4).find_map(|part: i32| {
                     let (part_x, part_z) = (x * 2 + (part & 1), z * 2 + (part >> 1));
-                    finder.in_bin(kind, 2, part_x, part_z, 16).filter(|f| *f == far)
+                    finder.in_bin(kind, 2, part_x, part_z, 0..16).filter(|f| *f == far)
                 });
                 assert_eq!(at_part, Some(far));
             }
@@ -609,6 +648,36 @@ mod tests {
             }
             assert!(real > 20, "{real}");
         });
+    }
+
+    #[test]
+    fn rounds_find_the_same_as_one_long_search() {
+        with_big_stack(|| {
+            let finder = Finder::new(12345, Dimension::Overworld).unwrap();
+            let kind = STRUCTURE_KINDS.iter().position(|k| k.id == "swamp_hut").unwrap();
+            let mut found = 0;
+            for (x, z) in (-5..5).flat_map(|x| (-5..5).map(move |z| (x, z))) {
+                let long = finder.in_bin(kind, 8, x, z, 0..256);
+                let rounds = finder
+                    .in_bin(kind, 8, x, z, 0..16)
+                    .or_else(|| finder.in_bin(kind, 8, x, z, 16..128))
+                    .or_else(|| finder.in_bin(kind, 8, x, z, 128..256));
+                assert_eq!(long, rounds);
+                found += long.is_some() as i32;
+            }
+            assert!(found > 10, "{found}");
+        });
+    }
+
+    #[test]
+    fn every_kind_has_a_rarity() {
+        let mut ranks: Vec<usize> = (0..STRUCTURE_KINDS.len()).map(rarity).collect();
+        ranks.sort();
+        ranks.dedup();
+        assert_eq!(ranks.len(), STRUCTURE_KINDS.len());
+        assert!(ranks.iter().all(|rank| *rank != usize::MAX));
+        let rank = |id| rarity(STRUCTURE_KINDS.iter().position(|k| k.id == id).unwrap());
+        assert!(rank("end_city_ship") < rank("end_city"));
     }
 
     #[test]

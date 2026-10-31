@@ -2,7 +2,13 @@
 
 use crate::{
     dimension::Dimension,
-    gui::{Ui, finder::Target, map_view::MAX_RELIEF_LEVEL, overlays::GridSpacing, resources},
+    gui::{
+        Ui,
+        finder::Target,
+        map_view::MAX_RELIEF_LEVEL,
+        overlays::{GridSpacing, MAX_MARKER_SPACING, OVERLAP_SPACING},
+        resources,
+    },
     structures::STRUCTURE_KINDS,
     terrain::Terrain,
     tile_renderer::Detail,
@@ -84,6 +90,24 @@ impl Ui {
                 if ui.button("None").clicked() {
                     kinds.iter().for_each(|&kind| self.shown_kinds[kind] = false);
                 }
+            });
+            ui.horizontal(|ui| {
+                ui.label("Spacing");
+                ui.add(
+                    egui::Slider::new(&mut self.marker_spacing, OVERLAP_SPACING..=MAX_MARKER_SPACING).custom_formatter(
+                        |points, _| {
+                            if points as f32 <= OVERLAP_SPACING {
+                                "overlap".to_string()
+                            } else {
+                                format!("{points:.0} pt")
+                            }
+                        },
+                    ),
+                )
+                .on_hover_text(
+                    "How far apart markers are at least. Where there is room and a structure, it is shown, \
+                     the rarest kinds first. Far left: markers may overlap.",
+                );
             });
             for kind in self.kinds_here().collect::<Vec<_>>() {
                 ui.horizontal(|ui| {

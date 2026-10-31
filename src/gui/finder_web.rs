@@ -16,7 +16,7 @@ use crate::{
 /// that make sense for its memory.
 const MAX_WORKERS: usize = 8;
 /// Replies are taken once per frame, so workers have this many jobs each not to run dry.
-const JOBS_PER_WORKER: usize = 8;
+const JOBS_PER_WORKER: usize = 16;
 
 pub struct Pool {
     inner: Rc<RefCell<Inner>>,

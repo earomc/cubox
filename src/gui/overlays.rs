@@ -1,10 +1,15 @@
 //! What is painted over the map: structure markers, the distance grid and the zoom buttons.
 
+use std::collections::HashMap;
+
 use egui::{Align2, Color32, FontId, Pos2, Rect, Stroke, TextureHandle, pos2, vec2};
 
 use crate::{
-    gui::{Ui, finder::Job},
-    structures::STRUCTURE_KINDS,
+    gui::{
+        Ui,
+        finder::{Job, Occupied},
+    },
+    structures::{Found, STRUCTURE_KINDS, rarity},
     tile_renderer::WORLD_BORDER_QUARTS,
 };
 
@@ -15,6 +20,83 @@ const MIN_LINE_DISTANCE: f64 = 80.0;
 /// Fixed grid spacings get coarser when lines would be closer than this, in points.
 const MIN_FIXED_LINE_DISTANCE: f64 = 12.0;
 const SEARCH_COLOR: Color32 = Color32::from_rgb(255, 225, 60);
+
+/// Marker spacing at which markers may overlap, the left end of its slider, in points.
+pub const OVERLAP_SPACING: f32 = 16.0;
+pub const MAX_MARKER_SPACING: f32 = 120.0;
+/// Just more than the size of a marker.
+pub const DEFAULT_MARKER_SPACING: f32 = MARKER_SIZE + 2.0;
+/// Squares of the screen a structure is shown for while markers may overlap, in points.
+const OVERLAP_BIN_POINTS: f64 = 24.0;
+
+/// The markers that are shown: those with space around them, the rarest kinds first. Depends only
+/// on the structures and the distance, so moving the view doesn't shuffle them.
+#[derive(Default)]
+pub struct Placed {
+    pub markers: Vec<Found>,
+    /// the rarity of the markers in each square of `cell` blocks
+    grid: HashMap<(i64, i64), Vec<(usize, Found)>>,
+    cell: f64,
+}
+
+impl Placed {
+    /// `distance` is in blocks, 0 keeps everything but exact duplicates.
+    pub fn new(mut candidates: Vec<Found>, distance: f64) -> Self {
+        let hash = |found: &Found| {
+            (found.x as u32 as u64)
+                .wrapping_mul(0x9E37_79B9_7F4A_7C15)
+                .wrapping_add((found.z as u32 as u64).wrapping_mul(0xC2B2_AE3D_27D4_EB4F))
+        };
+        candidates.sort_unstable_by_key(|found| (rarity(found.kind), hash(found), found.x, found.z));
+        candidates.dedup();
+        let cell = distance.max(1.0);
+        let at = |x: f64, z: f64| ((x / cell).floor() as i64, (z / cell).floor() as i64);
+        let mut placed = Self {
+            markers: Vec::with_capacity(candidates.len()),
+            grid: HashMap::new(),
+            cell,
+        };
+        for found in candidates {
+            let (cx, cz) = at(found.x as f64, found.z as f64);
+            let free = distance <= 0.0
+                || (cx - 1..=cx + 1).all(|x| {
+                    (cz - 1..=cz + 1).all(|z| {
+                        placed.grid.get(&(x, z)).is_none_or(|near| {
+                            near.iter().all(|(_, other)| {
+                                ((other.x - found.x).abs().max((other.z - found.z).abs()) as f64) >= distance
+                            })
+                        })
+                    })
+                });
+            if free {
+                placed
+                    .grid
+                    .entry((cx, cz))
+                    .or_default()
+                    .push((rarity(found.kind), found));
+                placed.markers.push(found);
+            }
+        }
+        placed
+    }
+}
+
+impl Occupied for Placed {
+    fn has_marker(&self, rarity: usize, min: [f64; 2], max: [f64; 2]) -> bool {
+        let range = |lo: f64, hi: f64| (lo / self.cell).floor() as i64..=(hi / self.cell).floor() as i64;
+        range(min[0], max[0]).any(|x| {
+            range(min[1], max[1]).any(|z| {
+                self.grid.get(&(x, z)).is_some_and(|near| {
+                    near.iter().any(|(rank, found)| {
+                        *rank <= rarity
+                            && (min[0]..max[0]).contains(&(found.x as f64))
+                            && (min[1]..max[1]).contains(&(found.z as f64))
+                    })
+                })
+            })
+        })
+    }
+}
 
 /// The structure icons in `assets/icons`. Replace those files and rebuild to change them.
 macro_rules! icon_files {
@@ -174,28 +256,49 @@ impl Ui {
     fn update_structures(&mut self, rect: Rect) {
         let (min, max) = self.map.visible_blocks(rect);
         let blocks_per_point = self.map.blocks_per_point();
-        let mut per_kind: Vec<std::vec::IntoIter<Job>> = Vec::new();
-        self.markers.clear();
+        let overlap = self.marker_spacing <= OVERLAP_SPACING;
+        let spacing = self.marker_spacing as f64;
+        // finer than the spacing: a structure too close to another leaves room for one in the next square
+        let bin_points = if overlap { OVERLAP_BIN_POINTS } else { spacing / 2.0 };
+        // what is just off the screen can still be in the way of what is on it
+        let margin = spacing * blocks_per_point;
+        let (min, max) = (min.map(|v| v - margin), max.map(|v| v + margin));
+        let mut rounds: Vec<Vec<std::vec::IntoIter<Job>>> = Vec::new();
+        let mut known = Vec::new();
         for (kind, def) in STRUCTURE_KINDS.iter().enumerate() {
             self.sampled[kind] = false;
             if !self.shown_kinds[kind] || def.dimension != self.dimension {
                 continue;
             }
-            let visible = self.queries.visible(kind, min, max, blocks_per_point);
+            let visible = self
+                .queries
+                .visible(kind, min, max, blocks_per_point, bin_points, &self.placed);
             self.sampled[kind] = visible.sampled;
-            self.markers.extend(visible.known);
-            per_kind.push(visible.jobs.into_iter());
+            known.extend(visible.known);
+            for (round, jobs) in visible.jobs.into_iter().enumerate() {
+                if rounds.len() <= round {
+                    rounds.resize_with(round + 1, Vec::new);
+                }
+                rounds[round].push(jobs.into_iter());
+            }
         }
-        // taking turns, or the kinds further down the list would wait for all of the others
+        // a round for all first. kinds take turns, or those further down the list would wait for
+        // all of the others
         let mut jobs: Vec<Job> = Vec::new();
-        loop {
-            let before = jobs.len();
-            jobs.extend(per_kind.iter_mut().filter_map(Iterator::next));
-            if jobs.len() == before {
-                break;
+        for mut per_kind in rounds {
+            loop {
+                let before = jobs.len();
+                jobs.extend(per_kind.iter_mut().filter_map(Iterator::next));
+                if jobs.len() == before {
+                    break;
+                }
             }
         }
         self.queries.update(&jobs);
+        let distance = if overlap { 0.0 } else { spacing * blocks_per_point };
+        self.placed = Placed::new(known, distance);
+        self.markers.clear();
+        self.markers.extend_from_slice(&self.placed.markers);
     }
 
     fn paint_markers(&self, ui: &egui::Ui, rect: Rect) {
@@ -204,7 +307,8 @@ impl Ui {
         // a mouse or the last touch shows what is under it
         let pointer = ui.input(|i| i.pointer.latest_pos());
         let mut label = None;
-        for found in &self.markers {
+        // the rarest last, on top if they overlap
+        for found in self.markers.iter().rev() {
             let at = self.map.block_to_screen(rect, [found.x as f64, found.z as f64]);
             if !rect.expand(MARKER_SIZE).contains(at) {
                 continue;
@@ -316,6 +420,60 @@ impl Ui {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn found(id: &str, x: i32, z: i32) -> Found {
+        Found {
+            kind: STRUCTURE_KINDS.iter().position(|kind| kind.id == id).unwrap(),
+            x,
+            z,
+        }
+    }
+
+    #[test]
+    fn markers_keep_their_distance_and_use_the_space_there_is() {
+        let candidates: Vec<Found> = (0..3000)
+            .map(|i: i32| found("village", i.wrapping_mul(7919) % 4000, i.wrapping_mul(104_729) % 4000))
+            .collect();
+        let distance = 100.0;
+        let placed = Placed::new(candidates.clone(), distance).markers;
+        for (i, a) in placed.iter().enumerate() {
+            for b in &placed[i + 1..] {
+                assert!((a.x - b.x).abs().max((a.z - b.z).abs()) as f64 >= distance);
+            }
+        }
+        // whatever is left out is next to one that is in: nothing with space around it is missing
+        for candidate in &candidates {
+            assert!(
+                placed
+                    .iter()
+                    .any(|p| (p.x - candidate.x).abs().max((p.z - candidate.z).abs()) < 100)
+            );
+        }
+        // the same whatever order they come in
+        let mut reversed = candidates;
+        reversed.reverse();
+        assert_eq!(Placed::new(reversed, distance).markers, placed);
+    }
+
+    #[test]
+    fn the_rare_kind_wins_the_space_but_far_apart_both_stay() {
+        let (rare, common) = (found("woodland_mansion", 0, 0), found("village", 10, 10));
+        assert_eq!(Placed::new(vec![common, rare], 100.0).markers, vec![rare]);
+        let far = found("village", 500, 500);
+        assert_eq!(Placed::new(vec![far, rare], 100.0).markers, vec![rare, far]);
+        // may overlap
+        assert_eq!(Placed::new(vec![common, rare], 0.0).markers.len(), 2);
+    }
+
+    #[test]
+    fn only_as_rare_markers_stop_looking_further() {
+        let placed = Placed::new(vec![found("village", 50, 50)], 100.0);
+        let village = rarity(found("village", 0, 0).kind);
+        let mansion = rarity(found("woodland_mansion", 0, 0).kind);
+        assert!(placed.has_marker(village, [0.0; 2], [100.0; 2]));
+        assert!(!placed.has_marker(mansion, [0.0; 2], [100.0; 2]));
+        assert!(!placed.has_marker(village, [200.0; 2], [300.0; 2]));
+    }
 
     #[test]
     fn auto_spacing_is_round_and_keeps_lines_apart() {

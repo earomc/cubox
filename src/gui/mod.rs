@@ -44,7 +44,7 @@ use crate::{
         map_renderer::{MapRenderer, Quad},
         map_view::{MapSettings, MapView},
         menus::ReliefQuality,
-        overlays::{Grid, Icons},
+        overlays::{Grid, Icons, Placed},
         tiles::TileCache,
         world::WorldParams,
     },
@@ -243,6 +243,10 @@ struct Ui {
     shown_kinds: Vec<bool>,
     /// structures on the screen, cached for the markers
     markers: Vec<Found>,
+    /// the last placement of them
+    placed: Placed,
+    /// how far apart markers are at least, in points
+    marker_spacing: f32,
     /// kinds of which only some are shown at this zoom
     sampled: Vec<bool>,
     icons: Option<Icons>,
@@ -390,6 +394,8 @@ impl State {
             }),
             shown_kinds: vec![false; STRUCTURE_KINDS.len()],
             markers: Vec::new(),
+            placed: Placed::default(),
+            marker_spacing: overlays::DEFAULT_MARKER_SPACING,
             sampled: vec![false; STRUCTURE_KINDS.len()],
             icons: None,
             search_filter: String::new(),
@@ -455,6 +461,7 @@ impl State {
                 Command::Relief(on) => ui.relief = on,
                 Command::Quality(quality) => ui.relief_quality = quality,
                 Command::Exact(on) => ui.relief_exact = on,
+                Command::MarkerSpacing(points) => ui.marker_spacing = points,
                 Command::Threads(threads) => ui.threads = threads,
                 Command::SeaFloor(on) => ui.sea_floor = on,
                 Command::ZoomButtons(on) => ui.zoom_buttons_shown = on,
@@ -881,6 +888,9 @@ impl Ui {
                 self.tiles.pending() - relief_tiles,
                 self.queries.waiting()
             ));
+            if !self.markers.is_empty() {
+                ui.label(format!("{} markers", self.markers.len()));
+            }
             ui.separator();
             self.structures_menu(ui);
             self.search_menu(ui);

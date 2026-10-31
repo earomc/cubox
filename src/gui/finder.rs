@@ -4,6 +4,7 @@
 
 use std::{
     collections::{HashMap, HashSet},
+    ops::Range,
     sync::OnceLock,
 };
 
@@ -12,7 +13,7 @@ use steel_worldgen::biomes::BiomeSourceKind;
 use crate::{
     dimension::Dimension,
     gui::finder_pool::Pool,
-    structures::{Finder, Found, STRUCTURE_KINDS, Spread, bin_budget, spread},
+    structures::{Finder, Found, STRUCTURE_KINDS, Spread, bin_rounds, rarity, spread},
 };
 
 /// Which world questions are about.
@@ -34,13 +35,11 @@ const BIOME_PATCH: i32 = 512;
 const STRUCTURE_LIMIT: i64 = 300_000;
 /// Results a search ends at.
 const SEARCH_RESULTS: usize = 10;
-/// When zoomed far out one structure is shown for each square of this many points. The work then
-/// stays the same however much of the world is visible.
-const MIN_BIN_POINTS: f64 = 24.0;
 /// Bins up to this level show everything in them instead of one structure.
 const COMPLETE_LEVEL: u32 = 1;
-/// Bins per axis of a job when zoomed out.
-const FAR_JOB_SIDE: i32 = 4;
+/// Bins per axis of a job at that level. Beyond it a job is one bin, as each one is looked through
+/// for as long as it takes to find something.
+const NEAR_JOB_SIDE: i32 = 4;
 /// The edge of the world in blocks.
 const WORLD_EDGE: f64 = 30_000_000.0;
 
@@ -53,6 +52,8 @@ pub enum Job {
         x: i32,
         z: i32,
         side: i32,
+        /// which candidates to try, all of them if empty
+        tries: Range<u32>,
     },
     Rings {
         kind: usize,
@@ -88,7 +89,8 @@ impl Job {
                 x,
                 z,
                 side,
-            } => format!("bins {kind} {level} {x} {z} {side}"),
+                tries,
+            } => format!("bins {kind} {level} {x} {z} {side} {} {}", tries.start, tries.end),
             Job::Rings { kind } => format!("rings {kind}"),
             Job::Biome {
                 biome,
@@ -112,6 +114,7 @@ impl Job {
                     x: *n.get(2)?,
                     z: *n.get(3)?,
                     side: *n.get(4)?,
+                    tries: *n.get(5)? as u32..*n.get(6)? as u32,
                 })
             }
             "rings" => Some(Job::Rings {
@@ -209,19 +212,16 @@ impl WorldQueries {
                 x,
                 z,
                 side,
+                tries,
             } => {
                 let found = self.finder().map_or(Vec::new(), |finder| {
-                    let budget = spread(*kind).map_or(0, |spread| match spread {
-                        Spread::Grid(spacing) => bin_budget(spacing),
-                        Spread::Rings => 0,
-                    });
                     (*z..z + side)
                         .flat_map(|z| (*x..x + side).map(move |x| (x, z)))
                         .flat_map(|(x, z)| {
-                            if *level <= COMPLETE_LEVEL {
+                            if tries.is_empty() {
                                 finder.all_in_bin(*kind, *level, x, z)
                             } else {
-                                finder.in_bin(*kind, *level, x, z, budget).into_iter().collect()
+                                finder.in_bin(*kind, *level, x, z, tries.clone()).into_iter().collect()
                             }
                         })
                         .collect()
@@ -277,17 +277,39 @@ fn job_side(spacing: i32) -> i32 {
     (16 / spacing).max(4)
 }
 
-/// The level of bins for a kind at this zoom: the smallest with bins of at least `MIN_BIN_POINTS`.
-fn bin_level(spacing: i32, blocks_per_point: f64) -> u32 {
+/// The level of bins for a kind at this zoom: the smallest with bins of at least `bin_points`.
+fn bin_level(spacing: i32, blocks_per_point: f64, bin_points: f64) -> u32 {
     let cell_points = (spacing * 16) as f64 / blocks_per_point;
-    (MIN_BIN_POINTS / cell_points).log2().ceil().max(0.0) as u32
+    (bin_points / cell_points).log2().ceil().max(0.0) as u32
+}
+
+fn job_side_at(level: u32, spacing: i32) -> i32 {
+    match level {
+        0 => job_side(spacing),
+        l if l <= COMPLETE_LEVEL => NEAR_JOB_SIDE,
+        _ => 1,
+    }
+}
+
+/// What a job for bins has found so far.
+#[derive(Default)]
+struct BinState {
+    found: Vec<Found>,
+    /// how many candidates were tried, of which job `tries` is next
+    tried: u32,
+}
+
+/// The markers that were placed on the screen, for not looking further where that can't change them.
+pub trait Occupied {
+    /// Whether a marker of this rarity or rarer is inside these blocks.
+    fn has_marker(&self, rarity: usize, min: [f64; 2], max: [f64; 2]) -> bool;
 }
 
 /// What is known and wanted of a kind in the visible part of the world.
 #[derive(Default)]
 pub struct Visible {
-    /// nearest to the center first
-    pub jobs: Vec<Job>,
+    /// the jobs of each round of looking for structures, nearest to the center first
+    pub jobs: Vec<Vec<Job>>,
     pub known: Vec<Found>,
     /// only some of the structures are shown at this zoom
     pub sampled: bool,
@@ -347,7 +369,7 @@ pub struct Queries {
     /// bumped when the world changes, replies of older ones are dropped
     generation: u64,
     /// the replies to `Job::Bins` by kind, level, x and z
-    bins: HashMap<(usize, u32, i32, i32), Vec<Found>>,
+    bins: HashMap<(usize, u32, i32, i32), BinState>,
     rings: HashMap<usize, Vec<Found>>,
     in_flight: HashSet<Job>,
     pub search: Option<Search>,
@@ -416,22 +438,31 @@ impl Queries {
         });
     }
 
-    /// The visible part of a kind. `min` and `max` are in blocks.
-    pub fn visible(&self, kind: usize, min: [f64; 2], max: [f64; 2], blocks_per_point: f64) -> Visible {
+    /// The visible part of a kind with a structure shown for each square of `bin_points`. `min` and
+    /// `max` are in blocks.
+    pub fn visible(
+        &self,
+        kind: usize,
+        min: [f64; 2],
+        max: [f64; 2],
+        blocks_per_point: f64,
+        bin_points: f64,
+        occupied: &dyn Occupied,
+    ) -> Visible {
         match spread(kind) {
             None => Visible::default(),
             Some(Spread::Rings) => Visible {
                 jobs: if self.rings.contains_key(&kind) {
                     Vec::new()
                 } else {
-                    vec![Job::Rings { kind }]
+                    vec![vec![Job::Rings { kind }]]
                 },
                 known: self.rings.get(&kind).cloned().unwrap_or_default(),
                 sampled: false,
             },
             Some(Spread::Grid(spacing)) => {
-                let level = bin_level(spacing, blocks_per_point);
-                let side = if level == 0 { job_side(spacing) } else { FAR_JOB_SIDE };
+                let level = bin_level(spacing, blocks_per_point, bin_points);
+                let side = job_side_at(level, spacing);
                 let block = spacing as f64 * (1i64 << level) as f64 * side as f64 * 16.0;
                 let range = |lo: f64, hi: f64| {
                     (lo.max(-WORLD_EDGE) / block).floor() as i64..=(hi.min(WORLD_EDGE) / block).floor() as i64
@@ -446,21 +477,64 @@ impl Queries {
                     sampled: level > COMPLETE_LEVEL,
                     ..Default::default()
                 };
+                let rounds = bin_rounds(spacing);
+                let candidates = 4u64.saturating_pow(level);
+                let rarity = rarity(kind);
                 for (x, z) in blocks {
                     let (x, z) = (x as i32 * side, z as i32 * side);
-                    match self.bins.get(&(kind, level, x, z)) {
-                        Some(found) => visible.known.extend_from_slice(found),
-                        None => {
-                            visible.jobs.push(Job::Bins {
+                    let state = self.bins.get(&(kind, level, x, z));
+                    if let Some(state) = state {
+                        visible.known.extend_from_slice(&state.found);
+                    }
+                    let tried = state.map_or(0, |state| state.tried);
+                    if level <= COMPLETE_LEVEL {
+                        if state.is_none() {
+                            visible.jobs.resize(1, Vec::new());
+                            visible.jobs[0].push(Job::Bins {
                                 kind,
                                 level,
                                 x,
                                 z,
                                 side,
+                                tries: 0..0,
                             });
                             self.nearby_levels(kind, level, [x, z], side, spacing, &mut visible.known);
                         }
+                        continue;
                     }
+                    if state.is_some_and(|state| !state.found.is_empty()) {
+                        continue;
+                    }
+                    let Some(round) = rounds
+                        .iter()
+                        .position(|&tries| tried < tries && (tried as u64) < candidates)
+                    else {
+                        continue;
+                    };
+                    if round == 0 {
+                        self.nearby_levels(kind, level, [x, z], side, spacing, &mut visible.known);
+                    } else {
+                        // no use looking further where nothing more could be shown
+                        let size = block / side as f64;
+                        let (lo, hi) = (
+                            [x as f64 * size, z as f64 * size],
+                            [(x + 1) as f64 * size, (z + 1) as f64 * size],
+                        );
+                        if occupied.has_marker(rarity, lo, hi) {
+                            continue;
+                        }
+                    }
+                    if visible.jobs.len() <= round {
+                        visible.jobs.resize(round + 1, Vec::new());
+                    }
+                    visible.jobs[round].push(Job::Bins {
+                        kind,
+                        level,
+                        x,
+                        z,
+                        side,
+                        tries: tried..(rounds[round] as u64).min(candidates) as u32,
+                    });
                 }
                 visible
             }
@@ -469,21 +543,21 @@ impl Queries {
 
     /// What other zoom levels know of a job that isn't answered yet, so markers stay while zooming.
     fn nearby_levels(&self, kind: usize, level: u32, at: [i32; 2], side: i32, spacing: i32, out: &mut Vec<Found>) {
-        let side_at = |level: u32| if level == 0 { job_side(spacing) } else { FAR_JOB_SIDE };
         // one level coarser
-        let coarse_side = side_at(level + 1);
-        let align = |v: i32| (v >> 1).div_euclid(coarse_side) * coarse_side;
-        if let Some(found) = self.bins.get(&(kind, level + 1, align(at[0]), align(at[1]))) {
-            out.extend_from_slice(found);
+        let coarse_side = job_side_at(level + 1, spacing);
+        let align = |v: i32, side: i32| v.div_euclid(side) * side;
+        let coarse = (align(at[0] >> 1, coarse_side), align(at[1] >> 1, coarse_side));
+        if let Some(state) = self.bins.get(&(kind, level + 1, coarse.0, coarse.1)) {
+            out.extend_from_slice(&state.found);
         }
         // one level finer
         if level > 0 {
-            let fine_side = side_at(level - 1);
-            let (from, to) = ((at[0] * 2, at[1] * 2), side * 2);
-            for x in (from.0..from.0 + to).step_by(fine_side as usize) {
-                for z in (from.1..from.1 + to).step_by(fine_side as usize) {
-                    if let Some(found) = self.bins.get(&(kind, level - 1, x, z)) {
-                        out.extend_from_slice(found);
+            let fine_side = job_side_at(level - 1, spacing);
+            let (from, to) = (at.map(|v| align(v * 2, fine_side)), side * 2);
+            for x in (from[0]..from[0] + to).step_by(fine_side as usize) {
+                for z in (from[1]..from[1] + to).step_by(fine_side as usize) {
+                    if let Some(state) = self.bins.get(&(kind, level - 1, x, z)) {
+                        out.extend_from_slice(&state.found);
                     }
                 }
             }
@@ -517,7 +591,17 @@ impl Queries {
 
     fn is_known(&self, job: &Job) -> bool {
         match job {
-            Job::Bins { kind, level, x, z, .. } => self.bins.contains_key(&(*kind, *level, *x, *z)),
+            Job::Bins {
+                kind,
+                level,
+                x,
+                z,
+                tries,
+                ..
+            } => self
+                .bins
+                .get(&(*kind, *level, *x, *z))
+                .is_some_and(|state| state.tried >= tries.end),
             Job::Rings { kind } => self.rings.contains_key(kind),
             Job::Biome { .. } => false,
         }
@@ -525,8 +609,20 @@ impl Queries {
 
     fn store(&mut self, job: Job, reply: Reply) {
         match (job, reply) {
-            (Job::Bins { kind, level, x, z, .. }, Reply::Found(found)) => {
-                self.bins.insert((kind, level, x, z), found);
+            (
+                Job::Bins {
+                    kind,
+                    level,
+                    x,
+                    z,
+                    tries,
+                    ..
+                },
+                Reply::Found(found),
+            ) => {
+                let state = self.bins.entry((kind, level, x, z)).or_default();
+                state.found.extend(found);
+                state.tried = state.tried.max(tries.end);
             }
             (Job::Rings { kind }, Reply::Found(found)) => {
                 self.rings.insert(kind, found);
@@ -595,6 +691,7 @@ impl Queries {
                                 x,
                                 z,
                                 side,
+                                tries: 0..0,
                             })
                             .collect::<Vec<_>>();
                         if !jobs.is_empty() {
@@ -603,7 +700,7 @@ impl Queries {
                         // the shell is answered
                         for (dx, dz) in shell_blocks(search.shell) {
                             let key = (kind, 0, (center[0] + dx) * side, (center[1] + dz) * side);
-                            search.results.extend(self.bins[&key].iter().map(|f| [f.x, f.z]));
+                            search.results.extend(self.bins[&key].found.iter().map(|f| [f.x, f.z]));
                         }
                         sort_by_distance(&mut search.results, search.center);
                         search.reached = search.shell as i64 * block as i64;
@@ -648,6 +745,78 @@ fn shell_blocks(shell: i32) -> Vec<(i32, i32)> {
 mod tests {
     use super::*;
 
+    struct Empty;
+
+    impl Occupied for Empty {
+        fn has_marker(&self, _: usize, _: [f64; 2], _: [f64; 2]) -> bool {
+            false
+        }
+    }
+
+    struct Full;
+
+    impl Occupied for Full {
+        fn has_marker(&self, _: usize, _: [f64; 2], _: [f64; 2]) -> bool {
+            true
+        }
+    }
+
+    /// Answers until nothing is wanted, and returns how many jobs that took.
+    fn answer_all(queries: &mut Queries, kind: usize, occupied: &dyn Occupied) -> usize {
+        let (min, max, zoom) = ([-300_000.0, -300_000.0], [300_000.0, 300_000.0], 1000.0);
+        let mut seen = HashSet::new();
+        for _ in 0..200_000 {
+            let jobs = queries.visible(kind, min, max, zoom, 24.0, occupied).jobs.concat();
+            seen.extend(jobs.iter().cloned());
+            queries.update(&jobs);
+            if !queries.busy() {
+                return seen.len();
+            }
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+        panic!("still {} waiting", queries.waiting());
+    }
+
+    #[test]
+    fn later_rounds_only_look_where_there_is_space() {
+        let world = FinderWorld {
+            seed: 12345,
+            dimension: Dimension::Overworld,
+            sample_height: 256,
+        };
+        let kind = STRUCTURE_KINDS.iter().position(|kind| kind.id == "swamp_hut").unwrap();
+        let bins = |round: usize, queries: &Queries, occupied: &dyn Occupied| {
+            let (min, max) = ([-300_000.0, -300_000.0], [300_000.0, 300_000.0]);
+            queries
+                .visible(kind, min, max, 1000.0, 24.0, occupied)
+                .jobs
+                .get(round)
+                .map_or(0, Vec::len)
+        };
+        let mut queries = Queries::new(world);
+        let first_round = bins(0, &queries, &Empty);
+        assert!(first_round > 100, "{first_round}");
+        // with markers everywhere only the first round happens
+        let full = answer_all(&mut queries, kind, &Full);
+        assert_eq!(full, first_round);
+        assert_eq!(
+            queries
+                .visible(kind, [-300_000.0; 2], [300_000.0; 2], 1000.0, 24.0, &Full)
+                .jobs
+                .concat()
+                .len(),
+            0
+        );
+        // where there is space it goes on, and every bin with something found stops
+        let later = bins(1, &queries, &Empty);
+        assert!(later > 0 && later < first_round, "{later} of {first_round}");
+        let found = queries
+            .visible(kind, [-300_000.0; 2], [300_000.0; 2], 1000.0, 24.0, &Empty)
+            .known
+            .len();
+        assert_eq!(later + found, first_round);
+    }
+
     #[test]
     fn messages_survive_encoding() {
         for job in [
@@ -657,6 +826,7 @@ mod tests {
                 x: -4,
                 z: 7,
                 side: 16,
+                tries: 16..128,
             },
             Job::Rings { kind: 2 },
             Job::Biome {
@@ -722,12 +892,15 @@ mod tests {
         let village = STRUCTURE_KINDS.iter().position(|kind| kind.id == "village").unwrap();
         let (min, max) = ([-1000.0, -1000.0], [1000.0, 1000.0]);
         for _ in 0..30_000 {
-            let mut jobs = queries.visible(stronghold, min, max, 16.0).jobs;
-            jobs.extend(queries.visible(village, min, max, 16.0).jobs);
-            queries.update(&jobs);
+            let mut jobs = queries.visible(stronghold, min, max, 16.0, 24.0, &Empty).jobs;
+            jobs.extend(queries.visible(village, min, max, 16.0, 24.0, &Empty).jobs);
+            queries.update(&jobs.concat());
             if !queries.busy() {
                 assert_eq!(queries.waiting(), 0);
-                assert_eq!(queries.visible(stronghold, min, max, 16.0).known.len(), 128);
+                assert_eq!(
+                    queries.visible(stronghold, min, max, 16.0, 24.0, &Empty).known.len(),
+                    128
+                );
                 return;
             }
             std::thread::sleep(std::time::Duration::from_millis(1));

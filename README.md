@@ -42,8 +42,8 @@ cubes/boxes ... so it works in multiple ways I guess ...
 
 - **Structures:** every kind in the game, each with its own icon and switch, off by default. Positions
   come from the game's real generation code, including biome and terrain checks. They show at any zoom: when
-  zoomed far out, where there are far too many to show, each spot shows one real structure and zooming in reveals
-  the rest. Structures made of jigsaw pieces, like villages, are marked at their center piece.
+  zoomed far out, where there are far too many to show, free space fills with real structures, the rarest kinds
+  first, at a spacing you choose, and zooming in reveals the rest. Structures made of jigsaw pieces, like villages, are marked at their center piece.
 - **Search** for the nearest structures or biomes from the middle of the view.
 - **Height map:** the real terrain shaded over the biomes when zoomed in, in the overworld, sea floor included.
   It uses the game's quick estimate of the surface, usually 5 to 15 blocks off. Exact heights can be switched on

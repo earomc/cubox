@@ -17,7 +17,7 @@ use crate::gui::{
 /// Placing structures recurses deeply, SteelMC's own tests need this much stack for it too.
 const STACK_SIZE: usize = 16 << 20;
 /// Replies are taken once per frame, so threads have this many jobs waiting each not to run dry.
-const JOBS_PER_THREAD: usize = 8;
+const JOBS_PER_THREAD: usize = 32;
 
 type Request = (FinderWorld, u64, Job);
 
