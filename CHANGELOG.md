@@ -8,6 +8,11 @@ The release workflow publishes the section of a version as its release notes.
 
 ## [Unreleased]
 
+### Fixed
+
+- Markers appear in the web version again, 0.4.1 broke them.
+- Flicker when zooming with highlighted biomes.
+
 ## [0.4.1] - 2026-10-31
 
 ### Changed

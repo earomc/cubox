@@ -33,7 +33,9 @@ impl Dimension {
         };
         // The first sample builds SteelMC's biome lookup tree with rayon, behind a lock. A worker of
         // a rayon pool doing that could pick up another job while it waits, which then waits for the
-        // same lock forever. So it is built here, before any worker needs it.
+        // same lock forever. So it is built here, before any worker needs it. Browsers have no such
+        // workers, and there rayon would make this thread its pool, which `Finder::new` needs it for.
+        #[cfg(not(target_arch = "wasm32"))]
         source.chunk_sampler().sample(0, 0, 0);
         source
     }
