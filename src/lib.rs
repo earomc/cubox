@@ -4,6 +4,7 @@
 pub mod biome_colors;
 pub mod dimension;
 pub mod gui;
+pub mod noise;
 pub mod seed;
 pub mod seedfind;
 pub mod structures;

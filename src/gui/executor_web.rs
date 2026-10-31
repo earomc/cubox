@@ -19,11 +19,14 @@ use crate::{
         resources,
         world::{Finished, Queue, Task, World, WorldParams},
     },
+    seedfind::spec::NoiseParameter,
     tile_renderer::{Detail, Estimate, Layer, Tile, TileKey},
 };
 
 /// The worker script next to the page, see `web/worker.js`.
 const WORKER_SCRIPT: &str = "./worker.js";
+/// How noise tiles are told apart from relief ones in requests, above the numbers of `Detail`.
+const FIRST_NOISE_NUMBER: u8 = 200;
 
 pub struct Executor {
     inner: Rc<RefCell<Inner>>,
@@ -184,6 +187,7 @@ fn encode_request(params: &WorldParams, key: TileKey, task: &Task) -> (Array, Ar
         match key.layer {
             Layer::Biome => 0.into(),
             Layer::Relief { detail, .. } => detail.encode().into(),
+            Layer::Noise(parameter) => (FIRST_NOISE_NUMBER + parameter as u8).into(),
         },
         matches!(key.layer, Layer::Relief { sea_floor: true, .. }).into(),
         matches!(task, Task::Numbers).into(),
@@ -234,16 +238,20 @@ pub fn worker_run(request: &Array) -> Result<Array, JsValue> {
         sample_height: number(2)? as i32,
         samples: number(3)? as u8,
     };
-    let detail = Detail::decode(number(10)? as u8);
-    let relief = detail.is_some();
+    let layer_number = number(10)? as u8;
+    let noise = layer_number
+        .checked_sub(FIRST_NOISE_NUMBER)
+        .and_then(|index| NoiseParameter::ALL.get(index as usize).copied());
+    let detail = Detail::decode(layer_number).filter(|_| noise.is_none());
+    let relief = detail.is_some() || noise.is_some();
     let key = TileKey {
-        layer: match detail {
-            Some(detail) => Layer::Relief {
+        layer: match (noise, detail) {
+            (Some(parameter), _) => Layer::Noise(parameter),
+            (None, Some(detail)) => Layer::Relief {
                 detail,
                 sea_floor: request.get(11).is_truthy(),
             },
-
-            None => Layer::Biome,
+            (None, None) => Layer::Biome,
         },
         scale: number(4)? as u8,
         x: number(5)? as i32,

@@ -23,6 +23,8 @@ pub enum Layer {
         detail: Detail,
         sea_floor: bool,
     },
+    /// a climate noise as colors, drawn over the biomes
+    Noise(crate::seedfind::spec::NoiseParameter),
 }
 
 /// Where a relief tile's heights come from.

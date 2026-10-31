@@ -50,7 +50,9 @@ use crate::{
         tiles::TileCache,
         world::WorldParams,
     },
+    noise::NoiseField,
     seed::{parse_seed, random_seed},
+    seedfind::spec::NoiseParameter,
     structures::{Found, STRUCTURE_KINDS},
     terrain::Terrain,
 };
@@ -274,6 +276,10 @@ struct Ui {
     icons: Option<Icons>,
     /// draw the terrain over the biomes
     relief: bool,
+    /// the climate noise shown over the biomes
+    noise: Option<NoiseParameter>,
+    /// for the value under the cursor
+    noise_field: Option<Option<NoiseField>>,
     /// replace the estimated heights with exact ones when zoomed in, in this quality
     relief_exact: bool,
     relief_quality: ReliefQuality,
@@ -433,6 +439,8 @@ impl State {
             sampled: vec![false; STRUCTURE_KINDS.len()],
             icons: None,
             relief: false,
+            noise: None,
+            noise_field: None,
             relief_exact: false,
             relief_quality: ReliefQuality::Auto,
             threads: resources::default_threads(),
@@ -513,6 +521,7 @@ impl State {
                 Command::ZoomButtons(on) => ui.zoom_buttons_shown = on,
                 Command::Grid(on) => ui.grid.enabled = on,
                 Command::GridOverMarkers(on) => ui.grid.over_markers = on,
+                Command::Noise(parameter) => ui.noise = parameter,
                 Command::OpenFirstMatch => ui.script_open_first_match(),
                 Command::SearchSeeds(text) => ui.seed_search.script_start(&text, ui.seed),
                 _ => {}
@@ -814,6 +823,7 @@ impl Ui {
     fn reset_tiles(&mut self) {
         self.hovered_biome = None;
         self.hovered_height = None;
+        self.noise_field = None;
         self.terrain = None;
         self.queries.set_world(FinderWorld {
             seed: self.seed,
@@ -842,6 +852,9 @@ impl Ui {
             max_relief_level: self.advanced.max_relief_level,
             relief_strength: self.advanced.relief_strength,
             sea_floor: self.sea_floor,
+            noise: self
+                .noise
+                .filter(|parameter| crate::noise::parameters_of(self.dimension).contains(parameter)),
         };
         let (tile_threads, finder_threads) =
             resources::share(self.threads, self.tiles.pending() > 0, self.queries.busy());
@@ -960,13 +973,21 @@ impl Ui {
                         let name = &self.hovered_biome.as_ref().unwrap().1;
                         let height = height.map_or(String::new(), |y| format!(" y {y}"));
                         ui.label(format!("x {} z {}{height}: {name}", q[0] * 4, q[1] * 4));
+                        if let Some(line) = self.hovered_noise(q) {
+                            ui.label(line);
+                        }
                     } else {
                         ui.label("");
                     }
-                    let relief_tiles = self.tiles.pending_relief();
+                    let (relief_tiles, noise_tiles) = (self.tiles.pending_relief(), self.tiles.pending_noise());
                     ui.label(format!(
-                        "Generating: {} biome, {relief_tiles} height map tiles, {} marker areas",
-                        self.tiles.pending() - relief_tiles,
+                        "Generating: {} biome, {relief_tiles} height map{} tiles, {} marker areas",
+                        self.tiles.pending() - relief_tiles - noise_tiles,
+                        if noise_tiles > 0 {
+                            format!(", {noise_tiles} noise")
+                        } else {
+                            String::new()
+                        },
                         self.queries.waiting()
                     ));
                     if !self.markers.is_empty() {
@@ -979,6 +1000,7 @@ impl Ui {
                     #[cfg(not(target_arch = "wasm32"))]
                     self.seed_search_menu(ui);
                     self.terrain_menu(ui, level);
+                    self.noise_menu(ui);
                     self.grid_menu(ui);
                     self.performance_menu(ui);
                     changed |= self.advanced_menu(ui);

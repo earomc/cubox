@@ -6,8 +6,8 @@ use steel_worldgen::biomes::BiomeSourceKind;
 
 use crate::{
     dimension::Dimension,
-    seed::generator_seed,
-    seedfind::spec::{Anchor, BiomeTest, Card, NoiseParameter},
+    noise::{NoiseCache, NoiseField},
+    seedfind::spec::{Anchor, BiomeTest, Card},
     structures::{Finder, Found, STRUCTURE_KINDS, Spread, allowed_by_biomes, candidates, spread},
 };
 
@@ -44,7 +44,7 @@ pub struct SeedWorld {
     sources: [OnceLock<BiomeSourceKind>; 3],
     finders: [OnceLock<Option<Finder>>; 3],
     spawn: OnceLock<[i32; 2]>,
-    climate: OnceLock<steel_worldgen::biomes::OverworldClimateSampler>,
+    climate: OnceLock<Option<NoiseField>>,
 }
 
 impl SeedWorld {
@@ -308,27 +308,6 @@ fn check_biome(world: &SeedWorld, biome: &str, test: BiomeTest, radius: i32, cen
     }
 }
 
-/// A noise parameter's value at a block, in the range the game uses.
-fn noise_value(
-    sampler: &steel_worldgen::biomes::OverworldClimateSampler,
-    cache: &mut steel_worldgen::density_functions::overworld::OverworldColumnCache,
-    parameter: NoiseParameter,
-    x: i32,
-    z: i32,
-    qy: i32,
-) -> f32 {
-    let point = sampler.sample(x >> 2, qy, z >> 2, cache);
-    let value = match parameter {
-        NoiseParameter::Temperature => point.temperature,
-        NoiseParameter::Humidity => point.humidity,
-        NoiseParameter::Continentalness => point.continentalness,
-        NoiseParameter::Erosion => point.erosion,
-        NoiseParameter::Weirdness => point.weirdness,
-        NoiseParameter::Depth => point.depth,
-    };
-    value as f32 / 10_000.0
-}
-
 impl SeedWorld {
     fn check(&self, card: &Card, here: [i32; 2], cells: &mut Vec<([i32; 2], [i32; 2])>) -> Option<Passed> {
         match card {
@@ -422,15 +401,16 @@ impl SeedWorld {
                 let center = self.center(*anchor, here);
                 let climate = self
                     .climate
-                    .get_or_init(|| steel_worldgen::biomes::OverworldClimateSampler::new(generator_seed(self.seed)));
-                let mut cache = steel_worldgen::density_functions::overworld::OverworldColumnCache::new();
+                    .get_or_init(|| NoiseField::new(Dimension::Overworld, self.seed))
+                    .as_ref()?;
+                let mut cache = NoiseCache::default();
                 let qy = Dimension::Overworld.default_height() >> 2;
                 // the climate changes slowly, and sampling it all takes longer than a biome
                 let spots = spots(center, *radius, (area_step(*radius) * 2).min(MAX_STEP));
                 let wanted = ((*coverage as f64 / 100.0 * spots.len() as f64).ceil() as usize).max(1);
                 let (mut inside, mut first) = (0, None);
                 for (i, at) in spots.iter().enumerate() {
-                    let value = noise_value(climate, &mut cache, *parameter, at[0], at[1], qy);
+                    let value = climate.value(&mut cache, *parameter, [at[0] >> 2, qy, at[1] >> 2]);
                     if (*min..=*max).contains(&value) {
                         inside += 1;
                         first.get_or_insert(*at);
@@ -587,7 +567,7 @@ impl Plan {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::seedfind::spec::parse;
+    use crate::seedfind::spec::{NoiseParameter, parse};
 
     fn with_stack(f: impl FnOnce() + Send + 'static) {
         std::thread::Builder::new()
@@ -680,23 +660,27 @@ mod tests {
     }
 
     #[test]
-    fn noise_values_explain_the_biomes() {
+    fn noise_cards_use_the_values_of_the_field() {
         with_stack(|| {
             // mushroom fields are where continentalness is lowest
             let source = Dimension::Overworld.biome_source(1);
             let mut sampler = source.chunk_sampler();
-            let climate = steel_worldgen::biomes::OverworldClimateSampler::new(generator_seed(1));
-            let mut cache = steel_worldgen::density_functions::overworld::OverworldColumnCache::new();
+            let field = NoiseField::new(Dimension::Overworld, 1).unwrap();
+            let mut cache = NoiseCache::default();
             let mut mushrooms = 0;
             for i in 0..40_000 {
-                let (x, z) = ((i % 200 - 100) * 512, (i / 200 - 100) * 512);
-                if &*sampler.sample(x >> 2, 64, z >> 2).key.path == "mushroom_fields" {
+                let (x, z) = ((i % 200 - 100) * 128, (i / 200 - 100) * 128);
+                if &*sampler.sample(x, 64, z).key.path == "mushroom_fields" {
                     mushrooms += 1;
-                    let value = noise_value(&climate, &mut cache, NoiseParameter::Continentalness, x, z, 64);
+                    let value = field.value(&mut cache, NoiseParameter::Continentalness, [x, 64, z]);
                     assert!(value <= -1.0, "{value}");
                 }
             }
             assert!(mushrooms > 0);
+            let plan = Plan::new(&parse("noise continentalness -5..5 coverage>=100% within 100 of 0,0").unwrap());
+            assert!(plan.check(&SeedWorld::new(1), [0, 0], &mut Vec::new()).is_some());
+            let plan = Plan::new(&parse("noise continentalness 5..6 within 100 of 0,0").unwrap());
+            assert!(plan.check(&SeedWorld::new(1), [0, 0], &mut Vec::new()).is_none());
         });
     }
 }

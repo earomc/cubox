@@ -9,6 +9,7 @@
 //! panel off              # hide the settings window (on to show it again)
 //! structure village      # show a kind of structure, or `all`, or `none`
 //! relief on              # terrain on the map (off to hide it)
+//! noise erosion          # show a climate noise (off to hide it)
 //! grid on                # the distance grid (off to hide it)
 //! grid_over_markers on   # draw it after the structure markers
 //! search_seeds biome desert present within 500 of spawn   # finds seeds, `;` separates conditions, prints them
@@ -29,6 +30,7 @@ use std::{collections::VecDeque, path::PathBuf, time::Instant};
 
 use anyhow::{Context, bail};
 
+use crate::seedfind::spec::NoiseParameter;
 use crate::{dimension::Dimension, gui::menus::ReliefQuality};
 
 pub enum Command {
@@ -55,6 +57,7 @@ pub enum Command {
     GridOverMarkers(bool),
     SearchSeeds(String),
     OpenFirstMatch,
+    Noise(Option<NoiseParameter>),
     Goto(f64, f64),
     Zoom(f64),
     ZoomTo(f64, f64),
@@ -117,6 +120,15 @@ impl Command {
             ),
             "grid_over_markers" => Command::GridOverMarkers(args.first() != Some(&"off")),
             "grid" => Command::Grid(args.first() != Some(&"off")),
+            "noise" => Command::Noise(match args.first().copied() {
+                Some("off") => None,
+                name => Some(
+                    NoiseParameter::ALL
+                        .into_iter()
+                        .find(|parameter| Some(parameter.name()) == name)
+                        .context("noise: off or a noise parameter")?,
+                ),
+            }),
             "open_first_match" => Command::OpenFirstMatch,
             "search_seeds" => Command::SearchSeeds(args.join(" ").replace(';', "\n")),
             "goto" => Command::Goto(num(0)?, num(1)?),

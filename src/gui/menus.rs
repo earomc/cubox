@@ -160,6 +160,48 @@ impl Ui {
         });
     }
 
+    pub(super) fn noise_menu(&mut self, ui: &mut egui::Ui) {
+        let parameters = crate::noise::parameters_of(self.dimension);
+        egui::CollapsingHeader::new("Noise").show(ui, |ui| {
+            if parameters.is_empty() {
+                ui.weak("The end has no noise values");
+                return;
+            }
+            ui.radio_value(&mut self.noise, None, "Off");
+            for parameter in parameters {
+                ui.radio_value(&mut self.noise, Some(*parameter), parameter.name());
+            }
+            ui.horizontal(|ui| {
+                ui.spacing_mut().item_spacing.x = 0.0;
+                ui.label("-1 ");
+                for i in 0..=20 {
+                    let [r, g, b] = crate::noise::color_of(i as f32 / 10.0 - 1.0);
+                    let (rect, _) = ui.allocate_exact_size(egui::vec2(6.0, 12.0), egui::Sense::hover());
+                    ui.painter().rect_filled(rect, 0.0, egui::Color32::from_rgb(r, g, b));
+                }
+                ui.label(" 1");
+            });
+            if self.noise == Some(crate::seedfind::spec::NoiseParameter::Depth) {
+                ui.weak("Depth changes with the height, try the height slider at 64");
+            }
+        });
+    }
+
+    /// The shown noise at a quart, as a line for the status.
+    pub(super) fn hovered_noise(&mut self, quart: [i32; 2]) -> Option<String> {
+        let parameter = self
+            .noise
+            .filter(|parameter| crate::noise::parameters_of(self.dimension).contains(parameter))?;
+        let (dimension, seed) = (self.dimension, self.seed);
+        let field = self
+            .noise_field
+            .get_or_insert_with(|| crate::noise::NoiseField::new(dimension, seed))
+            .as_ref()?;
+        let at = [quart[0], self.sample_height >> 2, quart[1]];
+        let value = field.value(&mut Default::default(), parameter, at);
+        Some(format!("{}: {value:.3}", parameter.name()))
+    }
+
     pub(super) fn terrain_menu(&mut self, ui: &mut egui::Ui, level: i32) {
         egui::CollapsingHeader::new("Terrain").show(ui, |ui| {
             ui.add_enabled_ui(self.dimension == Dimension::Overworld, |ui| {

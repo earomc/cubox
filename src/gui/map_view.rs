@@ -8,6 +8,7 @@ use crate::{
         menus::ReliefQuality,
         tiles::{TILE_SIZE, TileCache},
     },
+    seedfind::spec::NoiseParameter,
     tile_renderer::{self, Detail, Layer, TileKey},
 };
 
@@ -72,6 +73,8 @@ pub struct MapSettings {
     pub relief_strength: f32,
     /// the relief is that of the sea floor instead of the water
     pub sea_floor: bool,
+    /// show a climate noise over the biomes
+    pub noise: Option<NoiseParameter>,
 }
 
 pub struct MapView {
@@ -239,11 +242,21 @@ impl MapView {
             keys.iter().map(|&key| relief_key(key, detail)).collect()
         });
         // the quick estimate of everything first, shown until the wanted detail is there
+        let noise: Vec<TileKey> = settings.noise.map_or(Vec::new(), |parameter| {
+            keys.iter()
+                .map(|&key| TileKey {
+                    layer: Layer::Noise(parameter),
+                    samples: 1,
+                    ..key
+                })
+                .collect()
+        });
         let relief_wanted: Vec<TileKey> = keys
             .iter()
             .filter(|_| relief_detail.is_some_and(|detail| detail != Detail::Estimate))
             .map(|&key| relief_key(key, Detail::Estimate))
             .chain(relief.iter().copied())
+            .chain(noise.iter().copied())
             .collect();
         tiles.set_highlight(settings.highlight);
         tiles.update(&keys, &cover, &relief_wanted, unsettled_for <= 0.0);
@@ -300,6 +313,17 @@ impl MapView {
                 if let Some((tex, alpha)) = own {
                     out.push(tex, screen, FULL_UV, alpha);
                 }
+            }
+        }
+        for key in noise {
+            let screen = tile_screen(&self.camera, &key);
+            let tile = tiles.get(&key, now);
+            if !tile.as_ref().is_some_and(|(_, alpha)| *alpha >= 1.0) {
+                draw_ancestor(&mut out, tiles, now, key, screen);
+            }
+            if let Some((tex, alpha)) = tile {
+                fading |= alpha < 1.0;
+                out.push(tex, screen, FULL_UV, alpha);
             }
         }
         let first_relief_quad = out.quads.len();

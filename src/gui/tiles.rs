@@ -89,6 +89,14 @@ impl TileCache {
             .count()
     }
 
+    /// Of the tiles waiting or being generated, how many are noise tiles.
+    pub fn pending_noise(&self) -> usize {
+        self.pending
+            .iter()
+            .filter(|key| matches!(key.layer, Layer::Noise(_)))
+            .count()
+    }
+
     /// How many tiles may be generated at once.
     pub fn set_thread_limit(&mut self, threads: usize) {
         self.executor.set_limit(threads);
@@ -144,7 +152,7 @@ impl TileCache {
         if self.pending.contains(&key) || self.entries.contains_key(&key) {
             return;
         }
-        if matches!(key.layer, Layer::Relief { .. }) {
+        if matches!(key.layer, Layer::Relief { .. } | Layer::Noise(_)) {
             if allow_sampling {
                 self.queue(key, Task::Relief);
             }
@@ -246,7 +254,9 @@ impl TileCache {
             let texture = Rc::new(match done.key.layer {
                 Layer::Biome => renderer.create_tile(device, queue, &tile.rgb, TILE_SIZE as u32, done.key.scale == 0),
 
-                Layer::Relief { .. } => renderer.create_rgba_tile(device, queue, &tile.rgb, TILE_SIZE as u32, true),
+                Layer::Relief { .. } | Layer::Noise(_) => {
+                    renderer.create_rgba_tile(device, queue, &tile.rgb, TILE_SIZE as u32, true)
+                }
             });
             let mask = (!tile.biomes.is_empty())
                 .then(|| Rc::new(renderer.create_mask_tile(device, queue, &tile.biomes, TILE_SIZE as u32)));

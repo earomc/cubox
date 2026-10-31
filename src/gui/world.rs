@@ -10,6 +10,7 @@ use steel_worldgen::biomes::BiomeSourceKind;
 
 use crate::{
     dimension::Dimension,
+    noise::NoiseField,
     terrain::Terrain,
     tile_renderer::{
         Estimate, Lab, Layer, Shading, Tile, TileKey, calibrate, downsample, render_numbers, render_tile, world_mean,
@@ -109,6 +110,8 @@ pub struct World {
     shadings: Mutex<HashMap<(u8, u8), Arc<ShadingCell>>>,
     /// only made when relief tiles are wanted
     terrain: OnceLock<Terrain>,
+    /// only made when noise tiles are wanted
+    noise: OnceLock<Option<NoiseField>>,
 }
 
 impl World {
@@ -119,6 +122,7 @@ impl World {
             mean: OnceLock::new(),
             shadings: Default::default(),
             terrain: OnceLock::new(),
+            noise: OnceLock::new(),
         }
     }
 
@@ -167,6 +171,17 @@ impl World {
 
     /// A relief tile: its `rgb` are RGBA pixels and it has no estimates.
     fn relief(&self, key: TileKey, keep_going: &dyn Fn() -> bool) -> Option<Tile> {
+        if let Layer::Noise(parameter) = key.layer {
+            let field = self
+                .noise
+                .get_or_init(|| NoiseField::new(self.params.dimension, self.params.seed))
+                .as_ref()?;
+            return field.tile(parameter, key, keep_going).map(|rgb| Tile {
+                rgb,
+                estimates: Vec::new(),
+                biomes: Vec::new(),
+            });
+        }
         let terrain = self.terrain.get_or_init(|| Terrain::new(self.params.seed));
         let Layer::Relief { detail, sea_floor } = key.layer else {
             return None;

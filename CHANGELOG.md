@@ -15,6 +15,8 @@ The release workflow publishes the section of a version as its release notes.
 - A Seed search section on the desktop with presets, finding locations in one seed too. Clicking a result goes there
   and shows its markers.
 
+- A Noise section shows temperature, humidity, continentalness, erosion, weirdness or depth as colors over the map.
+
 ### Removed
 
 - The Search section, Seed search has taken its place. The web version has no search for now.
