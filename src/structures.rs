@@ -13,7 +13,7 @@ use steel_worldgen::{
     density_functions::{end::EndNoises, nether::NetherNoises, overworld::OverworldNoises},
     noise::LazyAquifer,
     structure::{
-        GenerationContext, StructureGenerator,
+        GenerationContext, StructureGenerator, StructurePiece, StructurePiecePayload,
         placement::{PlacementKind, StructurePlacement, StructureSet, load_vanilla_structure_sets},
     },
 };
@@ -33,6 +33,8 @@ pub struct StructureKind {
     pub dimension: Dimension,
     /// the game's structures of this kind
     structures: &'static [&'static str],
+    /// only those with this piece, which needs all their pieces to be known
+    with_piece: Option<&'static str>,
 }
 
 impl StructureKind {
@@ -54,6 +56,7 @@ const fn kind(
         name,
         dimension,
         structures,
+        with_piece: None,
     }
 }
 
@@ -115,6 +118,10 @@ pub const STRUCTURE_KINDS: &[StructureKind] = &[
         &["ruined_portal_nether"],
     ),
     kind("end_city", "End city", End, &["end_city"]),
+    StructureKind {
+        with_piece: Some("end_city/ship"),
+        ..kind("end_city_ship", "End city with ship", End, &["end_city"])
+    },
 ];
 
 /// A structure that really generates. `kind` is an index into `STRUCTURE_KINDS`, x and z are blocks.
@@ -397,6 +404,11 @@ impl Finder {
         starts
             .into_iter()
             .find(|start| !start.pieces.is_empty() && structures.contains(&&*start.structure.path))
+            .filter(|start| {
+                STRUCTURE_KINDS[kind]
+                    .with_piece
+                    .is_none_or(|piece| start.pieces.iter().any(|p| has_template(p, piece)))
+            })
             .and_then(|start| start.bounding_box)
             .map(|bb| Found {
                 kind,
@@ -435,6 +447,10 @@ impl Finder {
         let mut ctx = if self.assemble_all { ctx } else { ctx.with_locate_only() };
         generator.generate_starts_for_chunk(&mut ctx, |_| false)
     }
+}
+
+fn has_template(piece: &StructurePiece, template: &str) -> bool {
+    matches!(&piece.payload, StructurePiecePayload::Template(data) if &*data.template_id.path == template)
 }
 
 /// Grid cell number `index` of a bin. The lowest 2 bits of the index choose which of the 4 parts of
@@ -592,6 +608,27 @@ mod tests {
                 }
             }
             assert!(real > 20, "{real}");
+        });
+    }
+
+    #[test]
+    fn ships_are_some_of_the_end_cities() {
+        with_big_stack(|| {
+            let finder = Finder::new(12345, Dimension::End).unwrap();
+            let index = |id| STRUCTURE_KINDS.iter().position(|k| k.id == id).unwrap();
+            let (city, ship) = (index("end_city"), index("end_city_ship"));
+            let (mut cities, mut ships) = (0, 0);
+            for (x, z) in (-30..30).flat_map(|x| (-30..30).map(move |z| (x, z))) {
+                let at = finder.in_cell(city, x, z);
+                cities += at.is_some() as i32;
+                if let Some(found) = finder.in_cell(ship, x, z) {
+                    ships += 1;
+                    let at = at.expect("a ship without a city");
+                    assert_eq!((found.x, found.z), (at.x, at.z));
+                }
+            }
+            println!("{ships} ships of {cities} cities");
+            assert!(ships > 0 && ships < cities, "{ships} of {cities}");
         });
     }
 

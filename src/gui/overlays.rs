@@ -51,6 +51,7 @@ icon_files![
     "nether_fossil",
     "ruined_portal_nether",
     "end_city",
+    "end_city_ship",
 ];
 
 pub struct Icons(Vec<TextureHandle>);

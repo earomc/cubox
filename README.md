@@ -46,8 +46,8 @@ cubes/boxes ... so it works in multiple ways I guess ...
   the rest. Structures made of jigsaw pieces, like villages, are marked at their center piece.
 - **Search** for the nearest structures or biomes from the middle of the view.
 - **Height map:** the real terrain shaded over the biomes when zoomed in, in the overworld, sea floor included.
-  Close up the heights are exact, further out the game's quick estimate is used, about 10 blocks off. The quality
-  setting chooses how many exact heights to use: the higher, the slower.
+  It uses the game's quick estimate of the surface, usually 5 to 15 blocks off. Exact heights can be switched on
+  for when zoomed in, with a quality setting: the higher, the slower.
 - **Performance settings:** how many threads cubox may use and how much memory finished tiles may take.
 - **Distance grid** with block coordinates and a scale bar, with automatic or fixed spacing.
 - **Touch screens:** pinch to zoom, and a text bar that opens the on screen keyboard for numbers and seeds in the web

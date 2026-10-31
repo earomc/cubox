@@ -64,6 +64,8 @@ pub struct MapSettings {
     pub samples: u8,
     /// draw the terrain over the biomes where possible, in this quality
     pub relief: Option<ReliefQuality>,
+    /// use exact heights in that quality instead of only the estimate
+    pub relief_exact: bool,
     /// the relief is that of the sea floor instead of the water
     pub sea_floor: bool,
 }
@@ -212,10 +214,13 @@ impl MapView {
             samples: 1,
             ..key
         };
-        let relief_detail = settings
-            .relief
-            .filter(|_| level <= MAX_RELIEF_LEVEL)
-            .map(|quality| quality.detail(level));
+        let relief_detail = settings.relief.filter(|_| level <= MAX_RELIEF_LEVEL).map(|quality| {
+            if settings.relief_exact {
+                quality.detail(level)
+            } else {
+                Detail::Estimate
+            }
+        });
         let relief: Vec<TileKey> = relief_detail.map_or(Vec::new(), |detail| {
             keys.iter().map(|&key| relief_key(key, detail)).collect()
         });

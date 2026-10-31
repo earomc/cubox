@@ -28,7 +28,7 @@ pub enum Layer {
 pub enum Detail {
     /// the exact height every this many pixels
     Exact(u8),
-    /// the game's own quick estimate for every pixel, about 10 blocks off on average
+    /// the game's own quick estimate for every pixel, usually 5 to 15 blocks off
     Estimate,
 }
 

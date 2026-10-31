@@ -12,11 +12,11 @@ The release workflow publishes the section of a version as its release notes.
 
 - Structures on the map: a sub menu with a switch and an icon for every kind, all off by default.
   Their positions come from the game's real generation code.
-  They show at every zoom, all of them until they get very dense and a sample beyond that.
+  End cities with a ship have their own switch and icon. They show at every zoom, all of them until they get very dense and a sample beyond that.
 - A search for the nearest structures and biomes.
 - A height map of the real terrain when zoomed in, in the overworld, off by default, with a quality
-  setting and the sea floor shown under water. Each height is one visible square, and further out the
-  game's own quick estimate of the surface is used, which also shows first everywhere.
+  setting and the sea floor shown under water. Each height is one visible square. It uses the game's own
+  quick estimate of the surface, and exact heights can be switched on for when zoomed in.
 - A Performance menu with how many threads cubox may use and how much memory finished tiles may take.
 - The status line says how many biome tiles, height map tiles and structure areas are being generated.
 - A nightly web version of the newest commit on main, at `/nightly/`.

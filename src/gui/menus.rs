@@ -60,7 +60,7 @@ impl ReliefQuality {
     /// Measured on a desktop core.
     fn hint(self) -> &'static str {
         match self {
-            Self::Auto => "Exact heights close up, the game's quick estimate further out, which shows first everywhere",
+            Self::Auto => "Exact heights close up, the estimate further out",
             Self::Low => "An exact height every 8 pixels: 0.3 seconds per tile",
             Self::Medium => "An exact height every 4 pixels: 1 second per tile",
             Self::High => "An exact height every 2 pixels: 3 seconds per tile",
@@ -204,12 +204,17 @@ impl Ui {
                 ui.checkbox(&mut self.relief, "Show height map")
                     .on_hover_text("The real terrain height, shaded with the light in the north west");
                 ui.add_enabled_ui(self.relief, |ui| {
-                    ui.horizontal(|ui| {
-                        ui.label("Quality");
-                        for quality in ReliefQuality::ALL {
-                            ui.selectable_value(&mut self.relief_quality, quality, quality.name())
-                                .on_hover_text(quality.hint());
-                        }
+                    ui.checkbox(&mut self.relief_exact, "Exact heights").on_hover_text(
+                        "Replace the game's quick estimate with the real heights when zoomed in. Much slower.",
+                    );
+                    ui.add_enabled_ui(self.relief_exact, |ui| {
+                        ui.horizontal(|ui| {
+                            ui.label("Quality");
+                            for quality in ReliefQuality::ALL {
+                                ui.selectable_value(&mut self.relief_quality, quality, quality.name())
+                                    .on_hover_text(quality.hint());
+                            }
+                        });
                     });
                     ui.checkbox(&mut self.sea_floor, "Show sea floor")
                         .on_hover_text("Shade the ground under water. Without this water is flat.");
@@ -219,8 +224,8 @@ impl Ui {
                 ui.weak("Only in the overworld");
             } else if self.relief && level > MAX_RELIEF_LEVEL {
                 ui.weak("Zoom in to see terrain");
-            } else if self.relief && self.relief_quality.detail(level) == Detail::Estimate {
-                ui.weak("Estimated heights at this zoom, about 10 blocks off");
+            } else if self.relief && (!self.relief_exact || self.relief_quality.detail(level) == Detail::Estimate) {
+                ui.weak("Estimated heights, usually 5 to 15 blocks off");
             }
         });
     }

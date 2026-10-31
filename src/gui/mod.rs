@@ -249,6 +249,8 @@ struct Ui {
     search_filter: String,
     /// draw the terrain over the biomes
     relief: bool,
+    /// replace the estimated heights with exact ones when zoomed in, in this quality
+    relief_exact: bool,
     relief_quality: ReliefQuality,
     /// the relief of the sea floor instead of the flat water
     sea_floor: bool,
@@ -392,6 +394,7 @@ impl State {
             icons: None,
             search_filter: String::new(),
             relief: false,
+            relief_exact: false,
             relief_quality: ReliefQuality::Auto,
             threads: resources::default_threads(),
             cache_mib: resources::CACHE_MIB.2,
@@ -451,6 +454,7 @@ impl State {
                 Command::Structure(which) => ui.script_structure(&which),
                 Command::Relief(on) => ui.relief = on,
                 Command::Quality(quality) => ui.relief_quality = quality,
+                Command::Exact(on) => ui.relief_exact = on,
                 Command::Threads(threads) => ui.threads = threads,
                 Command::SeaFloor(on) => ui.sea_floor = on,
                 Command::ZoomButtons(on) => ui.zoom_buttons_shown = on,
@@ -768,6 +772,7 @@ impl Ui {
             sample_height: self.sample_height,
             samples: self.samples,
             relief: (self.relief && self.dimension == Dimension::Overworld).then_some(self.relief_quality),
+            relief_exact: self.relief_exact,
             sea_floor: self.sea_floor,
         };
         let (tile_threads, finder_threads) =
