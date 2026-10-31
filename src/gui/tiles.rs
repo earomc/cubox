@@ -42,6 +42,8 @@ pub struct TileCache {
     generation: u64,
     frame: u64,
     max_tiles: usize,
+    /// biomes are highlighted, so all tiles need their biome numbers
+    highlight: bool,
     /// seconds a newly arrived texture takes to fade in over whatever was shown before
     fade_seconds: f64,
 }
@@ -55,6 +57,7 @@ impl TileCache {
             generation: 0,
             frame: 0,
             max_tiles: resources::tiles_in_mib(resources::default_cache_mib()),
+            highlight: false,
             fade_seconds: 0.15,
         }
     }
@@ -82,6 +85,10 @@ impl TileCache {
     /// How many tiles may be generated at once.
     pub fn set_thread_limit(&mut self, threads: usize) {
         self.executor.set_limit(threads);
+    }
+
+    pub fn set_highlight(&mut self, highlight: bool) {
+        self.highlight = highlight;
     }
 
     pub fn set_fade_seconds(&mut self, seconds: f64) {
@@ -117,6 +124,16 @@ impl TileCache {
     /// tiles further down (right after zooming out a few levels at once), otherwise sampling it.
     fn plan(&mut self, key: TileKey, rank: usize, allow_sampling: bool, ranks: &mut HashMap<TileKey, usize>) {
         ranks.entry(key).or_insert(rank);
+        // only highlighting needs what flat tiles were made without
+        if self.highlight
+            && allow_sampling
+            && !self.pending.contains(&key)
+            && self.entries.get(&key).is_some_and(|entry| entry.mask.is_none())
+            && key.layer == Layer::Biome
+        {
+            self.queue(key, Task::Numbers);
+            return;
+        }
         if self.pending.contains(&key) || self.entries.contains_key(&key) {
             return;
         }
@@ -186,13 +203,27 @@ impl TileCache {
             }
             self.pending.remove(&done.key);
             let Some(tile) = done.tile else { continue };
+            // only the numbers of a tile that is there already
+            if tile.rgb.is_empty() {
+                if let Some(entry) = self.entries.get_mut(&done.key) {
+                    entry.mask = Some(Rc::new(renderer.create_mask_tile(
+                        device,
+                        queue,
+                        &tile.biomes,
+                        TILE_SIZE as u32,
+                    )));
+                    entry.biomes = Arc::new(tile.biomes);
+                    changed = true;
+                }
+                continue;
+            }
             // nearest at the finest level so single quarts stay crisp when zoomed in
             let texture = Rc::new(match done.key.layer {
                 Layer::Biome => renderer.create_tile(device, queue, &tile.rgb, TILE_SIZE as u32, done.key.scale == 0),
 
                 Layer::Relief { .. } => renderer.create_rgba_tile(device, queue, &tile.rgb, TILE_SIZE as u32, true),
             });
-            let mask = (done.key.layer == Layer::Biome)
+            let mask = (!tile.biomes.is_empty())
                 .then(|| Rc::new(renderer.create_mask_tile(device, queue, &tile.biomes, TILE_SIZE as u32)));
             let estimates = Arc::new(tile.estimates);
             let biomes = Arc::new(tile.biomes);

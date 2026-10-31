@@ -10,7 +10,7 @@ The release workflow publishes the section of a version as its release notes.
 
 ### Added
 
-- Highlight biomes: choose any in the Biomes menu and the others are darkened, with no cost while none are.
+- Highlight biomes: choose any in the Biomes menu and the others are darkened, instantly.
 - A button for a random seed.
 - The distance grid can be drawn over the structure markers.
 

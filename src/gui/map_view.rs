@@ -245,6 +245,7 @@ impl MapView {
             .map(|&key| relief_key(key, Detail::Estimate))
             .chain(relief.iter().copied())
             .collect();
+        tiles.set_highlight(settings.highlight);
         tiles.update(&keys, &cover, &relief_wanted, unsettled_for <= 0.0);
 
         let mut fading = false;
@@ -289,7 +290,8 @@ impl MapView {
             for &key in &keys_for_masks {
                 let screen = tile_screen(&self.camera, &key);
                 let tile = tiles.get(&key, now);
-                if !tile.as_ref().is_some_and(|(_, alpha)| *alpha >= 1.0)
+                let own = tiles.mask(&key);
+                if (own.is_none() || !tile.as_ref().is_some_and(|(_, alpha)| *alpha >= 1.0))
                     && let Some((parent, up)) = ancestor(tiles, &key)
                     && let Some(tex) = tiles.mask(&parent)
                 {
@@ -302,7 +304,7 @@ impl MapView {
                     out.push(tex, screen, uv, 1.0);
                 }
                 if let Some((_, alpha)) = tile
-                    && let Some(tex) = tiles.mask(&key)
+                    && let Some(tex) = own
                 {
                     out.push(tex, screen, FULL_UV, alpha);
                 }

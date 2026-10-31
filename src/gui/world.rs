@@ -11,7 +11,9 @@ use steel_worldgen::biomes::BiomeSourceKind;
 use crate::{
     dimension::Dimension,
     terrain::Terrain,
-    tile_renderer::{Estimate, Lab, Layer, Shading, Tile, TileKey, calibrate, downsample, render_tile, world_mean},
+    tile_renderer::{
+        Estimate, Lab, Layer, Shading, Tile, TileKey, calibrate, downsample, render_numbers, render_tile, world_mean,
+    },
 };
 
 /// Everything that decides how a tile looks besides its key.
@@ -33,6 +35,8 @@ pub enum Task {
     Downsample([Estimates; 4], [Biomes; 4]),
     /// sample the tile
     Render,
+    /// only the biome numbers of a tile that was made without them
+    Numbers,
 
     /// sample the terrain for a relief tile, the most expensive work
     Relief,
@@ -43,7 +47,8 @@ impl Task {
         match self {
             Task::Downsample(..) => 0,
             Task::Render => 1,
-            Task::Relief => 2,
+            Task::Numbers => 2,
+            Task::Relief => 3,
         }
     }
 }
@@ -136,8 +141,16 @@ impl World {
 
     /// Runs a task. `keep_going` is asked while sampling, a tile it says no to is abandoned.
     pub fn run(&self, key: TileKey, task: Task, keep_going: &dyn Fn() -> bool) -> Option<Tile> {
-        if matches!(task, Task::Relief) {
-            return self.relief(key, keep_going);
+        match task {
+            Task::Relief => return self.relief(key, keep_going),
+            Task::Numbers => {
+                return render_numbers(&self.source, key, keep_going).map(|biomes| Tile {
+                    rgb: Vec::new(),
+                    estimates: Vec::new(),
+                    biomes,
+                });
+            }
+            _ => {}
         }
         let shading = self.shading(key);
         match task {
@@ -148,7 +161,7 @@ impl World {
                 &shading,
             )),
             Task::Render => render_tile(&self.source, key, &shading, keep_going),
-            Task::Relief => unreachable!(),
+            Task::Numbers | Task::Relief => unreachable!(),
         }
     }
 

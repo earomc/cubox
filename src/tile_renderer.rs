@@ -365,26 +365,15 @@ pub fn render_tile(
     keep_going: &dyn Fn() -> bool,
 ) -> Option<Tile> {
     let size = key.tile_size_px;
+    if shading.is_flat() {
+        // no samples at all, `render_numbers` gets the biomes if they are ever needed
+        return Some(shade(vec![pack(shading.mean); size * size], Vec::new(), shading, 0.0));
+    }
     let stride = key.stride();
     let (origin_x, origin_z) = key.origin();
     let qy = key.sample_height >> 2; // converting block height to quart height dividing by 4
     let mut sampler = source.chunk_sampler();
     let mut last = LastNumber::default();
-    if shading.is_flat() {
-        // the colors need no sampling here, but highlighting needs to know the biomes
-        let mut biomes = Vec::with_capacity(size * size);
-        for row in 0..size {
-            if !keep_going() {
-                return None;
-            }
-            let pz = origin_z + row as i32 * stride + stride / 2;
-            for col in 0..size {
-                let px = origin_x + col as i32 * stride + stride / 2;
-                biomes.push(last.of(sampler.sample(px, qy, pz)));
-            }
-        }
-        return Some(shade(vec![pack(shading.mean); size * size], biomes, shading, 0.0));
-    }
     let offsets = offsets(stride, key.effective_samples());
     let mut estimates = Vec::with_capacity(size * size);
     let mut biomes = Vec::with_capacity(size * size);
@@ -404,6 +393,28 @@ pub fn render_tile(
     Some(shade(estimates, biomes, shading, shading.weight(shading.noise)))
 }
 
+/// Only the biome numbers of a tile, for tiles that were made without them, one sample per pixel.
+pub fn render_numbers(source: &BiomeSourceKind, key: TileKey, keep_going: &dyn Fn() -> bool) -> Option<Vec<u8>> {
+    let size = key.tile_size_px;
+    let stride = key.stride();
+    let (origin_x, origin_z) = key.origin();
+    let qy = key.sample_height >> 2;
+    let mut sampler = source.chunk_sampler();
+    let mut last = LastNumber::default();
+    let mut biomes = Vec::with_capacity(size * size);
+    for row in 0..size {
+        if !keep_going() {
+            return None;
+        }
+        let pz = origin_z + row as i32 * stride + stride / 2;
+        for col in 0..size {
+            let px = origin_x + col as i32 * stride + stride / 2;
+            biomes.push(last.of(sampler.sample(px, qy, pz)));
+        }
+    }
+    Some(biomes)
+}
+
 /// One of 0 to 3 that looks random, for a pixel of a tile.
 fn pixel_hash(tile_x: i32, tile_z: i32, x: usize, z: usize) -> usize {
     let mixed = (x as u64 + (tile_x as u32 as u64) * 131)
@@ -421,6 +432,8 @@ pub fn downsample(children: [&[Estimate]; 4], child_biomes: [&[u8]; 4], key: Til
     let size = key.tile_size_px;
     let half = size / 2;
     let mut estimates = Vec::with_capacity(size * size);
+    // flat tiles have none, they aren't made up for just one of the children
+    let no_numbers = child_biomes.iter().any(|numbers| numbers.is_empty());
     let mut biomes = Vec::with_capacity(size * size);
     for z in 0..size {
         for x in 0..size {
@@ -434,9 +447,11 @@ pub fn downsample(children: [&[Estimate]; 4], child_biomes: [&[u8]; 4], key: Til
                 (0..3).for_each(|ch| sum[ch] += c[ch]);
             }
             estimates.push(pack(sum.map(|s| s * 0.25)));
-            // the biome of one of the 4, by position so that it doesn't look like a pattern
-            let pick = pixel_hash(key.x, key.z, x, z);
-            biomes.push(child_biomes[which][(cz + (pick >> 1)) * size + cx + (pick & 1)]);
+            if !no_numbers {
+                // the biome of one of the 4, by position so that it doesn't look like a pattern
+                let pick = pixel_hash(key.x, key.z, x, z);
+                biomes.push(child_biomes[which][(cz + (pick >> 1)) * size + cx + (pick & 1)]);
+            }
         }
     }
     shade(estimates, biomes, shading, shading.weight(shading.noise / 4.0))
@@ -476,6 +491,37 @@ mod tests {
             assert_eq!(BIOMES[*number as usize], &*biome.key.path, "pixel {i}");
         }
         assert!(tile.biomes.iter().any(|n| *n != tile.biomes[0]));
+    }
+
+    #[test]
+    fn flat_tiles_get_their_numbers_only_on_request() {
+        let source = BiomeSourceKind::overworld(12345);
+        let key = TileKey {
+            layer: Layer::Biome,
+            scale: 12,
+            sample_height: 256,
+            tile_size_px: 16,
+            samples: 1,
+            x: 1,
+            z: 1,
+        };
+        let flat = calibrate(&source, key, world_mean(&source, 256));
+        assert!(flat.is_flat());
+        let tile = render_tile(&source, key, &flat, &|| true).unwrap();
+        assert!(tile.biomes.is_empty());
+        let numbers = render_numbers(&source, key, &|| true).unwrap();
+        assert_eq!(numbers.len(), 16 * 16);
+        assert!(numbers.iter().all(|n| *n != UNKNOWN_BIOME));
+        // and a tile built from one has none either, not a wrong one
+        let estimates = vec![[0u16; 3]; 16 * 16];
+        let exact = Shading::exact([0.5, 0.0, 0.0]);
+        let built = downsample(
+            [&estimates, &estimates, &estimates, &estimates],
+            [&numbers, &[], &numbers, &numbers],
+            TileKey { scale: 13, ..key },
+            &exact,
+        );
+        assert!(built.biomes.is_empty());
     }
 
     /// A coarser tile picks among the numbers of its children, the shares of biomes should stay.
