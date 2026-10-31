@@ -5,6 +5,13 @@ name: Release
 on:
   push:
     tags: ["v[0-9]+.[0-9]+.[0-9]+*"]
+  # builds the assets of an existing release again, if some of them failed
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: The tag of the release, like v0.2.0
+        required: true
+        type: string
 
 permissions:
   contents: write
@@ -14,6 +21,7 @@ env:
 
 jobs:
   create-release:
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -24,6 +32,8 @@ jobs:
 
   upload-assets:
     needs: create-release
+    # it is skipped when building for an existing release
+    if: ${{ !cancelled() && !failure() }}
     strategy:
       fail-fast: false
       matrix:
@@ -35,7 +45,7 @@ jobs:
             os: ubuntu-22.04-arm
           # one binary for intel and apple silicon
           - target: universal-apple-darwin
-            os: macos-14
+            os: macos-15
             targets: x86_64-apple-darwin aarch64-apple-darwin
           - target: x86_64-pc-windows-msvc
             os: windows-latest
@@ -45,6 +55,8 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.tag || github.ref }}
       - uses: ./.github/actions/setup-rust
         with:
           targets: ${{ matrix.targets }}
@@ -52,6 +64,7 @@ jobs:
       - uses: taiki-e/upload-rust-binary-action@v1
         with:
           bin: cubox
+          ref: ${{ inputs.tag && format('refs/tags/{0}', inputs.tag) || github.ref }}
           target: ${{ matrix.target }}
           include: LICENSE,README.md
           tar: unix

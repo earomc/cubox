@@ -48,6 +48,8 @@ with transparency. To change one, replace its file and rebuild. The current ones
    `## [x.y.z] - date` heading.
 2. Commit, then tag and push: `git tag vx.y.z && git push origin main vx.y.z`.
 
+If builds of a release fail, run the workflow by hand on GitHub with its tag: that builds and uploads all assets again.
+
 The [release workflow](../.github/workflows/release.yml) builds all platforms and publishes the release, with the
 changelog section as release notes. The [pages workflow](../.github/workflows/pages.yml) deploys the web version to
 GitHub Pages on every tag and every push to main: the latest release at the root and main at `/nightly/`.
