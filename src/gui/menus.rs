@@ -108,7 +108,7 @@ impl Ui {
     }
 
     pub(super) fn structures_menu(&mut self, ui: &mut egui::Ui) {
-        egui::CollapsingHeader::new("Structures").show(ui, |ui| {
+        egui::CollapsingHeader::new("Markers").show(ui, |ui| {
             ui.horizontal(|ui| {
                 let kinds: Vec<usize> = self.kinds_here().collect();
                 if ui.button("All").clicked() {

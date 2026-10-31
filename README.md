@@ -46,7 +46,7 @@ cubes/boxes ... so it works in multiple ways I guess ...
 
 **Finding things**
 
-- **All structures in the game**, each with its own icon and switch. Positions come from the game's real generation
+- **The spawn point and all structures in the game**, each with its own icon and switch. Positions come from the game's real generation
   code, including biome and terrain checks.
 - **At every zoom:** close up all of them, far out a steady number of real ones that fills the screen. Markers may
   overlap, set how many to show, or keep a space between them. Rare kinds come first if you like.
@@ -154,6 +154,8 @@ and faster. Distributions often ship versions too old for current wasm, `scripts
 cubox uses SteelMC with [one commit on top](https://github.com/earomc/SteelMC/tree/cubox-locate-only-26.3) that makes
 finding jigsaw structures much faster, until it is upstream. For the browser it uses a copy of simdnbt that allows 32-bit targets
 ([`vendor/simdnbt`](vendor/simdnbt/CUBOX.md)).
+
+To try a local build on a phone, serve `dist/` as above and open `http://<your computer's address>:8000` on it.
 
 ### Docker
 

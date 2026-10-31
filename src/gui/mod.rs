@@ -947,12 +947,13 @@ impl Ui {
                     }
                     let relief_tiles = self.tiles.pending_relief();
                     ui.label(format!(
-                        "Generating: {} biome, {relief_tiles} height map tiles, {} structure areas",
+                        "Generating: {} biome, {relief_tiles} height map tiles, {} marker areas",
                         self.tiles.pending() - relief_tiles,
                         self.queries.waiting()
                     ));
                     if !self.markers.is_empty() {
-                        ui.label(format!("{} markers", self.markers.len()));
+                        let plural = if self.markers.len() == 1 { "" } else { "s" };
+                        ui.label(format!("{} marker{plural}", self.markers.len()));
                     }
                     ui.separator();
                     self.structures_menu(ui);

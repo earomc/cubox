@@ -63,6 +63,8 @@ const fn kind(
 use Dimension::{End, Nether, Overworld};
 
 pub const STRUCTURE_KINDS: &[StructureKind] = &[
+    // not a structure, but marked like one. No game structures: it is found in another way
+    kind("spawn", "Spawn point", Overworld, &[]),
     kind(
         "village",
         "Village",
@@ -180,6 +182,9 @@ pub fn spread(kind: usize) -> Option<Spread> {
         STRUCTURE_KINDS
             .iter()
             .map(|kind| {
+                if kind.structures.is_empty() {
+                    return Some(Spread::Rings);
+                }
                 let (_, set) = sets.iter().find(|(_, set)| kind.is_in(set))?;
                 Some(match set.placement.kind {
                     PlacementKind::RandomSpread { spacing, .. } => Spread::Grid(spacing),
@@ -202,6 +207,7 @@ pub fn bin_rounds(spacing: i32, max_tries: u32) -> [u32; 5] {
 /// All kinds, the rarest in the world first, measured as real structures per area on a seed. Where
 /// markers compete for space the rare ones are placed first, the others would crowd them out.
 const RARITY_ORDER: &[&str] = &[
+    "spawn",
     "stronghold",
     "woodland_mansion",
     "buried_treasure",
@@ -468,6 +474,14 @@ impl Finder {
 
     /// All structures of a kind with `Spread::Rings`, which really generate.
     pub fn rings(&self, kind: usize) -> Vec<Found> {
+        if STRUCTURE_KINDS[kind].structures.is_empty() {
+            let spawn = self.source.initial_spawn_search_origin();
+            return vec![Found {
+                kind,
+                x: spawn.x(),
+                z: spawn.z(),
+            }];
+        }
         let generator = self.ring_generator.get_or_init(|| {
             POOL.with(|pool| match pool {
                 Ok(pool) => Some(StructureGenerator::vanilla(self.seed, None, &self.source, pool)),
@@ -762,6 +776,23 @@ mod tests {
                 }
             });
         }
+    }
+
+    #[test]
+    fn the_spawn_point_is_one_marker_near_the_origin() {
+        with_big_stack(|| {
+            let kind = STRUCTURE_KINDS.iter().position(|k| k.id == "spawn").unwrap();
+            assert_eq!(spread(kind), Some(Spread::Rings));
+            for seed in [1, 12345, -987] {
+                let finder = Finder::new(seed, Dimension::Overworld).unwrap();
+                let found = finder.rings(kind);
+                assert_eq!(found.len(), 1);
+                let spawn = Dimension::Overworld.biome_source(seed).initial_spawn_search_origin();
+                assert_eq!((found[0].x, found[0].z), (spawn.x(), spawn.z()));
+                // the game looks up to 2048 blocks from the origin, then 512 from what it found
+                assert!(found[0].x.abs().max(found[0].z.abs()) <= 2560, "{found:?}");
+            }
+        });
     }
 
     #[test]

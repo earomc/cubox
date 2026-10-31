@@ -12,6 +12,7 @@ The release workflow publishes the section of a version as its release notes.
 
 - Highlight biomes: choose any in the Biomes menu and the others are darkened, instantly.
 - A button for a random seed.
+- The spawn point of a seed as a marker. The Structures menu is now called Markers.
 - The distance grid can be drawn over the structure markers.
 
 ### Changed

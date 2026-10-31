@@ -134,6 +134,7 @@ macro_rules! icon_files {
 }
 
 icon_files![
+    "spawn",
     "village",
     "pillager_outpost",
     "stronghold",
@@ -408,7 +409,14 @@ impl Ui {
             let marker = Rect::from_center_size(at, vec2(size, size));
             icons.image(found.kind, size).paint_at(ui, marker);
             if pointer.is_some_and(|p| marker.contains(p)) {
-                let text = format!("{}\nx {} z {}", STRUCTURE_KINDS[found.kind].name, found.x, found.z);
+                let name = STRUCTURE_KINDS[found.kind].name;
+                // the game then looks for a suitable block nearby, in chunks that aren't built here
+                let about = if STRUCTURE_KINDS[found.kind].id == "spawn" {
+                    " (within about 80 blocks)"
+                } else {
+                    ""
+                };
+                let text = format!("{name}{about}\nx {} z {}", found.x, found.z);
                 label = Some((marker.right_top(), text));
             }
         }
