@@ -150,8 +150,8 @@ python3 -m http.server --directory dist                      # or any static fil
 `wasm-opt` from [binaryen](https://github.com/WebAssembly/binaryen) is used when installed, it makes the wasm smaller
 and faster. Distributions often ship versions too old for current wasm, `scripts/install-wasm-opt.sh` installs a release.
 
-For the browser, cubox uses SteelMC from a [fork](https://github.com/earomc/SteelMC/tree/wasm-support) that builds
-for `wasm32-unknown-unknown`, until the change is upstream, and a copy of simdnbt that allows 32-bit targets
+cubox uses SteelMC with [one commit on top](https://github.com/earomc/SteelMC/tree/cubox-locate-only-26.3) that makes
+finding jigsaw structures much faster, until it is upstream. For the browser it uses a copy of simdnbt that allows 32-bit targets
 ([`vendor/simdnbt`](vendor/simdnbt/CUBOX.md)).
 
 ### Docker

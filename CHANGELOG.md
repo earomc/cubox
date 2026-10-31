@@ -8,33 +8,36 @@ The release workflow publishes the section of a version as its release notes.
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-10-31
+
 ### Added
 
-- Structures on the map: a sub menu with a switch and an icon for every kind, all off by default.
-  Their positions come from the game's real generation code.
-  End cities with a ship have their own switch and icon. They show at every zoom, all of them until they
-  get very dense and a sample beyond that. Their number stays steady while zooming. Markers don't overlap unless you let
-  them, with a slider for the space between them and a limit of markers with overlap: where there is room and a
-  structure it is shown, the rarest kinds first, and free spots keep being searched in rounds.
-- A search for the nearest structures and biomes.
-- A height map of the real terrain when zoomed in, in the overworld, off by default, with a quality
-  setting and the sea floor shown under water. Each height is one visible square. It uses the game's own
-  quick estimate of the surface, and exact heights can be switched on for when zoomed in.
-- Arrow keys pan and + and - zoom the map, and an Advanced menu has more values to adjust.
-- A Performance menu with how many threads cubox may use and how much memory finished tiles may take.
-- The status line says how many biome tiles, height map tiles and structure areas are being generated.
-- A nightly web version of the newest commit on main, at `/nightly/`.
+- Structures on the map, with real positions from the game's generation code: a sub menu with a switch and
+  an icon for every kind, all off by default, including abandoned camps and end cities with a ship.
+  - They show at every zoom. Close up that is all of them, far out a steady number of real ones.
+  - Markers don't overlap unless you let them. A slider sets the space between them, the rarest kinds come
+    first unless you switch that off, and with overlap on a limit sets how many are shown.
+- A search for the nearest structures and biomes, which can be cleared again.
+- A height map in the overworld, off by default, with the sea floor shown under water. It uses the game's
+  quick estimate of the surface, exact heights can be switched on with a quality setting.
 - A distance grid with coordinates and a scale bar, with automatic or fixed spacing, off by default.
+- A Performance menu for how many threads cubox may use and how much memory finished tiles may take, and an
+  Advanced menu with more values to adjust.
+- The status line says how many biome tiles, height map tiles and structure areas are being generated.
+- Arrow keys pan and + and - zoom the map. Ctrl and + or - scale the interface.
 - Zoom buttons that can be hidden, and tapping the map shows the biome on touch screens.
+- A nightly web version of the newest commit on main, at `/nightly/`.
 
 ### Changed
 
-- Maps now match Minecraft 26.3, which adds abandoned camps as a structure kind.
+- Maps now match Minecraft 26.3.
 - The settings window shows the license and links to the source code.
+- The web download is bigger, about 23 MB, because of the structure data.
 
 ### Fixed
 
-- Pinching to zoom didn't work in browsers, and on phones numbers and seeds couldn't be typed.
+- Pinching to zoom didn't work in browsers.
+- On phones and tablets numbers and seeds couldn't be typed. A text bar now opens the keyboard.
 - The settings window scrolls and starts closed on small screens.
 
 ## [0.2.0] - 2026-10-30
@@ -74,7 +77,8 @@ First release.
 - `cubox img` renders a map to a PNG. `cubox gui --script` drives the view and takes screenshots.
 - Builds for Linux, macOS and Windows on x86_64 and ARM.
 
-[Unreleased]: https://github.com/earomc/cubox/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/earomc/cubox/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/earomc/cubox/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/earomc/cubox/compare/v0.1.1...v0.2.0
 [0.1.1]: https://github.com/earomc/cubox/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/earomc/cubox/releases/tag/v0.1.0
