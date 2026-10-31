@@ -8,6 +8,17 @@ The release workflow publishes the section of a version as its release notes.
 
 ## [Unreleased]
 
+### Changed
+
+- End city markers are found about 2.7 times as fast, with the same results.
+
+### Fixed
+
+- `cubox img` refuses sizes of 0 and images over 32768 pixels per side with an error, instead of crashing or
+  trying to allocate more memory than there is.
+- A rare possible deadlock when the first biome sample happened on a tile worker.
+- A crash of the gui now ends with its error message instead of a segmentation fault on Linux.
+
 ## [0.4.0] - 2026-10-31
 
 ### Added

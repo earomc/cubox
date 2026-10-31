@@ -4,6 +4,7 @@
 //! ```text
 //! size 1280 800          # window inner size in physical pixels
 //! dimension nether       # overworld, nether or end
+//! seed 12345             # a number or text, like the seed field
 //! samples 2              # samples per pixel and axis
 //! panel off              # hide the settings window (on to show it again)
 //! structure village      # show a kind of structure, or `all`, or `none`
@@ -49,6 +50,7 @@ pub enum Command {
     SeaFloor(bool),
     ZoomButtons(bool),
     ClearSearch,
+    Seed(i64),
     Grid(bool),
     GridOverMarkers(bool),
     Search(String),
@@ -110,6 +112,9 @@ impl Command {
             "sea_floor" => Command::SeaFloor(args.first() != Some(&"off")),
             "zoom_buttons" => Command::ZoomButtons(args.first() != Some(&"off")),
             "clear_search" => Command::ClearSearch,
+            "seed" => Command::Seed(
+                crate::seed::parse_seed(args.first().context("seed: a number or text")?).context("seed: blank")?,
+            ),
             "grid_over_markers" => Command::GridOverMarkers(args.first() != Some(&"off")),
             "grid" => Command::Grid(args.first() != Some(&"off")),
             "search" => Command::Search(args.first().context("search: for what")?.to_string()),

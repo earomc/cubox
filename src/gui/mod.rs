@@ -481,6 +481,11 @@ impl State {
                     }
                 }
                 Command::Dimension(dimension) => ui.set_dimension(dimension),
+                Command::Seed(seed) => {
+                    ui.seed_text = seed.to_string();
+                    ui.set_seed(seed);
+                    ui.reset_tiles();
+                }
                 Command::Samples(samples) => {
                     ui.samples = samples;
                     ui.reset_tiles();
@@ -788,6 +793,12 @@ impl Ui {
         self.tiles.pending() > 0 || self.queries.busy()
     }
 
+    /// Tiles still need `reset_tiles`.
+    fn set_seed(&mut self, seed: i64) {
+        self.seed = seed;
+        self.biome_source = Arc::new(self.dimension.biome_source(seed));
+    }
+
     fn set_dimension(&mut self, dimension: Dimension) {
         self.dimension = dimension;
         self.sample_height = dimension.default_height();
@@ -875,8 +886,7 @@ impl Ui {
                         if let Some(seed) = new_seed
                             && seed != self.seed
                         {
-                            self.seed = seed;
-                            self.biome_source = Arc::new(self.dimension.biome_source(seed));
+                            self.set_seed(seed);
                             changed = true;
                         }
                         ui.end_row();
@@ -996,6 +1006,15 @@ fn with_app_name(attributes: winit::window::WindowAttributes) -> winit::window::
 #[cfg(not(target_arch = "wasm32"))]
 pub fn run(seed: i64, dimension: Dimension, script: Option<std::path::PathBuf>) -> anyhow::Result<()> {
     env_logger::init();
+    // unwinding the main thread drops the wayland connection before egui's clipboard thread is done
+    // with it, which segfaults and hides how it ended
+    let print_panic = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        print_panic(info);
+        if std::thread::current().name() == Some("main") {
+            std::process::exit(101);
+        }
+    }));
     let script = script.map(|path| Script::load(&path)).transpose()?;
     let event_loop = EventLoop::with_user_event().build()?;
     let mut app = App {

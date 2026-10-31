@@ -204,6 +204,9 @@ pub fn bin_rounds(spacing: i32, max_tries: u32) -> [u32; 5] {
     if spacing <= 4 { tries.map(|n| n * 8) } else { tries }
 }
 
+/// What the game requires of the lowest corner of an end city.
+const END_CITY_MIN_HEIGHT: i32 = 60;
+
 /// All kinds, the rarest in the world first, measured as real structures per area on a seed. Where
 /// markers compete for space the rare ones are placed first, the others would crowd them out.
 const RARITY_ORDER: &[&str] = &[
@@ -513,9 +516,9 @@ impl Finder {
     fn at_chunk(&self, generator: &StructureGenerator, kind: usize, chunk: ChunkPos) -> Option<Found> {
         let structures = STRUCTURE_KINDS[kind].structures;
         let starts = match &self.noises {
-            AnyNoises::Overworld(noises) => self.starts(generator, noises, chunk),
-            AnyNoises::Nether(noises) => self.starts(generator, noises, chunk),
-            AnyNoises::End(noises) => self.starts(generator, noises, chunk),
+            AnyNoises::Overworld(noises) => self.starts(generator, noises, chunk, kind),
+            AnyNoises::Nether(noises) => self.starts(generator, noises, chunk, kind),
+            AnyNoises::End(noises) => self.starts(generator, noises, chunk, kind),
         };
         starts
             .into_iter()
@@ -538,6 +541,7 @@ impl Finder {
         generator: &StructureGenerator,
         noises: &Noises<N>,
         chunk: ChunkPos,
+        kind: usize,
     ) -> Vec<steel_worldgen::structure::StructureStart> {
         let (chunk_x, chunk_z) = (chunk.0.x, chunk.0.y);
         let mut sampler = self.source.chunk_sampler();
@@ -561,6 +565,14 @@ impl Finder {
         );
         // a marker needs no more than where it starts
         let mut ctx = if self.assemble_all { ctx } else { ctx.with_locate_only() };
+        // The game measures an end city's 4 corners before it looks at any of them. The first is
+        // always the middle of the chunk, and most candidates that fail already fail there.
+        if !self.assemble_all
+            && STRUCTURE_KINDS[kind].structures == ["end_city"]
+            && ctx.base_height_full(chunk_x * 16 + 7, chunk_z * 16 + 7, false) - 1 < END_CITY_MIN_HEIGHT
+        {
+            return Vec::new();
+        }
         generator.generate_starts_for_chunk(&mut ctx, |_| false)
     }
 }
@@ -701,6 +713,27 @@ mod tests {
         for thread in threads {
             thread.join().unwrap();
         }
+    }
+
+    #[test]
+    fn low_end_city_shortcut_finds_the_same() {
+        with_big_stack(|| {
+            let mut real = 0;
+            for seed in [12345, 1, -987654321] {
+                let finder = Finder::new(seed, Dimension::End).unwrap();
+                let mut whole = Finder::new(seed, Dimension::End).unwrap();
+                whole.assemble_all = true;
+                for id in ["end_city", "end_city_ship"] {
+                    let kind = STRUCTURE_KINDS.iter().position(|kind| kind.id == id).unwrap();
+                    for (x, z) in (20..50).flat_map(|x| (20..50).map(move |z| (x, z))) {
+                        let ours = finder.in_cell(kind, x, z);
+                        assert_eq!(ours, whole.in_cell(kind, x, z), "{id} of {seed} at {x} {z}");
+                        real += ours.is_some() as i32;
+                    }
+                }
+            }
+            assert!(real > 100, "{real}");
+        });
     }
 
     #[test]

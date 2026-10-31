@@ -1,6 +1,9 @@
 use clap::{Arg, ArgAction, Command, crate_description, crate_name, crate_version, value_parser};
 use cubox::seed::parse_seed;
 
+/// The longest side of `img`, in pixels. Its 3 bytes per pixel come to about 3.2 GiB, and the tiles need that again.
+pub(crate) const MAX_IMAGE_SIDE: u64 = 32768;
+
 const SEED_HELP: &str = "Seed like in Minecraft: a number (negative too) or any text";
 
 fn parse_seed_arg(text: &str) -> Result<i64, String> {
@@ -44,13 +47,13 @@ pub(crate) fn build_cmd() -> Command {
                 .arg(Arg::new("tile-size")
                     .help("Size of tile in pixels")
                     .long("tile-size")
-                    .value_parser(value_parser!(usize))
+                    .value_parser(value_parser!(u32).range(1..=MAX_IMAGE_SIDE as i64))
                     .default_value("128")
                 )
                 .arg(Arg::new("tiles")
                     .help("Amount of tiles per side")
                     .long("tiles")
-                    .value_parser(value_parser!(i32))
+                    .value_parser(value_parser!(i32).range(1..=MAX_IMAGE_SIDE as i64))
                     .default_value("1")
                 )
                 .arg(Arg::new("sample-height")
