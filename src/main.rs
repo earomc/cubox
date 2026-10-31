@@ -166,6 +166,9 @@ fn find(matches: &clap::ArgMatches) {
     let tested = matches.get_one::<u64>("tested").copied();
     let top = *matches.get_one::<usize>("top").unwrap();
 
+    let sort_best = |kept: &mut Vec<Match>| {
+        kept.sort_by(|a, b| b.score.unwrap_or(f64::MIN).total_cmp(&a.score.unwrap_or(f64::MIN)));
+    };
     let line = |found: &Match| {
         let score = found.score.map_or("-".to_owned(), |score| format!("{score:.0}"));
         let hits: Vec<String> = found.hits.iter().map(|hit| format!("{},{}", hit.x, hit.z)).collect();
@@ -184,6 +187,11 @@ fn find(matches: &clap::ArgMatches) {
                 shown += 1;
                 if tested.is_some() {
                     kept.push(found);
+                    // only the best are shown, a common match must not fill the memory
+                    if kept.len() >= top.max(1) * 2 + 1024 {
+                        sort_best(&mut kept);
+                        kept.truncate(top);
+                    }
                 } else {
                     println!("{}", line(&found));
                 }
@@ -210,7 +218,7 @@ fn find(matches: &clap::ArgMatches) {
         }
     }
     search.stop();
-    kept.sort_by(|a, b| b.score.unwrap_or(f64::MIN).total_cmp(&a.score.unwrap_or(f64::MIN)));
+    sort_best(&mut kept);
     for found in kept.iter().take(top) {
         println!("{}", line(found));
     }
