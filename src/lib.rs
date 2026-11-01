@@ -3,6 +3,7 @@
 
 pub mod biome_colors;
 pub mod dimension;
+pub mod features;
 pub mod gui;
 pub mod noise;
 pub mod seed;

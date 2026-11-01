@@ -20,6 +20,7 @@ use steel_worldgen::{
 
 use crate::{
     dimension::Dimension,
+    features::{feature_of, ring_gateways},
     seed::generator_seed,
     terrain::{Noises, init_registry},
     tile_renderer::WORLD_BORDER_QUARTS,
@@ -145,6 +146,14 @@ pub const STRUCTURE_KINDS: &[StructureKind] = &[
         &["ruined_portal_nether"],
     ),
     kind("end_city", "End city", End, &["end_city"]),
+    kind("end_gateway", "End gateway after the dragon (experimental)", End, &[]),
+    kind(
+        "end_gateway_scattered",
+        "Scattered end gateway (likely, experimental)",
+        End,
+        &[],
+    ),
+    kind("geode", "Geode (likely, experimental)", Overworld, &[]),
     StructureKind {
         with_piece: Some("end_city/ship"),
         ..kind("end_city_ship", "End city with ship", End, &["end_city"])
@@ -182,6 +191,9 @@ pub fn spread(kind: usize) -> Option<Spread> {
         STRUCTURE_KINDS
             .iter()
             .map(|kind| {
+                if feature_of(kind.id).is_some() {
+                    return Some(Spread::Grid(1));
+                }
                 if kind.structures.is_empty() {
                     return Some(Spread::Rings);
                 }
@@ -196,16 +208,21 @@ pub fn spread(kind: usize) -> Option<Spread> {
     SPREADS[kind]
 }
 
+/// Whether where a kind can be only depends on the lower 48 bits of the seed.
+pub fn depends_on_lower_bits(kind: usize) -> bool {
+    feature_of(STRUCTURE_KINDS[kind].id).is_none()
+}
+
 /// Whether a kind is a structure of the game, unlike the spawn point.
 pub fn is_structure(kind: usize) -> bool {
-    !STRUCTURE_KINDS[kind].structures.is_empty()
+    STRUCTURE_KINDS[kind].id != "spawn"
 }
 
 /// How far from the middle of its chunk a structure's marker can be, in blocks. See the test
 /// `markers_stay_within_their_margin`.
 pub fn marker_margin(kind: usize) -> i32 {
     match STRUCTURE_KINDS[kind].id {
-        "swamp_hut" => 16,
+        "swamp_hut" | "geode" | "end_gateway_scattered" | "end_gateway" => 16,
         "desert_pyramid" | "jungle_temple" | "igloo" | "buried_treasure" | "ocean_monument" => 64,
         _ => 512,
     }
@@ -213,8 +230,27 @@ pub fn marker_margin(kind: usize) -> i32 {
 
 /// Where a kind might be around a spot, from the seed alone: the grid cell and middle of the
 /// chunk of each candidate within `radius` blocks of `center` or `marker_margin` further. A kind
-/// that isn't on a grid has none. This depends on nothing but the lower 48 bits of the seed.
+/// that isn't on a grid has none. Structures depend on nothing but the lower 48 bits of the seed,
+/// see `depends_on_lower_bits`.
 pub fn candidates(seed: i64, kind: usize, center: [i32; 2], radius: i32, out: &mut Vec<([i32; 2], [i32; 2])>) {
+    if let Some(feature) = feature_of(STRUCTURE_KINDS[kind].id) {
+        let reach = radius as i64 + marker_margin(kind) as i64;
+        let chunks = |middle: i32| {
+            ((middle as i64 - reach).div_euclid(16) as i32)..=((middle as i64 + reach).div_euclid(16) as i32)
+        };
+        for z in chunks(center[1]) {
+            for x in chunks(center[0]) {
+                if feature.in_chunk(seed, [x, z]).is_some() {
+                    let middle = [x * 16 + 8, z * 16 + 8];
+                    let (dx, dz) = ((middle[0] - center[0]) as i64, (middle[1] - center[1]) as i64);
+                    if dx * dx + dz * dz <= reach * reach {
+                        out.push(([x, z], middle));
+                    }
+                }
+            }
+        }
+        return;
+    }
     let Some(set) = &kind_sets()[kind] else { return };
     let placement = &set.placement;
     let PlacementKind::RandomSpread {
@@ -285,13 +321,18 @@ const RARITY_ORDER: &[&str] = &[
     "bastion",
     "ruined_portal_nether",
     "nether_fossil",
+    "end_gateway",
+    "end_gateway_scattered",
     "end_city_ship",
     "end_city",
+    "geode",
 ];
 
 /// How many of a grid's candidates really generate, measured over thousands of cells on several
 /// seeds. Depends a little on the seed, it is used to know how many to look for.
 const REAL_RATES: &[(&str, f64)] = &[
+    ("geode", 0.041),
+    ("end_gateway_scattered", 0.0004),
     ("village", 0.233),
     ("pillager_outpost", 0.032),
     ("mineshaft", 0.0037),
@@ -487,6 +528,17 @@ impl Finder {
 
     /// The structure of `kind` in a grid cell of its `Spread::Grid`, if one really generates.
     pub fn in_cell(&self, kind: usize, cell_x: i32, cell_z: i32) -> Option<Found> {
+        if let Some(feature) = feature_of(STRUCTURE_KINDS[kind].id) {
+            if feature.dimension != self.dimension {
+                return None;
+            }
+            let (block, y) = feature.in_chunk(self.seed, [cell_x, cell_z])?;
+            return feature.biome_allows(&self.source, block, y).then_some(Found {
+                kind,
+                x: block[0],
+                z: block[1],
+            });
+        }
         let set = self.set(kind)?;
         let PlacementKind::RandomSpread {
             spacing,
@@ -560,6 +612,12 @@ impl Finder {
 
     /// All structures of a kind with `Spread::Rings`, which really generate.
     pub fn rings(&self, kind: usize) -> Vec<Found> {
+        if STRUCTURE_KINDS[kind].id == "end_gateway" {
+            return ring_gateways(self.seed)
+                .into_iter()
+                .map(|[x, z]| Found { kind, x, z })
+                .collect();
+        }
         if STRUCTURE_KINDS[kind].structures.is_empty() {
             let spawn = self.source.initial_spawn_search_origin();
             return vec![Found {
@@ -768,6 +826,9 @@ mod tests {
     #[test]
     fn candidates_depend_on_the_lower_48_bits_only() {
         for (kind, _) in STRUCTURE_KINDS.iter().enumerate() {
+            if !depends_on_lower_bits(kind) {
+                continue;
+            }
             for seed in 0..20i64 {
                 let seed = seed.wrapping_mul(0x5DEE_CE66_D123_4567u64 as i64);
                 let other = seed ^ (seed.rotate_left(13) << 48) ^ (1 << 63);
@@ -797,6 +858,9 @@ mod tests {
                                 continue;
                             }
                             let Some(Spread::Grid(_)) = spread(kind) else { continue };
+                            if !depends_on_lower_bits(kind) {
+                                continue;
+                            }
                             let set = finder.set(kind).unwrap();
                             let PlacementKind::RandomSpread {
                                 spacing,
@@ -916,7 +980,7 @@ mod tests {
                         continue;
                     };
                     // far too rare to measure quickly
-                    if def.id == "buried_treasure" {
+                    if def.id == "buried_treasure" || def.id == "end_gateway_scattered" {
                         continue;
                     }
                     let n: i32 = if spacing <= 4 { 250 } else { 50 };

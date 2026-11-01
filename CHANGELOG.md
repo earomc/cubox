@@ -15,6 +15,7 @@ The release workflow publishes the section of a version as its release notes.
 - A Seed search section on the desktop with presets, finding locations in one seed too. Clicking a result goes there
   and shows its markers.
 
+- End gateways, and as an experiment likely geodes and scattered end gateways, as markers and search conditions.
 - Large ore veins on the map and as a `vein` search condition.
 - Finding locations in one seed goes through an `area` once, reports each place once and ends.
 - A Noise section shows temperature, humidity, continentalness, erosion, weirdness or depth as colors over the map.

@@ -6,6 +6,7 @@ use egui::{Align2, Color32, FontId, Pos2, Rect, Stroke, TextureHandle, pos2, vec
 
 use crate::{
     dimension::Dimension,
+    features::ring_gateways,
     gui::{
         Ui,
         finder::{Job, MarkerSearch, Occupied},
@@ -134,6 +135,9 @@ macro_rules! icon_files {
 
 icon_files![
     "spawn",
+    "end_gateway",
+    "end_gateway_scattered",
+    "geode",
     "village",
     "pillager_outpost",
     "stronghold",
@@ -410,10 +414,15 @@ impl Ui {
             if pointer.is_some_and(|p| marker.contains(p)) {
                 let name = STRUCTURE_KINDS[found.kind].name;
                 // the game then looks for a suitable block nearby, in chunks that aren't built here
-                let about = if STRUCTURE_KINDS[found.kind].id == "spawn" {
-                    " (within about 80 blocks)"
-                } else {
-                    ""
+                let about = match STRUCTURE_KINDS[found.kind].id {
+                    "spawn" => " (within about 80 blocks)".to_owned(),
+                    "end_gateway" => ring_gateways(self.seed)
+                        .iter()
+                        .position(|spot| *spot == [found.x, found.z])
+                        .map_or(String::new(), |number| {
+                            format!("\nopens as number {} of 20", number + 1)
+                        }),
+                    _ => String::new(),
                 };
                 let text = format!("{name}{about}\nx {} z {}", found.x, found.z);
                 label = Some((marker.right_top(), text));

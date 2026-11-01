@@ -8,7 +8,9 @@ use crate::{
     dimension::Dimension,
     noise::{NoiseCache, NoiseField, VeinField},
     seedfind::spec::{Anchor, BiomeTest, Card},
-    structures::{Finder, Found, STRUCTURE_KINDS, Spread, allowed_by_biomes, candidates, spread},
+    structures::{
+        Finder, Found, STRUCTURE_KINDS, Spread, allowed_by_biomes, candidates, depends_on_lower_bits, spread,
+    },
 };
 
 /// Samples of a card's area, whatever its size.
@@ -540,7 +542,9 @@ impl Plan {
             .enumerate()
             .filter(|(_, (_, card))| match card {
                 Card::Structure { kind, anchor, .. } | Card::Cluster { kind, anchor, .. } => {
-                    matches!(anchor, Anchor::At(..)) && spread(*kind) != Some(Spread::Rings)
+                    matches!(anchor, Anchor::At(..))
+                        && spread(*kind) != Some(Spread::Rings)
+                        && depends_on_lower_bits(*kind)
                 }
                 _ => false,
             })
