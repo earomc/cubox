@@ -8,6 +8,10 @@ The release workflow publishes the section of a version as its release notes.
 
 ## [Unreleased]
 
+### Changed
+
+- Several noises and the ore veins can be shown at once, each with its own opacity.
+
 ## [0.5.0] - 2026-11-01
 
 ### Added

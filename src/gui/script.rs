@@ -9,7 +9,7 @@
 //! panel off              # hide the settings window (on to show it again)
 //! structure village      # show a kind of structure, or `all`, or `none`
 //! relief on              # terrain on the map (off to hide it)
-//! noise erosion          # show a climate noise (off to hide it)
+//! noise erosion 0.5      # show a climate noise too, with this opacity (off hides all)
 //! veins on               # show the large ore veins (off to hide them)
 //! grid on                # the distance grid (off to hide it)
 //! grid_over_markers on   # draw it after the structure markers
@@ -65,7 +65,7 @@ pub enum Command {
     SearchLocations(String),
     PrintSearchStatus,
     EditSearch(String),
-    Noise(Option<NoiseParameter>),
+    Noise(Option<(NoiseParameter, f32)>),
     Goto(f64, f64),
     Zoom(f64),
     ZoomTo(f64, f64),
@@ -130,12 +130,13 @@ impl Command {
             "grid" => Command::Grid(args.first() != Some(&"off")),
             "noise" => Command::Noise(match args.first().copied() {
                 Some("off") => None,
-                name => Some(
+                name => Some((
                     NoiseParameter::ALL
                         .into_iter()
                         .find(|parameter| Some(parameter.name()) == name)
                         .context("noise: off or a noise parameter")?,
-                ),
+                    num(1).unwrap_or(0.7) as f32,
+                )),
             }),
             "search_locations" => Command::SearchLocations(args.join(" ").replace(';', "\n")),
             "edit_search" => Command::EditSearch(args.join(" ").replace(';', "\n")),

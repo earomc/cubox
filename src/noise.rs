@@ -123,8 +123,8 @@ const COPPER_HEIGHTS: [i32; 3] = [15, 25, 35];
 const IRON_HEIGHTS: [i32; 3] = [-44, -34, -24];
 /// Vein tiles are sampled every this many pixels.
 const VEIN_TILE_STEP: usize = 2;
-const COPPER_COLOR: [u8; 4] = [232, 120, 60, 170];
-const IRON_COLOR: [u8; 4] = [225, 215, 205, 170];
+const COPPER_COLOR: [u8; 4] = [232, 120, 60, 255];
+const IRON_COLOR: [u8; 4] = [225, 215, 205, 255];
 
 /// Where the large ore veins of an overworld are. Says where they run: the blocks in them are
 /// random, and caves can cut through them.

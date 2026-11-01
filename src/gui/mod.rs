@@ -223,6 +223,22 @@ struct State {
 }
 
 /// Everything that is shown in the window.
+/// Something that can be shown over the biomes.
+#[derive(Clone, Copy)]
+struct Overlay {
+    shown: bool,
+    opacity: f32,
+}
+
+impl Default for Overlay {
+    fn default() -> Self {
+        Self {
+            shown: false,
+            opacity: 0.7,
+        }
+    }
+}
+
 struct Ui {
     seed: i64,
     /// the seed as typed, a number or any text like in Minecraft
@@ -277,11 +293,11 @@ struct Ui {
     /// draw the terrain over the biomes
     relief: bool,
     /// the climate noise shown over the biomes
-    noise: Option<NoiseParameter>,
+    noise: [Overlay; NoiseParameter::ALL.len()],
     /// for the value under the cursor
     noise_field: Option<Option<NoiseField>>,
-    /// show where the large ore veins run instead of a noise
-    veins: bool,
+    /// where the large ore veins run
+    veins: Overlay,
     vein_field: Option<VeinField>,
     /// replace the estimated heights with exact ones when zoomed in, in this quality
     relief_exact: bool,
@@ -442,9 +458,9 @@ impl State {
             sampled: vec![false; STRUCTURE_KINDS.len()],
             icons: None,
             relief: false,
-            noise: None,
+            noise: Default::default(),
             noise_field: None,
-            veins: false,
+            veins: Default::default(),
             vein_field: None,
             relief_exact: false,
             relief_quality: ReliefQuality::Auto,
@@ -526,8 +542,11 @@ impl State {
                 Command::ZoomButtons(on) => ui.zoom_buttons_shown = on,
                 Command::Grid(on) => ui.grid.enabled = on,
                 Command::GridOverMarkers(on) => ui.grid.over_markers = on,
-                Command::Noise(parameter) => ui.noise = parameter,
-                Command::Veins(on) => ui.veins = on,
+                Command::Noise(Some((parameter, opacity))) => {
+                    ui.noise[parameter as usize] = Overlay { shown: true, opacity };
+                }
+                Command::Noise(None) => ui.noise.iter_mut().for_each(|noise| noise.shown = false),
+                Command::Veins(on) => ui.veins.shown = on,
                 Command::OpenFirstMatch => ui.script_open_first_match(),
                 Command::SearchSeeds(text) => ui.seed_search.script_start(&text, ui.seed, false),
                 Command::SearchLocations(text) => ui.seed_search.script_start(&text, ui.seed, true),
@@ -862,13 +881,7 @@ impl Ui {
             max_relief_level: self.advanced.max_relief_level,
             relief_strength: self.advanced.relief_strength,
             sea_floor: self.sea_floor,
-            overlay: if self.veins && self.dimension == Dimension::Overworld {
-                Some(crate::tile_renderer::Layer::Veins)
-            } else {
-                self.noise
-                    .filter(|parameter| crate::noise::parameters_of(self.dimension).contains(parameter))
-                    .map(crate::tile_renderer::Layer::Noise)
-            },
+            overlays: self.overlays(),
         };
         let (tile_threads, finder_threads) =
             resources::share(self.threads, self.tiles.pending() > 0, self.queries.busy());
@@ -987,7 +1000,7 @@ impl Ui {
                         let name = &self.hovered_biome.as_ref().unwrap().1;
                         let height = height.map_or(String::new(), |y| format!(" y {y}"));
                         ui.label(format!("x {} z {}{height}: {name}", q[0] * 4, q[1] * 4));
-                        if let Some(line) = self.hovered_noise(q) {
+                        for line in self.hovered_overlays(q) {
                             ui.label(line);
                         }
                     } else {

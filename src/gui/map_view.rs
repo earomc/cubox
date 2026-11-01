@@ -56,7 +56,7 @@ impl Camera {
 }
 
 /// Settings that every tile of the current map shares.
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 pub struct MapSettings {
     pub sample_height: i32,
     pub samples: u8,
@@ -72,8 +72,8 @@ pub struct MapSettings {
     pub relief_strength: f32,
     /// the relief is that of the sea floor instead of the water
     pub sea_floor: bool,
-    /// show this over the biomes: a climate noise or the ore veins
-    pub overlay: Option<Layer>,
+    /// shown over the biomes with their opacity: climate noises and the ore veins
+    pub overlays: Vec<(Layer, f32)>,
 }
 
 pub struct MapView {
@@ -241,21 +241,28 @@ impl MapView {
             keys.iter().map(|&key| relief_key(key, detail)).collect()
         });
         // the quick estimate of everything first, shown until the wanted detail is there
-        let overlay: Vec<TileKey> = settings.overlay.map_or(Vec::new(), |layer| {
-            keys.iter()
-                .map(|&key| TileKey {
-                    layer,
-                    samples: 1,
-                    ..key
+        let overlays: Vec<(TileKey, f32)> = settings
+            .overlays
+            .iter()
+            .flat_map(|&(layer, opacity)| {
+                keys.iter().map(move |&key| {
+                    (
+                        TileKey {
+                            layer,
+                            samples: 1,
+                            ..key
+                        },
+                        opacity,
+                    )
                 })
-                .collect()
-        });
+            })
+            .collect();
         let relief_wanted: Vec<TileKey> = keys
             .iter()
             .filter(|_| relief_detail.is_some_and(|detail| detail != Detail::Estimate))
             .map(|&key| relief_key(key, Detail::Estimate))
             .chain(relief.iter().copied())
-            .chain(overlay.iter().copied())
+            .chain(overlays.iter().map(|(key, _)| *key))
             .collect();
         tiles.set_highlight(settings.highlight);
         tiles.update(&keys, &cover, &relief_wanted, unsettled_for <= 0.0);
@@ -307,15 +314,21 @@ impl MapView {
                 }
             }
         }
-        for key in overlay {
+        for (key, opacity) in overlays {
             let screen = tile_screen(&self.camera, &key);
             let tile = tiles.get(&key, now);
-            if !tile.as_ref().is_some_and(|(_, alpha)| *alpha >= 1.0) {
+            let own_alpha = tile.as_ref().map_or(0.0, |(_, alpha)| *alpha);
+            // what shows until then fades out as the tile fades in, both would show twice as strong
+            let first_stand_in = out.quads.len();
+            if own_alpha < 1.0 {
                 draw_ancestor(&mut out, tiles, now, key, screen);
+            }
+            for quad in &mut out.quads[first_stand_in..] {
+                quad.alpha = opacity * (1.0 - own_alpha);
             }
             if let Some((tex, alpha)) = tile {
                 fading |= alpha < 1.0;
-                out.push(tex, screen, FULL_UV, alpha);
+                out.push(tex, screen, FULL_UV, alpha * opacity);
             }
         }
         let first_relief_quad = out.quads.len();
