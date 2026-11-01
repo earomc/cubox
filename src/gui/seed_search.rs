@@ -9,7 +9,7 @@ use crate::{
     seedfind::{
         engine::Match,
         run::{Search, Seeds},
-        spec::{self, Anchor, BiomeTest, Card, NoiseParameter, Ore, PRESETS},
+        spec::{self, Anchor, BiomeTest, Card, NoiseParameter, PRESETS},
     },
     structures::{STRUCTURE_KINDS, is_structure},
 };
@@ -335,25 +335,6 @@ fn card_ui(ui: &mut egui::Ui, salt: usize, card: &mut Card, here: bool) -> bool 
             ui.label("%");
             changed |= within_ui(ui, salt, radius, anchor, here);
         }
-        Card::Vein {
-            ore,
-            area,
-            radius,
-            anchor,
-        } => {
-            ui.label("vein");
-            egui::ComboBox::from_id_salt(("ore", salt))
-                .selected_text(ore.name())
-                .width(60.0)
-                .show_ui(ui, |ui| {
-                    for option in Ore::ALL {
-                        changed |= ui.selectable_value(ore, option, option.name()).changed();
-                    }
-                });
-            ui.label("area>=");
-            changed |= number_ui(ui, area, 1..=1_000_000_000, 10_000.0);
-            changed |= within_ui(ui, salt, radius, anchor, here);
-        }
         Card::Not(inner) => changed |= card_ui(ui, salt, inner, here),
         Card::Any(cards) => {
             ui.label(format!("any of {} conditions, see the text", cards.len()));
@@ -454,15 +435,6 @@ impl Ui {
                             biome: "plains".to_owned(),
                             test: BiomeTest::Present,
                             radius: 500,
-                            anchor,
-                        },
-                    ),
-                    (
-                        "+ vein",
-                        Card::Vein {
-                            ore: Ore::Copper,
-                            area: 100_000,
-                            radius: 1000,
                             anchor,
                         },
                     ),

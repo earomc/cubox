@@ -1,12 +1,17 @@
 //! The climate noises that decide biomes, for looking at them and for searching.
 
-use steel_utils::random::{Random, xoroshiro::Xoroshiro};
+use steel_utils::{
+    BlockStateId,
+    random::{Random, xoroshiro::Xoroshiro},
+};
 use steel_worldgen::{
     biomes::{NetherClimateSampler, OverworldClimateSampler},
+    density::DimensionNoises,
     density_functions::{
         nether::NetherColumnCache,
-        overworld::{OverworldColumnCache, OverworldNoises},
+        overworld::{self as generated, OverworldColumnCache, OverworldNoises},
     },
+    noise::OreVeinifier,
     noise_parameters::get_noise_parameters,
 };
 
@@ -122,20 +127,82 @@ const VEININESS: f32 = 0.4;
 const COPPER_HEIGHTS: [i32; 3] = [15, 25, 35];
 const IRON_HEIGHTS: [i32; 3] = [-44, -34, -24];
 
-/// Where the large ore veins of an overworld are. Says where they run: the blocks in them are
-/// random, and caves can cut through them.
+/// Blocks of a vein looked at around a spot, every this many blocks, across all of the ore's heights.
+const ORE_SCAN_RADIUS: i32 = 8;
+const ORE_SCAN_STEP: usize = 2;
+
+/// What is underground in an overworld, from its noises. That is before caves are carved out of it
+/// and features are placed, which can take things away again.
 pub struct VeinField {
     noises: Box<OverworldNoises>,
+    veinifier: OreVeinifier,
 }
 
 impl VeinField {
     pub fn new(seed: i64) -> Self {
+        crate::terrain::init_registry();
         let seed = generator_seed(seed);
         let mut rng = Xoroshiro::from_seed(seed);
         let splitter = rng.next_positional();
         Self {
             noises: Box::new(OverworldNoises::create(seed, &splitter, &get_noise_parameters())),
+            veinifier: OreVeinifier::new(&splitter),
         }
+    }
+
+    /// Whether the terrain is solid at a block, not air or water.
+    pub fn is_solid(&self, cache: &mut NoiseCache, x: i32, y: i32, z: i32) -> bool {
+        cache.overworld.ensure(x, z, &self.noises);
+        self.noises.router_final_density(&mut cache.overworld, x, y, z) > 0.0
+    }
+
+    /// Whether the game's rule puts ore or a raw ore block of this ore at a block of solid stone.
+    /// Copper and iron have the heights of their rule, the blocks of the rule itself don't matter.
+    fn has_ore(&self, cache: &mut NoiseCache, ore: Ore, x: i32, y: i32, z: i32) -> bool {
+        cache.overworld.ensure(x, z, &self.noises);
+        let at = (x as f64, y as f64, z as f64);
+        let (density, richness) = match ore {
+            Ore::Copper => (
+                generated::router_material_ore_vein_0_density(&self.noises, &cache.overworld, at.0, at.1, at.2),
+                generated::router_material_ore_vein_0_richness(&self.noises, &cache.overworld, at.0, at.1, at.2),
+            ),
+            Ore::Iron => (
+                generated::router_material_ore_vein_1_density(&self.noises, &cache.overworld, at.0, at.1, at.2),
+                generated::router_material_ore_vein_1_richness(&self.noises, &cache.overworld, at.0, at.1, at.2),
+            ),
+        };
+        if density <= 0.0 || !self.is_solid(cache, x, y, z) {
+            return false;
+        }
+        let (ore_block, filler) = (BlockStateId(1), BlockStateId(0));
+        let gap = || match ore {
+            Ore::Copper => {
+                generated::router_material_ore_vein_0_filler_gap(&self.noises, &cache.overworld, at.0, at.1, at.2)
+            }
+            Ore::Iron => {
+                generated::router_material_ore_vein_1_filler_gap(&self.noises, &cache.overworld, at.0, at.1, at.2)
+            }
+        };
+        self.veinifier
+            .try_apply_material_rule(x, y, z, density, richness, gap, ore_block, ore_block, filler, 0.02)
+            == Some(ore_block)
+    }
+
+    /// How many blocks of ore a look around a spot finds. It looks at one block in 8.
+    pub fn ore_near(&self, cache: &mut NoiseCache, ore: Ore, x: i32, z: i32) -> u32 {
+        let heights = match ore {
+            Ore::Copper => 0..50,
+            Ore::Iron => -60..-8,
+        };
+        let mut found = 0;
+        for dz in (-ORE_SCAN_RADIUS..ORE_SCAN_RADIUS).step_by(ORE_SCAN_STEP) {
+            for dx in (-ORE_SCAN_RADIUS..ORE_SCAN_RADIUS).step_by(ORE_SCAN_STEP) {
+                for y in heights.clone().step_by(ORE_SCAN_STEP) {
+                    found += self.has_ore(cache, ore, x + dx, y, z + dz) as u32;
+                }
+            }
+        }
+        found
     }
 
     /// The ore whose veins run under a block position, if any. This is the noise that decides where
@@ -158,7 +225,6 @@ impl VeinField {
     /// Whether the game's own rule for an ore can place anything at a block.
     #[cfg(test)]
     fn game_density(&self, cache: &mut NoiseCache, ore: Ore, x: i32, y: i32, z: i32) -> f32 {
-        use steel_worldgen::density_functions::overworld as generated;
         cache.overworld.ensure(x, z, &self.noises);
         let at = (x as f64, y as f64, z as f64);
         match ore {

@@ -6,7 +6,7 @@ use steel_worldgen::biomes::BiomeSourceKind;
 
 use crate::{
     dimension::Dimension,
-    noise::{NoiseCache, NoiseField, VeinField},
+    noise::{NoiseCache, NoiseField},
     seedfind::spec::{Anchor, BiomeTest, Card},
     structures::{
         Finder, Found, STRUCTURE_KINDS, Spread, allowed_by_biomes, candidates, depends_on_lower_bits, spread,
@@ -50,7 +50,6 @@ pub struct SeedWorld {
     finders: [OnceLock<Option<Finder>>; 3],
     spawn: OnceLock<[i32; 2]>,
     climate: OnceLock<Option<NoiseField>>,
-    veins: OnceLock<VeinField>,
 }
 
 impl SeedWorld {
@@ -61,7 +60,6 @@ impl SeedWorld {
             finders: Default::default(),
             spawn: OnceLock::new(),
             climate: OnceLock::new(),
-            veins: OnceLock::new(),
         }
     }
 
@@ -454,26 +452,6 @@ impl SeedWorld {
                         .collect(),
                 })
             }
-            Card::Vein {
-                ore,
-                area,
-                radius,
-                anchor,
-            } => {
-                let center = self.center(*anchor, here);
-                let veins = self.veins.get_or_init(|| VeinField::new(self.seed));
-                let mut is_vein = |x: i32, z: i32| veins.at(x, z) == Some(*ore);
-                let (size, middle) = largest_patch(&mut is_vein, *area, *radius, center)?;
-                Some(Passed {
-                    score: Some(size as f64),
-                    hits: vec![Hit {
-                        kind: None,
-                        dimension: Dimension::Overworld,
-                        x: middle[0],
-                        z: middle[1],
-                    }],
-                })
-            }
             Card::Not(card) => match self.check(card, here, cells) {
                 Some(_) => None,
                 None => Some(Passed::default()),
@@ -526,7 +504,7 @@ fn cost(card: &Card) -> u32 {
                 1 + anchored(anchor)
             }
         }
-        Card::Biome { anchor, .. } | Card::Noise { anchor, .. } | Card::Vein { anchor, .. } => 2 + anchored(anchor),
+        Card::Biome { anchor, .. } | Card::Noise { anchor, .. } => 2 + anchored(anchor),
         Card::Not(card) => cost(card),
         Card::Any(cards) => cards.iter().map(cost).sum(),
         Card::Area { .. } => 0,

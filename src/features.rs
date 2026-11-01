@@ -163,8 +163,40 @@ impl FeatureRoll {
         let z = chunk[1] * 16 + random.next_i32_bounded(16);
         let y = self
             .heights
-            .map(|(lowest, highest)| lowest + random.next_i32_bounded(highest - lowest + 1));
+            .map(|(lowest, highest)| random.next_i32_between(lowest, highest));
         Some(([x, z], y))
+    }
+
+    /// The blocks the game looks at for a geode at this chunk: it gives up if more than one of them
+    /// isn't solid. They come next in the same random numbers.
+    pub fn geode_points(seed: i64, chunk: [i32; 2]) -> Option<([i32; 3], Vec<[i32; 3]>)> {
+        let (number, step) = number_of(&GEODE);
+        let mut random = WorldgenRandom::from_seed(0);
+        let decoration_seed = random.set_decoration_seed(seed, chunk[0] * 16, chunk[1] * 16);
+        random.set_feature_seed(decoration_seed, number, step);
+        if random.next_f32() >= 1.0 / GEODE.chance as f32 {
+            return None;
+        }
+        let x = chunk[0] * 16 + random.next_i32_bounded(16);
+        let z = chunk[1] * 16 + random.next_i32_bounded(16);
+        let (lowest, highest) = GEODE.heights?;
+        let y = random.next_i32_between(lowest, highest);
+        // how `GeodeFeature` goes on, with its defaults: 3 to 4 points, 4 to 6 blocks away
+        let points = random.next_i32_between(3, 4);
+        random.next_f64(); // the size of its crack
+        random.next_f32(); // whether it has one
+        let points = (0..points)
+            .map(|_| {
+                let point = [
+                    x + random.next_i32_between(4, 6),
+                    y + random.next_i32_between(4, 6),
+                    z + random.next_i32_between(4, 6),
+                ];
+                random.next_i32_between(1, 2); // its offset
+                point
+            })
+            .collect();
+        Some(([x, y, z], points))
     }
 
     /// Whether the feature can be in the biome at this block. The game shifts where it looks a

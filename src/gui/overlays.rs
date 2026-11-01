@@ -327,7 +327,7 @@ impl Ui {
         } else {
             // what fits on the part of the screen with world on it, and some more to choose from
             let fit = markers_that_fit(min, max, distance_points * marker_scale);
-            let choice = (self.advanced.search_fineness * self.advanced.search_fineness) as f64;
+            let choice = (self.advanced.marker_fineness * self.advanced.marker_fineness) as f64;
             // with more kinds the others fill the gaps: half the work for 2% fewer markers
             fit * if kinds >= 3 { choice / 2.0 } else { choice }
         };
@@ -340,7 +340,7 @@ impl Ui {
             overlap: self.marker_overlap,
             rare_first: self.prioritize_rare,
             distance: distance_points * marker_scale,
-            max_tries: self.advanced.search_tries,
+            max_tries: self.advanced.marker_tries,
             max_markers: self.max_markers,
         };
         // only when something changed, there can be a lot of them. Answers keep coming in while they
@@ -418,8 +418,8 @@ impl Ui {
                 // the game then looks for a suitable block nearby, in chunks that aren't built here
                 let about = match STRUCTURE_KINDS[found.kind].id {
                     "spawn" => " (within about 80 blocks)".to_owned(),
-                    "copper_vein" => "\ny 0 to 50, the ore in it is random".to_owned(),
-                    "iron_vein" => "\ny -60 to -8, the ore in it is random".to_owned(),
+                    "copper_vein" => "\nore at y 0 to 50".to_owned(),
+                    "iron_vein" => "\nore at y -60 to -8".to_owned(),
                     "end_gateway" => ring_gateways(self.seed)
                         .iter()
                         .position(|spot| *spot == [found.x, found.z])
@@ -593,7 +593,7 @@ mod tests {
         let many: Vec<Found> = (0..3100).map(|i| found("village", i, 0)).collect();
         let placed = Placed::new(many, 0.0, true, 3000);
         assert_eq!(placed.markers.len(), 3000);
-        // a whole world of a search: quickly, however far apart the corners are
+        // a whole world of candidates: quickly, however far apart the corners are
         assert!(!placed.has_marker(0, [-3e7; 2], [3e7; 2]));
     }
 

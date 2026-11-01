@@ -11,7 +11,9 @@ The release workflow publishes the section of a version as its release notes.
 ### Changed
 
 - Several noises can be shown at once, each with its own opacity, and one slider changes all of them.
-- Large ore veins are markers instead of something drawn over the map.
+- Ore veins are markers at real ore instead of something drawn over the map. The `vein` search condition is gone,
+  `structure copper_vein` and `structure iron_vein` do it.
+- Geodes and scattered end gateways are also checked against the terrain.
 - The settings window can be resized.
 
 ## [0.5.0] - 2026-11-01

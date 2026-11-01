@@ -1,6 +1,6 @@
-//! What structures and search ask of background workers, and which questions to ask when.
+//! What markers ask of background workers, and which questions to ask when.
 //! Where the work runs differs, see `finder_native.rs` and `finder_web.rs`. Workers are stateless
-//! besides caching the world, so stopping a search is just not asking any further.
+//! besides caching the world, so stopping is just not asking any further.
 
 use std::{
     collections::{HashMap, HashSet},
@@ -494,7 +494,7 @@ impl Queries {
         }
     }
 
-    /// Takes the workers' answers and gives idle workers the next jobs: for the search first, then
+    /// Takes the workers' answers and gives idle workers the next jobs: then
     /// `wanted`, most important first.
     pub fn update(&mut self, wanted: &[Job]) {
         self.waiting = wanted.len();

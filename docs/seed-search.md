@@ -22,7 +22,6 @@ checked first.
 | `biome mushroom_fields area>=1000000 within 5000 of spawn` | one connected patch that starts in the area has that many square blocks |
 | `biome jungle coverage>=20% within 1000 of spawn` | it covers that share of the area |
 | `biome ocean present within 300 of spawn`, `absent` | it is or isn't in the area |
-| `vein copper area>=100000 within 1000 of spawn` | a connected part of that many square blocks has large veins of `copper` or `iron` under it. Says where veins run: the blocks in them are random, and caves can cut through |
 | `noise continentalness -2..-1.05 coverage>=30% within 1000 of spawn` | the overworld's value is in the range, for that share of the area or just anywhere without `coverage` |
 | `not <condition>` | the condition doesn't pass |
 | `any`, conditions on their own lines, `end` | one of them passes |

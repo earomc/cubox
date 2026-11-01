@@ -55,7 +55,7 @@ pub fn tiles_in_mib(mib: u32) -> usize {
     mib as usize * 1024 / KIB_PER_TILE
 }
 
-/// How threads are divided: `(for tiles, for structures and search)`, never more than `threads`
+/// How threads are divided: `(for tiles, for markers)`, never more than `threads`
 /// together while both have work, and one gets all of them when the other has none.
 pub fn share(threads: usize, tiles_busy: bool, finder_busy: bool) -> (usize, usize) {
     match (tiles_busy, finder_busy) {

@@ -51,8 +51,6 @@ pub struct Counters {
     /// seeds checked with a world
     pub seeds: AtomicU64,
     pub matches: AtomicU64,
-    /// the highest seed that is sure to be done when counting up
-    pub position: AtomicU64,
     /// items of a list or spots of an area that are finished
     finished: AtomicU64,
 }
@@ -360,7 +358,6 @@ impl Worker {
                 }
                 Seeds::From(start) => {
                     self.one_seed(start.wrapping_add(index as i64), &mut cells);
-                    self.counters.position.store(index, Ordering::Relaxed);
                     true
                 }
                 Seeds::List(list) => match list.get(index as usize) {

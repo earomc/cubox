@@ -257,7 +257,7 @@ struct Ui {
     hovered_biome: Option<([i32; 2], String)>,
     /// what the map view wants drawn this frame
     quads: Vec<Quad>,
-    /// structures and search
+    /// markers
     queries: Queries,
     /// which of `STRUCTURE_KINDS` are shown
     shown_kinds: Vec<bool>,

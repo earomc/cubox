@@ -20,8 +20,8 @@ use steel_worldgen::{
 
 use crate::{
     dimension::Dimension,
-    features::{feature_of, ring_gateways},
-    noise::VeinField,
+    features::{FeatureRoll, feature_of, ring_gateways},
+    noise::{NoiseCache, VeinField},
     seed::generator_seed,
     seedfind::spec::Ore,
     terrain::{Noises, init_registry},
@@ -151,8 +151,8 @@ pub const STRUCTURE_KINDS: &[StructureKind] = &[
     kind("end_gateway", "End gateway after the dragon", End, &[]),
     kind("end_gateway_scattered", "Scattered end gateway (maybe there)", End, &[]),
     kind("geode", "Geode (maybe there)", Overworld, &[]),
-    kind("copper_vein", "Large copper vein (maybe there)", Overworld, &[]),
-    kind("iron_vein", "Large iron vein (maybe there)", Overworld, &[]),
+    kind("copper_vein", "Copper ore vein", Overworld, &[]),
+    kind("iron_vein", "Iron ore vein", Overworld, &[]),
     StructureKind {
         with_piece: Some("end_city/ship"),
         ..kind("end_city_ship", "End city with ship", End, &["end_city"])
@@ -214,6 +214,8 @@ pub fn spread(kind: usize) -> Option<Spread> {
 const VEIN_CELL_CHUNKS: i32 = 32;
 /// Spots looked at per side of a cell.
 const VEIN_SAMPLES: i32 = 4;
+/// Blocks of ore a look around a spot has to find, of what it looks at. See `VeinField::ore_near`.
+const VEIN_MIN_ORE: u32 = 6;
 /// How many of those spots need veins for a marker.
 const VEIN_MIN_SAMPLES: usize = 4;
 
@@ -370,8 +372,8 @@ const RARITY_ORDER: &[&str] = &[
 /// seeds. Depends a little on the seed, it is used to know how many to look for.
 const REAL_RATES: &[(&str, f64)] = &[
     ("geode", 0.041),
-    ("copper_vein", 0.15),
-    ("iron_vein", 0.15),
+    ("copper_vein", 0.1),
+    ("iron_vein", 0.1),
     ("end_gateway_scattered", 0.0004),
     ("village", 0.233),
     ("pillager_outpost", 0.032),
@@ -595,10 +597,15 @@ impl Finder {
             // the spot nearest their middle, the middle itself can be beside a curved vein
             let count = hits.len() as i64;
             let middle = [0, 1].map(|axis| hits.iter().map(|hit| hit[axis] as i64).sum::<i64>() / count);
-            let [x, z] = hits.into_iter().min_by_key(|hit| {
+            hits.sort_by_key(|hit| {
                 let (dx, dz) = (hit[0] as i64 - middle[0], hit[1] as i64 - middle[1]);
                 dx * dx + dz * dz
-            })?;
+            });
+            // where real ore is: much of a vein's area can be cave or sea, and its blocks are random
+            let mut cache = NoiseCache::default();
+            let [x, z] = hits
+                .into_iter()
+                .find(|hit| veins.ore_near(&mut cache, ore, hit[0], hit[1]) >= VEIN_MIN_ORE)?;
             return Some(Found { kind, x, z });
         }
         if let Some(feature) = feature_of(STRUCTURE_KINDS[kind].id) {
@@ -606,7 +613,10 @@ impl Finder {
                 return None;
             }
             let (block, y) = feature.in_chunk(self.seed, [cell_x, cell_z])?;
-            return feature.biome_allows(&self.source, block, y).then_some(Found {
+            if !feature.biome_allows(&self.source, block, y) || !self.terrain_allows(kind, cell_x, cell_z, block) {
+                return None;
+            }
+            return Some(Found {
                 kind,
                 x: block[0],
                 z: block[1],
@@ -675,6 +685,34 @@ impl Finder {
                 self.in_world(kind, cell_x, cell_z)
             })
             .collect()
+    }
+
+    /// What the game looks at in the terrain before placing a feature, as far as noise can tell.
+    /// Caves carved later aren't known.
+    fn terrain_allows(&self, kind: usize, cell_x: i32, cell_z: i32, block: [i32; 2]) -> bool {
+        match (&self.noises, STRUCTURE_KINDS[kind].id) {
+            (AnyNoises::Overworld(_), "geode") => {
+                let Some((_, points)) = FeatureRoll::geode_points(self.seed, [cell_x, cell_z]) else {
+                    return false;
+                };
+                let veins = self.veins.get_or_init(|| VeinField::new(self.seed));
+                let mut cache = NoiseCache::default();
+                let not_solid = points
+                    .iter()
+                    .filter(|point| !veins.is_solid(&mut cache, point[0], point[1], point[2]))
+                    .count();
+                not_solid <= 1
+            }
+            // a gateway needs ground below it, the end has lots of nothing
+            (AnyNoises::End(noises), "end_gateway_scattered") => {
+                let mut cache: <EndNoises as DimensionNoises>::ColumnCache = Default::default();
+                cache.ensure(block[0], block[1], &noises.noises);
+                (0..128)
+                    .step_by(4)
+                    .any(|y| noises.noises.router_final_density(&mut cache, block[0], y, block[1]) > 0.0)
+            }
+            _ => true,
+        }
     }
 
     /// `in_cell` without what is past the edge of the world, which bins at the edge reach into.
@@ -914,6 +952,28 @@ mod tests {
     }
 
     #[test]
+    fn geodes_look_at_points_around_them() {
+        let mut seen = 0;
+        for i in 0..20_000 {
+            let chunk = [i % 200 - 100, i / 200 - 50];
+            let roll = feature_of("geode").unwrap().in_chunk(7, chunk);
+            let points = FeatureRoll::geode_points(7, chunk);
+            assert_eq!(roll.is_some(), points.is_some());
+            if let (Some(([x, z], y)), Some((origin, points))) = (roll, points) {
+                assert_eq!(origin, [x, y.unwrap(), z]);
+                assert!((3..=4).contains(&points.len()));
+                for point in points {
+                    for axis in 0..3 {
+                        assert!((4..=6).contains(&(point[axis] - origin[axis])));
+                    }
+                }
+                seen += 1;
+            }
+        }
+        assert!(seen > 100);
+    }
+
+    #[test]
     fn vein_markers_are_on_veins_of_both_ores_on_every_seed() {
         with_big_stack(|| {
             for seed in [12345, 1, -987_654_321, 77] {
@@ -925,6 +985,8 @@ mod tests {
                     assert!(found.len() > 50, "{id} of {seed}: {}", found.len());
                     for marker in found {
                         assert_eq!(veins.at(marker.x, marker.z), Some(ore), "{marker:?}");
+                        let mut cache = NoiseCache::default();
+                        assert!(veins.ore_near(&mut cache, ore, marker.x, marker.z) >= VEIN_MIN_ORE);
                     }
                 }
             }

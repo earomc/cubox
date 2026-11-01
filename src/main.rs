@@ -127,7 +127,7 @@ fn find(matches: &clap::ArgMatches) {
         run::{Search, Seeds},
         spec,
     };
-    use std::{sync::atomic::Ordering, time::Duration};
+    use std::time::Duration;
 
     let fail = |message: String| -> ! {
         eprintln!("error: {message}");
@@ -203,11 +203,7 @@ fn find(matches: &clap::ArgMatches) {
         }
         if last_report.elapsed() >= Duration::from_secs(2) {
             last_report = Instant::now();
-            eprintln!(
-                "{}, at {}",
-                search.status().replace('\n', ", "),
-                search.counters.position.load(Ordering::Relaxed),
-            );
+            eprintln!("{}", search.status().replace('\n', ", "));
         }
         if done(&search, ended, shown) {
             break;

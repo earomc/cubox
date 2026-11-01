@@ -26,9 +26,9 @@ const MAX_EXACT_LEVEL: i32 = 3;
 pub struct Advanced {
     pub marker_size: f32,
     /// candidates an empty spot is given
-    pub search_tries: u32,
-    /// spots searched per marker distance, per axis
-    pub search_fineness: u32,
+    pub marker_tries: u32,
+    /// spots tried per marker distance, per axis
+    pub marker_fineness: u32,
     pub max_relief_level: i32,
     pub relief_strength: f32,
     pub fade_seconds: f32,
@@ -38,8 +38,8 @@ impl Default for Advanced {
     fn default() -> Self {
         Self {
             marker_size: 22.0,
-            search_tries: 8192,
-            search_fineness: 2,
+            marker_tries: 8192,
+            marker_fineness: 2,
             max_relief_level: 5,
             relief_strength: 1.0,
             fade_seconds: 0.15,
@@ -300,14 +300,14 @@ impl Ui {
             );
             row(
                 ui,
-                "Search tries",
-                egui::Slider::new(&mut advanced.search_tries, 16..=65536).logarithmic(true),
+                "Marker tries",
+                egui::Slider::new(&mut advanced.marker_tries, 16..=65536).logarithmic(true),
                 "How many candidates an empty spot is given to find a structure. More fills more gaps, more slowly.",
             );
             row(
                 ui,
-                "Search detail",
-                egui::Slider::new(&mut advanced.search_fineness, 1..=4),
+                "Marker detail",
+                egui::Slider::new(&mut advanced.marker_fineness, 1..=4),
                 "How many candidates are searched for each marker that fits. More fills more gaps, with much more work.",
             );
             row(
