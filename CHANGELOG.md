@@ -8,14 +8,16 @@ The release workflow publishes the section of a version as its release notes.
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-11-01
+
 ### Added
 
 - `cubox find` searches for seeds: structures near a spot or spawn, structures close together, biomes with a
   minimum size or share of an area, and noise values. See `docs/seed-search.md`.
 - A Seed search section on the desktop with presets, finding locations in one seed too. Clicking a result goes there
   and shows its markers.
-
-- End gateways, and as an experiment likely geodes and scattered end gateways, as markers and search conditions.
+- End gateways, in the order the dragon opens them, and geodes and scattered end gateways, which are maybe there, as
+  markers and search conditions.
 - Large ore veins on the map and as a `vein` search condition.
 - Finding locations in one seed goes through an `area` once, reports each place once and ends.
 - A Noise section shows temperature, humidity, continentalness, erosion, weirdness or depth as colors over the map.
@@ -129,7 +131,8 @@ First release.
 - `cubox img` renders a map to a PNG. `cubox gui --script` drives the view and takes screenshots.
 - Builds for Linux, macOS and Windows on x86_64 and ARM.
 
-[Unreleased]: https://github.com/earomc/cubox/compare/v0.4.2...HEAD
+[Unreleased]: https://github.com/earomc/cubox/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/earomc/cubox/compare/v0.4.2...v0.5.0
 [0.4.2]: https://github.com/earomc/cubox/compare/v0.4.1...v0.4.2
 [0.4.1]: https://github.com/earomc/cubox/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/earomc/cubox/compare/v0.3.0...v0.4.0

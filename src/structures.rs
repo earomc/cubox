@@ -146,14 +146,14 @@ pub const STRUCTURE_KINDS: &[StructureKind] = &[
         &["ruined_portal_nether"],
     ),
     kind("end_city", "End city", End, &["end_city"]),
-    kind("end_gateway", "End gateway after the dragon (experimental)", End, &[]),
+    kind("end_gateway", "End gateway after the dragon", End, &[]),
     kind(
         "end_gateway_scattered",
-        "Scattered end gateway (likely, experimental)",
+        "Scattered end gateway (maybe there)",
         End,
         &[],
     ),
-    kind("geode", "Geode (likely, experimental)", Overworld, &[]),
+    kind("geode", "Geode (maybe there)", Overworld, &[]),
     StructureKind {
         with_piece: Some("end_city/ship"),
         ..kind("end_city_ship", "End city with ship", End, &["end_city"])
