@@ -8,12 +8,15 @@ The release workflow publishes the section of a version as its release notes.
 
 ## [Unreleased]
 
+## [0.5.1] - 2026-11-01
+
 ### Changed
 
 - Several noises can be shown at once, each with its own opacity, and one slider changes all of them.
 - Ore veins are markers at real ore instead of something drawn over the map. The `vein` search condition is gone,
   `structure copper_vein` and `structure iron_vein` do it.
 - Geodes and scattered end gateways are also checked against the terrain.
+- Zoom buttons are off by default, their switch is in the Advanced menu, now called Extras.
 - The settings window can be resized.
 
 ## [0.5.0] - 2026-11-01
@@ -139,7 +142,8 @@ First release.
 - `cubox img` renders a map to a PNG. `cubox gui --script` drives the view and takes screenshots.
 - Builds for Linux, macOS and Windows on x86_64 and ARM.
 
-[Unreleased]: https://github.com/earomc/cubox/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/earomc/cubox/compare/v0.5.1...HEAD
+[0.5.1]: https://github.com/earomc/cubox/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/earomc/cubox/compare/v0.4.2...v0.5.0
 [0.4.2]: https://github.com/earomc/cubox/compare/v0.4.1...v0.4.2
 [0.4.1]: https://github.com/earomc/cubox/compare/v0.4.0...v0.4.1

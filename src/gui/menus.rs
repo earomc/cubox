@@ -169,10 +169,9 @@ impl Ui {
                 return;
             }
             let opacity_slider = |ui: &mut egui::Ui, opacity: &mut f32, enabled: bool, name: &str| {
-                let hint = format!("{name}: {:.0}%", *opacity * 100.0);
-                ui.add_enabled(enabled, egui::Slider::new(opacity, 0.05..=1.0).show_value(false))
-                    .on_hover_text(hint.clone())
-                    .on_disabled_hover_text(hint);
+                ui.add_enabled(enabled, egui::Slider::new(opacity, 0.05..=1.0))
+                    .on_hover_text(name)
+                    .on_disabled_hover_text(name);
             };
             // the values have a place of their own: nothing moves when one is switched on
             let quart = self.map.hovered_quart.or(self.noise_quart);
@@ -270,9 +269,10 @@ impl Ui {
     }
 
     /// Returns whether the tiles have to be generated anew.
-    pub(super) fn advanced_menu(&mut self, ui: &mut egui::Ui) -> bool {
+    pub(super) fn extras_menu(&mut self, ui: &mut egui::Ui) -> bool {
         let mut changed = false;
-        egui::CollapsingHeader::new("Advanced").show(ui, |ui| {
+        egui::CollapsingHeader::new("Extras").show(ui, |ui| {
+            ui.checkbox(&mut self.zoom_buttons_shown, "Zoom buttons");
             ui.horizontal(|ui| {
                 ui.label("Samples / pixel").on_hover_text(
                     "Biome samples averaged per pixel. Higher shows more of the real detail far out, but is much slower",

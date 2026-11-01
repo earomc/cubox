@@ -468,7 +468,7 @@ impl State {
             threads: resources::default_threads(),
             cache_mib: resources::default_cache_mib(),
             sea_floor: true,
-            zoom_buttons_shown: true,
+            zoom_buttons_shown: false,
             terrain: None,
             hovered_height: None,
             grid: Grid::default(),
@@ -1027,8 +1027,7 @@ impl Ui {
                     self.noise_menu(ui);
                     self.grid_menu(ui);
                     self.performance_menu(ui);
-                    changed |= self.advanced_menu(ui);
-                    ui.checkbox(&mut self.zoom_buttons_shown, "Zoom buttons");
+                    changed |= self.extras_menu(ui);
                     self.license_notice(ui);
                 })
             });
