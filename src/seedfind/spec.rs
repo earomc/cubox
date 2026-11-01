@@ -7,6 +7,7 @@
 //! biome ocean absent within 300 of spawn
 //! biome jungle coverage>=20% within 1000 of here
 //! noise continentalness -1.2..-1.05 coverage>=5% within 1000 of spawn
+//! vein iron area>=100000 within 1000 of spawn
 //! not structure stronghold count>=1 within 2000 of spawn
 //! area within 10000 of 0,0    # when finding locations in one seed, `here` is every spot in it
 //! any
@@ -70,6 +71,24 @@ impl NoiseParameter {
     }
 }
 
+/// The ores of large veins.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Ore {
+    Copper,
+    Iron,
+}
+
+impl Ore {
+    pub const ALL: [Self; 2] = [Self::Copper, Self::Iron];
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Copper => "copper",
+            Self::Iron => "iron",
+        }
+    }
+}
+
 #[derive(Clone, PartialEq, Debug)]
 pub enum Card {
     Structure {
@@ -101,6 +120,14 @@ pub enum Card {
         radius: i32,
         anchor: Anchor,
     },
+    /// a connected part of the area with large veins of an ore under it
+    Vein {
+        ore: Ore,
+        /// square blocks
+        area: i64,
+        radius: i32,
+        anchor: Anchor,
+    },
     Not(Box<Card>),
     Any(Vec<Card>),
     /// where the spots are when finding locations in one seed
@@ -124,6 +151,11 @@ pub fn smallest_here(card: &Card) -> Option<i32> {
             ..
         }
         | Card::Noise {
+            radius,
+            anchor: Anchor::Here,
+            ..
+        }
+        | Card::Vein {
             radius,
             anchor: Anchor::Here,
             ..
@@ -218,6 +250,18 @@ impl Card {
     fn parse_line(words: &[&str]) -> Result<Self, String> {
         match words {
             ["not", rest @ ..] => Ok(Card::Not(Box::new(Self::parse_line(rest)?))),
+            ["vein", ore, area_word, rest @ ..] => {
+                let (radius, anchor) = area(rest)?;
+                Ok(Card::Vein {
+                    ore: Ore::ALL
+                        .into_iter()
+                        .find(|o| o.name() == *ore)
+                        .ok_or_else(|| format!("`{ore}` is not copper or iron"))?,
+                    area: number_after(area_word, "area>=")?,
+                    radius,
+                    anchor,
+                })
+            }
             ["area", rest @ ..] => {
                 let (radius, anchor) = area(rest)?;
                 if anchor == Anchor::Here {
@@ -383,6 +427,12 @@ impl fmt::Display for Card {
                 }
                 write!(f, " within {radius} of {anchor}")
             }
+            Card::Vein {
+                ore,
+                area,
+                radius,
+                anchor,
+            } => write!(f, "vein {} area>={area} within {radius} of {anchor}", ore.name()),
             Card::Not(card) => write!(f, "not {card}"),
             Card::Area { radius, anchor } => write!(f, "area within {radius} of {anchor}"),
             Card::Any(cards) => {
@@ -435,6 +485,7 @@ biome ocean absent within 300 of spawn
 biome jungle coverage>=20% within 1000 of here
 noise continentalness -1.2..-1.05 coverage>=5% within 1000 of spawn
 noise erosion 0..0.5 within 10 of 1,2
+vein copper area>=50000 within 900 of spawn
 not structure stronghold count>=1 within 2000 of spawn
 any
   biome desert present within 500 of spawn

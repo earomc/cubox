@@ -25,6 +25,8 @@ pub enum Layer {
     },
     /// a climate noise as colors, drawn over the biomes
     Noise(crate::seedfind::spec::NoiseParameter),
+    /// where the large ore veins run, clear elsewhere
+    Veins,
 }
 
 /// Where a relief tile's heights come from.

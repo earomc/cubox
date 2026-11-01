@@ -167,9 +167,28 @@ impl Ui {
                 ui.weak("The end has no noise values");
                 return;
             }
-            ui.radio_value(&mut self.noise, None, "Off");
+            if ui.radio(self.noise.is_none() && !self.veins, "Off").clicked() {
+                self.noise = None;
+                self.veins = false;
+            }
             for parameter in parameters {
-                ui.radio_value(&mut self.noise, Some(*parameter), parameter.name());
+                if ui
+                    .radio(self.noise == Some(*parameter) && !self.veins, parameter.name())
+                    .clicked()
+                {
+                    self.noise = Some(*parameter);
+                    self.veins = false;
+                }
+            }
+            if self.dimension == Dimension::Overworld
+                && ui
+                    .radio(self.veins, "large ore veins")
+                    .on_hover_text(
+                        "Where veins run: orange copper at y 0 to 50, pale iron at y -60 to -8. The blocks in them are random, and caves can cut through",
+                    )
+                    .clicked()
+            {
+                self.veins = true;
             }
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = 0.0;
@@ -189,6 +208,14 @@ impl Ui {
 
     /// The shown noise at a quart, as a line for the status.
     pub(super) fn hovered_noise(&mut self, quart: [i32; 2]) -> Option<String> {
+        if self.veins && self.dimension == Dimension::Overworld {
+            let seed = self.seed;
+            let field = self
+                .vein_field
+                .get_or_insert_with(|| crate::noise::VeinField::new(seed));
+            let ore = field.at(quart[0] * 4, quart[1] * 4)?;
+            return Some(format!("large {} veins", ore.name()));
+        }
         let parameter = self
             .noise
             .filter(|parameter| crate::noise::parameters_of(self.dimension).contains(parameter))?;

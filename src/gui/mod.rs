@@ -50,7 +50,7 @@ use crate::{
         tiles::TileCache,
         world::WorldParams,
     },
-    noise::NoiseField,
+    noise::{NoiseField, VeinField},
     seed::{parse_seed, random_seed},
     seedfind::spec::NoiseParameter,
     structures::{Found, STRUCTURE_KINDS},
@@ -280,6 +280,9 @@ struct Ui {
     noise: Option<NoiseParameter>,
     /// for the value under the cursor
     noise_field: Option<Option<NoiseField>>,
+    /// show where the large ore veins run instead of a noise
+    veins: bool,
+    vein_field: Option<VeinField>,
     /// replace the estimated heights with exact ones when zoomed in, in this quality
     relief_exact: bool,
     relief_quality: ReliefQuality,
@@ -441,6 +444,8 @@ impl State {
             relief: false,
             noise: None,
             noise_field: None,
+            veins: false,
+            vein_field: None,
             relief_exact: false,
             relief_quality: ReliefQuality::Auto,
             threads: resources::default_threads(),
@@ -522,6 +527,7 @@ impl State {
                 Command::Grid(on) => ui.grid.enabled = on,
                 Command::GridOverMarkers(on) => ui.grid.over_markers = on,
                 Command::Noise(parameter) => ui.noise = parameter,
+                Command::Veins(on) => ui.veins = on,
                 Command::OpenFirstMatch => ui.script_open_first_match(),
                 Command::SearchSeeds(text) => ui.seed_search.script_start(&text, ui.seed, false),
                 Command::SearchLocations(text) => ui.seed_search.script_start(&text, ui.seed, true),
@@ -827,6 +833,7 @@ impl Ui {
         self.hovered_biome = None;
         self.hovered_height = None;
         self.noise_field = None;
+        self.vein_field = None;
         self.terrain = None;
         self.queries.set_world(FinderWorld {
             seed: self.seed,
@@ -855,9 +862,13 @@ impl Ui {
             max_relief_level: self.advanced.max_relief_level,
             relief_strength: self.advanced.relief_strength,
             sea_floor: self.sea_floor,
-            noise: self
-                .noise
-                .filter(|parameter| crate::noise::parameters_of(self.dimension).contains(parameter)),
+            overlay: if self.veins && self.dimension == Dimension::Overworld {
+                Some(crate::tile_renderer::Layer::Veins)
+            } else {
+                self.noise
+                    .filter(|parameter| crate::noise::parameters_of(self.dimension).contains(parameter))
+                    .map(crate::tile_renderer::Layer::Noise)
+            },
         };
         let (tile_threads, finder_threads) =
             resources::share(self.threads, self.tiles.pending() > 0, self.queries.busy());

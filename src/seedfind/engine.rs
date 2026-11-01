@@ -6,7 +6,7 @@ use steel_worldgen::biomes::BiomeSourceKind;
 
 use crate::{
     dimension::Dimension,
-    noise::{NoiseCache, NoiseField},
+    noise::{NoiseCache, NoiseField, VeinField},
     seedfind::spec::{Anchor, BiomeTest, Card},
     structures::{Finder, Found, STRUCTURE_KINDS, Spread, allowed_by_biomes, candidates, spread},
 };
@@ -48,6 +48,7 @@ pub struct SeedWorld {
     finders: [OnceLock<Option<Finder>>; 3],
     spawn: OnceLock<[i32; 2]>,
     climate: OnceLock<Option<NoiseField>>,
+    veins: OnceLock<VeinField>,
 }
 
 impl SeedWorld {
@@ -58,6 +59,7 @@ impl SeedWorld {
             finders: Default::default(),
             spawn: OnceLock::new(),
             climate: OnceLock::new(),
+            veins: OnceLock::new(),
         }
     }
 
@@ -239,6 +241,40 @@ fn patch(
     )
 }
 
+/// The largest connected patch of at least `area` square blocks that starts around `center`: its
+/// square blocks and middle. Looks on a grid coarse enough to be quick, fine enough not to miss a
+/// patch of this size, then measures on one 4 times finer.
+fn largest_patch(
+    is_inside: &mut dyn FnMut(i32, i32) -> bool,
+    area: i64,
+    radius: i32,
+    center: [i32; 2],
+) -> Option<(i64, [i32; 2])> {
+    let step = (((area as f64).sqrt() / 8.0) as i32)
+        .clamp(MIN_STEP, MAX_STEP)
+        .min((radius / 4).max(MIN_STEP));
+    let mut seen = HashMap::new();
+    let mut best: Option<(i64, [i32; 2])> = None;
+    for at in spots(center, radius, step) {
+        if seen.contains_key(&at) {
+            continue;
+        }
+        let inside = is_inside(at[0], at[1]);
+        seen.insert(at, inside);
+        if !inside {
+            continue;
+        }
+        let (coarse, _) = patch(is_inside, at, step, &mut seen);
+        if coarse as f64 >= area as f64 * COARSE_SHARE {
+            let (fine, middle) = patch(is_inside, at, (step / 4).max(4), &mut HashMap::new());
+            if fine >= area && best.is_none_or(|(size, _)| fine > size) {
+                best = Some((fine, middle));
+            }
+        }
+    }
+    best
+}
+
 fn check_biome(world: &SeedWorld, biome: &str, test: BiomeTest, radius: i32, center: [i32; 2]) -> Option<Passed> {
     let dimension = biome_dimension(biome);
     let source = world.source(dimension);
@@ -285,31 +321,7 @@ fn check_biome(world: &SeedWorld, biome: &str, test: BiomeTest, radius: i32, cen
             })
         }
         BiomeTest::Area(area) => {
-            // coarse enough to be quick, fine enough not to miss a patch of this size. Exact to
-            // the fine grid, which is 4 times finer.
-            let step = (((area as f64).sqrt() / 8.0) as i32)
-                .clamp(MIN_STEP, MAX_STEP)
-                .min((radius / 4).max(MIN_STEP));
-            let mut seen = HashMap::new();
-            let mut best: Option<(i64, [i32; 2])> = None;
-            for at in spots(center, radius, step) {
-                let inside = match seen.get(&at) {
-                    Some(_) => continue,
-                    None => is_biome(at[0], at[1]),
-                };
-                seen.insert(at, inside);
-                if !inside {
-                    continue;
-                }
-                let (coarse, middle) = patch(&mut is_biome, at, step, &mut seen);
-                if coarse as f64 >= area as f64 * COARSE_SHARE {
-                    let (fine, middle_fine) = patch(&mut is_biome, at, (step / 4).max(4), &mut HashMap::new());
-                    if fine >= area && best.is_none_or(|(size, _)| fine > size) {
-                        best = Some((fine, if fine > 0 { middle_fine } else { middle }));
-                    }
-                }
-            }
-            let (size, middle) = best?;
+            let (size, middle) = largest_patch(&mut is_biome, area, radius, center)?;
             Some(Passed {
                 score: Some(size as f64),
                 hits: vec![hit(middle[0], middle[1])],
@@ -440,6 +452,26 @@ impl SeedWorld {
                         .collect(),
                 })
             }
+            Card::Vein {
+                ore,
+                area,
+                radius,
+                anchor,
+            } => {
+                let center = self.center(*anchor, here);
+                let veins = self.veins.get_or_init(|| VeinField::new(self.seed));
+                let mut is_vein = |x: i32, z: i32| veins.at(x, z) == Some(*ore);
+                let (size, middle) = largest_patch(&mut is_vein, *area, *radius, center)?;
+                Some(Passed {
+                    score: Some(size as f64),
+                    hits: vec![Hit {
+                        kind: None,
+                        dimension: Dimension::Overworld,
+                        x: middle[0],
+                        z: middle[1],
+                    }],
+                })
+            }
             Card::Not(card) => match self.check(card, here, cells) {
                 Some(_) => None,
                 None => Some(Passed::default()),
@@ -492,7 +524,7 @@ fn cost(card: &Card) -> u32 {
                 1 + anchored(anchor)
             }
         }
-        Card::Biome { anchor, .. } | Card::Noise { anchor, .. } => 2 + anchored(anchor),
+        Card::Biome { anchor, .. } | Card::Noise { anchor, .. } | Card::Vein { anchor, .. } => 2 + anchored(anchor),
         Card::Not(card) => cost(card),
         Card::Any(cards) => cards.iter().map(cost).sum(),
         Card::Area { .. } => 0,

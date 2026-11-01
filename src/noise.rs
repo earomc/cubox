@@ -1,11 +1,21 @@
 //! The climate noises that decide biomes, for looking at them and for searching.
 
+use steel_utils::random::{Random, xoroshiro::Xoroshiro};
 use steel_worldgen::{
     biomes::{NetherClimateSampler, OverworldClimateSampler},
-    density_functions::{nether::NetherColumnCache, overworld::OverworldColumnCache},
+    density_functions::{
+        nether::NetherColumnCache,
+        overworld::{OverworldColumnCache, OverworldNoises},
+    },
+    noise_parameters::get_noise_parameters,
 };
 
-use crate::{dimension::Dimension, seed::generator_seed, seedfind::spec::NoiseParameter, tile_renderer::TileKey};
+use crate::{
+    dimension::Dimension,
+    seed::generator_seed,
+    seedfind::spec::{NoiseParameter, Ore},
+    tile_renderer::TileKey,
+};
 
 /// Noise tiles are sampled every this many pixels and blended between, as noise changes slowly.
 const TILE_STEP: usize = 4;
@@ -105,6 +115,94 @@ impl NoiseField {
     }
 }
 
+/// How much vein noise is needed for a vein, what the game calls veininess, see its `OreVeinifier`.
+const VEININESS: f32 = 0.4;
+/// The heights looked at for veins of each ore, inside what the game allows and away from its
+/// ends, where it makes veins thinner. Copper is at y 0 to 50, iron at y -60 to -8.
+const COPPER_HEIGHTS: [i32; 3] = [15, 25, 35];
+const IRON_HEIGHTS: [i32; 3] = [-44, -34, -24];
+/// Vein tiles are sampled every this many pixels.
+const VEIN_TILE_STEP: usize = 2;
+const COPPER_COLOR: [u8; 4] = [232, 120, 60, 170];
+const IRON_COLOR: [u8; 4] = [225, 215, 205, 170];
+
+/// Where the large ore veins of an overworld are. Says where they run: the blocks in them are
+/// random, and caves can cut through them.
+pub struct VeinField {
+    noises: Box<OverworldNoises>,
+}
+
+impl VeinField {
+    pub fn new(seed: i64) -> Self {
+        let seed = generator_seed(seed);
+        let mut rng = Xoroshiro::from_seed(seed);
+        let splitter = rng.next_positional();
+        Self {
+            noises: Box::new(OverworldNoises::create(seed, &splitter, &get_noise_parameters())),
+        }
+    }
+
+    /// The ore whose veins run under a block position, if any. This is the noise that decides where
+    /// veins are, the game then only keeps some blocks in them.
+    pub fn at(&self, x: i32, z: i32) -> Option<Ore> {
+        let veininess = |y: i32| {
+            self.noises
+                .n_ore_veininess
+                .get_value(x as f64 * 1.5, y as f64 * 1.5, z as f64 * 1.5)
+        };
+        if COPPER_HEIGHTS.into_iter().any(|y| veininess(y) >= VEININESS) {
+            Some(Ore::Copper)
+        } else if IRON_HEIGHTS.into_iter().any(|y| veininess(y) <= -VEININESS) {
+            Some(Ore::Iron)
+        } else {
+            None
+        }
+    }
+
+    /// Whether the game's own rule for an ore can place anything at a block.
+    #[cfg(test)]
+    fn game_density(&self, cache: &mut NoiseCache, ore: Ore, x: i32, y: i32, z: i32) -> f32 {
+        use steel_worldgen::density_functions::overworld as generated;
+        cache.overworld.ensure(x, z, &self.noises);
+        let at = (x as f64, y as f64, z as f64);
+        match ore {
+            Ore::Copper => {
+                generated::router_material_ore_vein_0_density(&self.noises, &cache.overworld, at.0, at.1, at.2)
+            }
+            Ore::Iron => {
+                generated::router_material_ore_vein_1_density(&self.noises, &cache.overworld, at.0, at.1, at.2)
+            }
+        }
+    }
+
+    /// The RGBA pixels of a tile, clear where there is no vein.
+    pub fn tile(&self, key: TileKey, keep_going: &dyn Fn() -> bool) -> Option<Vec<u8>> {
+        let size = key.tile_size_px;
+        let (origin_x, origin_z) = key.origin();
+        let stride = key.stride();
+        let mut rgba = vec![0; size * size * 4];
+        for z in (0..size).step_by(VEIN_TILE_STEP) {
+            if !keep_going() {
+                return None;
+            }
+            for x in (0..size).step_by(VEIN_TILE_STEP) {
+                let block = |origin: i32, pixel: usize| (origin + pixel as i32 * stride) * 4;
+                let color = match self.at(block(origin_x, x), block(origin_z, z)) {
+                    Some(Ore::Copper) => COPPER_COLOR,
+                    Some(Ore::Iron) => IRON_COLOR,
+                    None => continue,
+                };
+                for row in z..(z + VEIN_TILE_STEP).min(size) {
+                    for column in x..(x + VEIN_TILE_STEP).min(size) {
+                        rgba[(row * size + column) * 4..][..4].copy_from_slice(&color);
+                    }
+                }
+            }
+        }
+        Some(rgba)
+    }
+}
+
 /// The color of a value: blue for low, pale for 0, red for high.
 pub fn color_of(value: f32) -> [u8; 3] {
     const LOW: [f32; 3] = [33.0, 72.0, 170.0];
@@ -163,6 +261,45 @@ mod tests {
         let (x, z) = key.origin();
         let value = field.value(&mut NoiseCache::default(), NoiseParameter::Erosion, [x, 64, z]);
         assert_eq!(rgba[..3], color_of(value));
+    }
+
+    #[test]
+    fn veins_are_rare_and_of_both_ores() {
+        let field = VeinField::new(12345);
+        let (mut copper, mut iron, mut none) = (0, 0, 0);
+        for i in 0..40_000 {
+            match field.at((i % 200 - 100) * 64, (i / 200 - 100) * 64) {
+                Some(Ore::Copper) => copper += 1,
+                Some(Ore::Iron) => iron += 1,
+                None => none += 1,
+            }
+        }
+        assert!(copper > 200 && iron > 200 && none > 20_000, "{copper} {iron} {none}");
+    }
+
+    /// Where the game's rule places a vein block, the map says there is a vein.
+    #[test]
+    fn veins_are_where_the_game_puts_them() {
+        let field = VeinField::new(12345);
+        let mut cache = NoiseCache::default();
+        let (mut placed, mut outside) = (0, 0);
+        for i in 0..40_000 {
+            let (x, z) = ((i % 200 - 100) * 37, (i / 200 - 100) * 37);
+            for (ore, heights) in [(Ore::Copper, COPPER_HEIGHTS), (Ore::Iron, IRON_HEIGHTS)] {
+                for y in heights {
+                    if field.game_density(&mut cache, ore, x, y, z) > 0.0 {
+                        placed += 1;
+                        outside += (field.at(x, z) != Some(ore)) as i32;
+                    }
+                }
+            }
+            assert!(field.game_density(&mut cache, Ore::Copper, x, -30, z) <= 0.0);
+            assert!(field.game_density(&mut cache, Ore::Iron, x, 25, z) <= 0.0);
+        }
+        println!("placed {placed} outside {outside}");
+        assert!(placed > 100);
+        // the game's noise is interpolated between cells, which moves the edge by a few blocks
+        assert!((outside as f64) < placed as f64 * 0.1, "{outside} of {placed}");
     }
 
     #[test]

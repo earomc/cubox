@@ -8,7 +8,6 @@ use crate::{
         menus::ReliefQuality,
         tiles::{TILE_SIZE, TileCache},
     },
-    seedfind::spec::NoiseParameter,
     tile_renderer::{self, Detail, Layer, TileKey},
 };
 
@@ -73,8 +72,8 @@ pub struct MapSettings {
     pub relief_strength: f32,
     /// the relief is that of the sea floor instead of the water
     pub sea_floor: bool,
-    /// show a climate noise over the biomes
-    pub noise: Option<NoiseParameter>,
+    /// show this over the biomes: a climate noise or the ore veins
+    pub overlay: Option<Layer>,
 }
 
 pub struct MapView {
@@ -242,10 +241,10 @@ impl MapView {
             keys.iter().map(|&key| relief_key(key, detail)).collect()
         });
         // the quick estimate of everything first, shown until the wanted detail is there
-        let noise: Vec<TileKey> = settings.noise.map_or(Vec::new(), |parameter| {
+        let overlay: Vec<TileKey> = settings.overlay.map_or(Vec::new(), |layer| {
             keys.iter()
                 .map(|&key| TileKey {
-                    layer: Layer::Noise(parameter),
+                    layer,
                     samples: 1,
                     ..key
                 })
@@ -256,7 +255,7 @@ impl MapView {
             .filter(|_| relief_detail.is_some_and(|detail| detail != Detail::Estimate))
             .map(|&key| relief_key(key, Detail::Estimate))
             .chain(relief.iter().copied())
-            .chain(noise.iter().copied())
+            .chain(overlay.iter().copied())
             .collect();
         tiles.set_highlight(settings.highlight);
         tiles.update(&keys, &cover, &relief_wanted, unsettled_for <= 0.0);
@@ -308,7 +307,7 @@ impl MapView {
                 }
             }
         }
-        for key in noise {
+        for key in overlay {
             let screen = tile_screen(&self.camera, &key);
             let tile = tiles.get(&key, now);
             if !tile.as_ref().is_some_and(|(_, alpha)| *alpha >= 1.0) {
