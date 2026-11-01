@@ -10,7 +10,7 @@ cubox find --file search.txt --limit 20
 ```
 
 Matches go to stdout, one per line: the seed, its score, and the `x,z` of what was found. How it is going goes to
-stderr, with an estimate of how rare a match is. The order of the conditions doesn't matter, the cheap ones are
+stderr, and after 5 matches an estimate of how rare they are. The order of the conditions doesn't matter, the cheap ones are
 checked first.
 
 ## Conditions
@@ -34,10 +34,23 @@ biomes their names in the game. `#` starts a comment.
 
 - `--limit 10`: stop after this many matches.
 - `--tested 100000 --top 10`: cover this many seeds, then show the best ones, by the score of the first condition
-  that has one: the biggest area or share, the most in a cluster, the nearest structure.
+  that has one: the biggest area or share, the most in a cluster, the nearest structure (its distance, below 0 so that more is better).
 - `--from 0`: count up from a seed instead of trying random ones. `--seeds file` tries the seeds of a file.
 - `--threads 4`: use fewer threads.
-- `--in-seed 12345`: find locations in one seed instead of seeds. `here` means the spot being tried, every 512 blocks.
+- `--in-seed 12345`: find locations in one seed instead of seeds, see below.
+
+## Finding locations in one seed
+
+With `--in-seed` or "Find locations in this seed", an `area` line says where to look and `here` means each spot in it:
+
+```
+area within 10000 of 0,0
+structure village count>=1 within 200 of here
+biome desert present within 300 of here
+```
+
+It goes through the area once, reports each place once and then ends. Spots are as far apart as the smallest
+`within ... of here`. Conditions without `here` are about one place, so they are only checked once.
 
 ## How accurate it is
 

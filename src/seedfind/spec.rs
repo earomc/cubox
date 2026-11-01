@@ -8,6 +8,7 @@
 //! biome jungle coverage>=20% within 1000 of here
 //! noise continentalness -1.2..-1.05 coverage>=5% within 1000 of spawn
 //! not structure stronghold count>=1 within 2000 of spawn
+//! area within 10000 of 0,0    # when finding locations in one seed, `here` is every spot in it
 //! any
 //!   biome desert present within 500 of spawn
 //!   biome badlands present within 500 of spawn
@@ -102,6 +103,69 @@ pub enum Card {
     },
     Not(Box<Card>),
     Any(Vec<Card>),
+    /// where the spots are when finding locations in one seed
+    Area {
+        radius: i32,
+        anchor: Anchor,
+    },
+}
+
+/// The smallest `within ... of here` in a card.
+pub fn smallest_here(card: &Card) -> Option<i32> {
+    match card {
+        Card::Structure {
+            radius,
+            anchor: Anchor::Here,
+            ..
+        }
+        | Card::Biome {
+            radius,
+            anchor: Anchor::Here,
+            ..
+        }
+        | Card::Noise {
+            radius,
+            anchor: Anchor::Here,
+            ..
+        } => Some(*radius),
+        Card::Cluster {
+            radius,
+            within,
+            anchor: Anchor::Here,
+            ..
+        } => Some((*within).min((*radius).max(1) * 2)),
+        Card::Not(card) => smallest_here(card),
+        Card::Any(cards) => cards.iter().filter_map(smallest_here).min(),
+        _ => None,
+    }
+}
+
+/// Says what is wrong with cards for finding seeds, or locations `in_seed`.
+pub fn validate(cards: &[Card], in_seed: bool) -> Result<(), String> {
+    let areas = cards.iter().filter(|card| matches!(card, Card::Area { .. })).count();
+    let uses_here = cards.iter().any(|card| smallest_here(card).is_some());
+    if in_seed {
+        if areas > 1 {
+            return Err("only one `area`".to_owned());
+        }
+        if uses_here && areas == 0 {
+            return Err("`here` needs an `area` line: area within 10000 of 0,0".to_owned());
+        }
+        if cards.iter().all(|card| matches!(card, Card::Area { .. })) {
+            return Err("nothing to look for".to_owned());
+        }
+    } else {
+        if areas > 0 {
+            return Err("`area` is only for finding locations in one seed".to_owned());
+        }
+        if uses_here {
+            return Err("`here` is only for finding locations in one seed".to_owned());
+        }
+        if cards.is_empty() {
+            return Err("nothing to look for".to_owned());
+        }
+    }
+    Ok(())
 }
 
 fn kind_named(id: &str) -> Result<usize, String> {
@@ -154,6 +218,13 @@ impl Card {
     fn parse_line(words: &[&str]) -> Result<Self, String> {
         match words {
             ["not", rest @ ..] => Ok(Card::Not(Box::new(Self::parse_line(rest)?))),
+            ["area", rest @ ..] => {
+                let (radius, anchor) = area(rest)?;
+                if anchor == Anchor::Here {
+                    return Err("`area` can't be around `here`, it says where that is".to_owned());
+                }
+                Ok(Card::Area { radius, anchor })
+            }
             ["structure", kind, count, rest @ ..] => {
                 let (radius, anchor) = area(rest)?;
                 Ok(Card::Structure {
@@ -313,6 +384,7 @@ impl fmt::Display for Card {
                 write!(f, " within {radius} of {anchor}")
             }
             Card::Not(card) => write!(f, "not {card}"),
+            Card::Area { radius, anchor } => write!(f, "area within {radius} of {anchor}"),
             Card::Any(cards) => {
                 writeln!(f, "any")?;
                 for card in cards {
@@ -355,7 +427,8 @@ mod tests {
 
     #[test]
     fn text_reads_back_the_same() {
-        let text = "structure village count>=2 within 500 of spawn
+        let text = "area within 9000 of spawn
+structure village count>=2 within 500 of spawn
 cluster swamp_hut count>=2 radius 128 within 3000 of 0,-5
 biome mushroom_fields area>=4000000 within 5000 of here
 biome ocean absent within 300 of spawn
@@ -376,8 +449,23 @@ end
     #[test]
     fn presets_are_valid() {
         for (name, text) in PRESETS {
-            assert!(parse(text).is_ok(), "{name}");
+            validate(&parse(text).unwrap(), false).unwrap_or_else(|err| panic!("{name}: {err}"));
         }
+    }
+
+    #[test]
+    fn area_and_here_belong_to_one_seed() {
+        let check = |text: &str, in_seed| validate(&parse(text).unwrap(), in_seed);
+        let near = "biome desert present within 500 of here";
+        let area = "area within 900 of 0,0";
+        assert!(check(&format!("{area}\n{near}"), true).is_ok());
+        assert!(check("biome desert present within 500 of 0,0", true).is_ok());
+        assert!(check(near, true).unwrap_err().contains("needs an `area`"));
+        assert!(check(area, true).is_err());
+        assert!(check(&format!("{area}\n{area}\n{near}"), true).is_err());
+        assert!(check(&format!("{area}\nbiome desert present within 5 of 0,0"), false).is_err());
+        assert!(check(near, false).unwrap_err().contains("one seed"));
+        assert!(check("", false).is_err());
     }
 
     #[test]

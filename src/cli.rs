@@ -132,7 +132,7 @@ pub(crate) fn build_cmd() -> Command {
                 )
                 .arg(Arg::new("in-seed")
                     .long("in-seed")
-                    .help("Find locations in this seed instead of seeds. `here` in conditions means the spot being tried")
+                    .help("Find locations in this seed instead of seeds, in the `area` line. `here` in conditions means each spot of it")
                     .allow_negative_numbers(true)
                     .value_parser(value_parser!(i64))
                 )

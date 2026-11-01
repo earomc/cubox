@@ -84,7 +84,7 @@ impl SeedWorld {
         })
     }
 
-    fn center(&self, anchor: Anchor, here: [i32; 2]) -> [i32; 2] {
+    pub fn center(&self, anchor: Anchor, here: [i32; 2]) -> [i32; 2] {
         match anchor {
             Anchor::Spawn => self.spawn(),
             Anchor::At(x, z) => [x, z],
@@ -183,7 +183,7 @@ fn could_cluster(cells: &mut Cells, radius: i32, count: u32) -> bool {
 }
 
 /// Spots on a grid in a circle, the closest to the middle first.
-fn spots(center: [i32; 2], radius: i32, step: i32) -> Vec<[i32; 2]> {
+pub fn spots(center: [i32; 2], radius: i32, step: i32) -> Vec<[i32; 2]> {
     let n = radius / step;
     let mut spots = Vec::with_capacity(((2 * n + 1) * (2 * n + 1)) as usize);
     for dz in -n..=n {
@@ -445,6 +445,7 @@ impl SeedWorld {
                 None => Some(Passed::default()),
             },
             Card::Any(cards) => cards.iter().find_map(|card| self.check(card, here, cells)),
+            Card::Area { .. } => Some(Passed::default()),
         }
     }
 }
@@ -494,6 +495,7 @@ fn cost(card: &Card) -> u32 {
         Card::Biome { anchor, .. } | Card::Noise { anchor, .. } => 2 + anchored(anchor),
         Card::Not(card) => cost(card),
         Card::Any(cards) => cards.iter().map(cost).sum(),
+        Card::Area { .. } => 0,
     }
 }
 

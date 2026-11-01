@@ -13,6 +13,9 @@
 //! grid on                # the distance grid (off to hide it)
 //! grid_over_markers on   # draw it after the structure markers
 //! search_seeds biome desert present within 500 of spawn   # finds seeds, `;` separates conditions, prints them
+//! search_locations area within 5000 of 0,0;biome desert present within 500 of here  # the same in this seed
+//! edit_search biome desert present within 500 of spawn   # changes the conditions like the panel does
+//! print_search_status    # prints how the search is going
 //! open_first_match       # goes to the best seed found, with its markers
 //! goto 1000 -500         # center the view on these block coordinates
 //! zoom 6                 # log2 of quarts per screen point, 0 = 1 quart per point
@@ -57,6 +60,9 @@ pub enum Command {
     GridOverMarkers(bool),
     SearchSeeds(String),
     OpenFirstMatch,
+    SearchLocations(String),
+    PrintSearchStatus,
+    EditSearch(String),
     Noise(Option<NoiseParameter>),
     Goto(f64, f64),
     Zoom(f64),
@@ -129,6 +135,9 @@ impl Command {
                         .context("noise: off or a noise parameter")?,
                 ),
             }),
+            "search_locations" => Command::SearchLocations(args.join(" ").replace(';', "\n")),
+            "edit_search" => Command::EditSearch(args.join(" ").replace(';', "\n")),
+            "print_search_status" => Command::PrintSearchStatus,
             "open_first_match" => Command::OpenFirstMatch,
             "search_seeds" => Command::SearchSeeds(args.join(" ").replace(';', "\n")),
             "goto" => Command::Goto(num(0)?, num(1)?),

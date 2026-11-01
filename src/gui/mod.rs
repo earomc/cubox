@@ -523,7 +523,10 @@ impl State {
                 Command::GridOverMarkers(on) => ui.grid.over_markers = on,
                 Command::Noise(parameter) => ui.noise = parameter,
                 Command::OpenFirstMatch => ui.script_open_first_match(),
-                Command::SearchSeeds(text) => ui.seed_search.script_start(&text, ui.seed),
+                Command::SearchSeeds(text) => ui.seed_search.script_start(&text, ui.seed, false),
+                Command::SearchLocations(text) => ui.seed_search.script_start(&text, ui.seed, true),
+                Command::EditSearch(text) => ui.seed_search.script_edit(&text),
+                Command::PrintSearchStatus => println!("search status: {}", ui.seed_search.script_status()),
                 _ => {}
             }
         }
@@ -840,7 +843,7 @@ impl Ui {
 
     fn show(&mut self, root: &mut egui::Ui) {
         #[cfg(not(target_arch = "wasm32"))]
-        if self.seed_search.poll(self.threads) {
+        if self.seed_search.poll(self.seed, self.threads) {
             root.ctx().request_repaint_after(Duration::from_millis(200));
         }
         let settings = MapSettings {

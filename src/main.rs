@@ -140,9 +140,6 @@ fn find(matches: &clap::ArgMatches) {
         None => matches.get_one::<String>("cards").cloned().unwrap_or_default(),
     };
     let cards = spec::parse(&text).unwrap_or_else(|err| fail(err));
-    if cards.is_empty() {
-        fail("no conditions".to_owned());
-    }
     let seeds = if let Some(seed) = matches.get_one::<i64>("in-seed") {
         Seeds::Locations(*seed)
     } else if let Some(from) = matches.get_one::<i64>("from") {
@@ -162,7 +159,12 @@ fn find(matches: &clap::ArgMatches) {
         .get_one::<usize>("threads")
         .copied()
         .unwrap_or_else(|| std::thread::available_parallelism().map_or(4, |n| n.get()));
-    let limit = *matches.get_one::<u64>("limit").unwrap();
+    // an area has an end, so all of it unless asked otherwise
+    let limit = match matches.value_source("limit") {
+        Some(clap::parser::ValueSource::CommandLine) => *matches.get_one::<u64>("limit").unwrap(),
+        _ if matches.contains_id("in-seed") => u64::MAX,
+        _ => *matches.get_one::<u64>("limit").unwrap(),
+    };
     let tested = matches.get_one::<u64>("tested").copied();
     let top = *matches.get_one::<usize>("top").unwrap();
 
@@ -174,8 +176,7 @@ fn find(matches: &clap::ArgMatches) {
         let hits: Vec<String> = found.hits.iter().map(|hit| format!("{},{}", hit.x, hit.z)).collect();
         format!("{} {score} {}", found.seed, hits.join(" "))
     };
-    let search = Search::start(&cards, seeds, threads);
-    let start = Instant::now();
+    let search = Search::start(&cards, seeds, threads).unwrap_or_else(|err| fail(err));
     let (mut shown, mut last_report, mut kept): (u64, _, Vec<Match>) = (0, Instant::now(), Vec::new());
     let done = |search: &Search, ended: bool, shown: u64| {
         ended || tested.map_or(shown >= limit, |tested| search.counters.covered() >= tested)
@@ -196,20 +197,15 @@ fn find(matches: &clap::ArgMatches) {
                     println!("{}", line(&found));
                 }
             }
-            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
+            // what is left of a finished search has come by now, workers send before saying so
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => ended = search.is_done(),
             Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => ended = true,
         }
         if last_report.elapsed() >= Duration::from_secs(2) {
             last_report = Instant::now();
-            let covered = search.counters.covered();
-            let rate = covered as f64 / start.elapsed().as_secs_f64();
-            let odds = match search.counters.one_in() {
-                Some(one_in) => format!("about 1 in {one_in:.0}, {:.0} s each", one_in / rate),
-                None => format!("rarer than 1 in {:.0} so far", search.counters.at_least_one_in()),
-            };
             eprintln!(
-                "{covered} seeds, {rate:.0}/s, {} checked with a world, {shown} matches, {odds}, at {}",
-                search.counters.seeds.load(Ordering::Relaxed),
+                "{}, at {}",
+                search.status().replace('\n', ", "),
                 search.counters.position.load(Ordering::Relaxed),
             );
         }
@@ -217,6 +213,7 @@ fn find(matches: &clap::ArgMatches) {
             break;
         }
     }
+    eprintln!("{}", search.status().replace('\n', ", "));
     search.stop();
     sort_best(&mut kept);
     for found in kept.iter().take(top) {
