@@ -215,7 +215,7 @@ const VEIN_CELL_CHUNKS: i32 = 32;
 /// Spots looked at per side of a cell.
 const VEIN_SAMPLES: i32 = 4;
 /// How many of those spots need veins for a marker.
-const VEIN_MIN_SAMPLES: usize = 7;
+const VEIN_MIN_SAMPLES: usize = 4;
 
 fn ore_of(id: &str) -> Option<Ore> {
     match id {
@@ -370,8 +370,8 @@ const RARITY_ORDER: &[&str] = &[
 /// seeds. Depends a little on the seed, it is used to know how many to look for.
 const REAL_RATES: &[(&str, f64)] = &[
     ("geode", 0.041),
-    ("copper_vein", 0.006),
-    ("iron_vein", 0.004),
+    ("copper_vein", 0.15),
+    ("iron_vein", 0.15),
     ("end_gateway_scattered", 0.0004),
     ("village", 0.233),
     ("pillager_outpost", 0.032),
@@ -577,7 +577,7 @@ impl Finder {
             }
             let veins = self.veins.get_or_init(|| VeinField::new(self.seed));
             let (size, step) = (VEIN_CELL_CHUNKS * 16, VEIN_CELL_CHUNKS * 16 / VEIN_SAMPLES);
-            let (mut hits, mut sum) = (0, [0i64; 2]);
+            let mut hits = Vec::new();
             for dz in 0..VEIN_SAMPLES {
                 for dx in 0..VEIN_SAMPLES {
                     let (x, z) = (
@@ -585,17 +585,21 @@ impl Finder {
                         cell_z * size + dz * step + step / 2,
                     );
                     if veins.at(x, z) == Some(ore) {
-                        hits += 1;
-                        sum[0] += x as i64;
-                        sum[1] += z as i64;
+                        hits.push([x, z]);
                     }
                 }
             }
-            return (hits >= VEIN_MIN_SAMPLES).then(|| Found {
-                kind,
-                x: (sum[0] / hits as i64) as i32,
-                z: (sum[1] / hits as i64) as i32,
-            });
+            if hits.len() < VEIN_MIN_SAMPLES {
+                return None;
+            }
+            // the spot nearest their middle, the middle itself can be beside a curved vein
+            let count = hits.len() as i64;
+            let middle = [0, 1].map(|axis| hits.iter().map(|hit| hit[axis] as i64).sum::<i64>() / count);
+            let [x, z] = hits.into_iter().min_by_key(|hit| {
+                let (dx, dz) = (hit[0] as i64 - middle[0], hit[1] as i64 - middle[1]);
+                dx * dx + dz * dz
+            })?;
+            return Some(Found { kind, x, z });
         }
         if let Some(feature) = feature_of(STRUCTURE_KINDS[kind].id) {
             if feature.dimension != self.dimension {
@@ -907,6 +911,24 @@ mod tests {
                 assert_eq!(a, b, "{}", STRUCTURE_KINDS[kind].id);
             }
         }
+    }
+
+    #[test]
+    fn vein_markers_are_on_veins_of_both_ores_on_every_seed() {
+        with_big_stack(|| {
+            for seed in [12345, 1, -987_654_321, 77] {
+                let finder = Finder::new(seed, Dimension::Overworld).unwrap();
+                let veins = VeinField::new(seed);
+                for (id, ore) in [("copper_vein", Ore::Copper), ("iron_vein", Ore::Iron)] {
+                    let kind = STRUCTURE_KINDS.iter().position(|k| k.id == id).unwrap();
+                    let found = finder.around(kind, [0, 0], 10_000);
+                    assert!(found.len() > 50, "{id} of {seed}: {}", found.len());
+                    for marker in found {
+                        assert_eq!(veins.at(marker.x, marker.z), Some(ore), "{marker:?}");
+                    }
+                }
+            }
+        });
     }
 
     #[test]
