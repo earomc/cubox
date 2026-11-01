@@ -4,7 +4,7 @@ use crate::{
     biome_colors::{BIOMES, biome_color, biome_number},
     dimension::Dimension,
     gui::{
-        Overlay, Ui,
+        Ui,
         overlays::{GridSpacing, MARKER_GAPS, line_visibility},
         resources,
     },
@@ -168,32 +168,34 @@ impl Ui {
                 ui.weak("The end has no noise values");
                 return;
             }
-            let row = |ui: &mut egui::Ui, overlay: &mut Overlay, name: &str, hint: Option<&str>| {
-                ui.horizontal(|ui| {
-                    let check = ui.checkbox(&mut overlay.shown, name);
-                    if let Some(hint) = hint {
-                        check.on_hover_text(hint);
-                    }
-                    ui.add_enabled(
-                        overlay.shown,
-                        egui::Slider::new(&mut overlay.opacity, 0.05..=1.0).show_value(false),
-                    )
-                    .on_hover_text("Opacity");
-                });
+            let opacity_slider = |ui: &mut egui::Ui, opacity: &mut f32, enabled: bool, name: &str| {
+                let hint = format!("{name}: {:.0}%", *opacity * 100.0);
+                ui.add_enabled(enabled, egui::Slider::new(opacity, 0.05..=1.0).show_value(false))
+                    .on_hover_text(hint.clone())
+                    .on_disabled_hover_text(hint);
             };
-            for parameter in parameters {
-                row(ui, &mut self.noise[*parameter as usize], parameter.name(), None);
-            }
-            if self.dimension == Dimension::Overworld {
-                row(
-                    ui,
-                    &mut self.veins,
-                    "large ore veins",
-                    Some(
-                        "Where veins run: orange copper at y 0 to 50, pale iron at y -60 to -8. The blocks in them are random, and caves can cut through",
-                    ),
-                );
-            }
+            // the values have a place of their own: nothing moves when one is switched on
+            let quart = self.map.hovered_quart.or(self.noise_quart);
+            self.noise_quart = quart;
+            let values: Vec<Option<f32>> = parameters
+                .iter()
+                .map(|parameter| quart.and_then(|quart| self.noise_value(*parameter, quart)))
+                .collect();
+            egui::Grid::new("noises").num_columns(3).show(ui, |ui| {
+                ui.label("All");
+                opacity_slider(ui, &mut self.noise_opacity, true, "Opacity of all");
+                ui.label("");
+                ui.end_row();
+                for (parameter, value) in parameters.iter().zip(values) {
+                    let overlay = &mut self.noise[*parameter as usize];
+                    ui.checkbox(&mut overlay.shown, parameter.name());
+                    opacity_slider(ui, &mut overlay.opacity, overlay.shown, "Opacity");
+                    let text = value.map_or("-".to_owned(), |value| format!("{value:.3}"));
+                    ui.add_sized([44.0, 14.0], egui::Label::new(egui::RichText::new(text).weak()))
+                        .on_hover_text("The value at the last spot of the map under the cursor");
+                    ui.end_row();
+                }
+            });
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = 0.0;
                 ui.label("-1 ");
@@ -212,42 +214,27 @@ impl Ui {
 
     /// What is shown over the biomes in this dimension, with its opacity.
     pub(super) fn overlays(&self) -> Vec<(Layer, f32)> {
-        let mut overlays: Vec<(Layer, f32)> = crate::noise::parameters_of(self.dimension)
+        crate::noise::parameters_of(self.dimension)
             .iter()
             .filter(|parameter| self.noise[**parameter as usize].shown)
-            .map(|parameter| (Layer::Noise(*parameter), self.noise[*parameter as usize].opacity))
-            .collect();
-        if self.veins.shown && self.dimension == Dimension::Overworld {
-            overlays.push((Layer::Veins, self.veins.opacity));
-        }
-        overlays
+            .map(|parameter| {
+                let opacity = self.noise[*parameter as usize].opacity * self.noise_opacity;
+                (Layer::Noise(*parameter), opacity)
+            })
+            .collect()
     }
 
-    /// The values of what is shown over the biomes at a quart, a line each.
-    pub(super) fn hovered_overlays(&mut self, quart: [i32; 2]) -> Vec<String> {
-        let mut lines = Vec::new();
+    /// The value of a shown noise at a quart.
+    fn noise_value(&mut self, parameter: NoiseParameter, quart: [i32; 2]) -> Option<f32> {
+        if !self.noise[parameter as usize].shown {
+            return None;
+        }
         let (dimension, seed, qy) = (self.dimension, self.seed, self.sample_height >> 2);
-        for parameter in crate::noise::parameters_of(dimension) {
-            if !self.noise[*parameter as usize].shown {
-                continue;
-            }
-            let field = self
-                .noise_field
-                .get_or_insert_with(|| crate::noise::NoiseField::new(dimension, seed));
-            if let Some(field) = field {
-                let value = field.value(&mut Default::default(), *parameter, [quart[0], qy, quart[1]]);
-                lines.push(format!("{}: {value:.3}", parameter.name()));
-            }
-        }
-        if self.veins.shown && dimension == Dimension::Overworld {
-            let field = self
-                .vein_field
-                .get_or_insert_with(|| crate::noise::VeinField::new(seed));
-            if let Some(ore) = field.at(quart[0] * 4, quart[1] * 4) {
-                lines.push(format!("large {} veins", ore.name()));
-            }
-        }
-        lines
+        let field = self
+            .noise_field
+            .get_or_insert_with(|| crate::noise::NoiseField::new(dimension, seed))
+            .as_ref()?;
+        Some(field.value(&mut Default::default(), parameter, [quart[0], qy, quart[1]]))
     }
 
     pub(super) fn terrain_menu(&mut self, ui: &mut egui::Ui, level: i32) {

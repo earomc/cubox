@@ -138,6 +138,8 @@ icon_files![
     "end_gateway",
     "end_gateway_scattered",
     "geode",
+    "copper_vein",
+    "iron_vein",
     "village",
     "pillager_outpost",
     "stronghold",
@@ -416,6 +418,8 @@ impl Ui {
                 // the game then looks for a suitable block nearby, in chunks that aren't built here
                 let about = match STRUCTURE_KINDS[found.kind].id {
                     "spawn" => " (within about 80 blocks)".to_owned(),
+                    "copper_vein" => "\ny 0 to 50, the ore in it is random".to_owned(),
+                    "iron_vein" => "\ny -60 to -8, the ore in it is random".to_owned(),
                     "end_gateway" => ring_gateways(self.seed)
                         .iter()
                         .position(|spot| *spot == [found.x, found.z])

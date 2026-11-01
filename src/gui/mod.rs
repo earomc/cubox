@@ -50,7 +50,7 @@ use crate::{
         tiles::TileCache,
         world::WorldParams,
     },
-    noise::{NoiseField, VeinField},
+    noise::NoiseField,
     seed::{parse_seed, random_seed},
     seedfind::spec::NoiseParameter,
     structures::{Found, STRUCTURE_KINDS},
@@ -296,9 +296,10 @@ struct Ui {
     noise: [Overlay; NoiseParameter::ALL.len()],
     /// for the value under the cursor
     noise_field: Option<Option<NoiseField>>,
-    /// where the large ore veins run
-    veins: Overlay,
-    vein_field: Option<VeinField>,
+    /// all noises are shown with this share of their own opacity
+    noise_opacity: f32,
+    /// where the map was last hovered, the noise values are of there
+    noise_quart: Option<[i32; 2]>,
     /// replace the estimated heights with exact ones when zoomed in, in this quality
     relief_exact: bool,
     relief_quality: ReliefQuality,
@@ -460,8 +461,8 @@ impl State {
             relief: false,
             noise: Default::default(),
             noise_field: None,
-            veins: Default::default(),
-            vein_field: None,
+            noise_opacity: 1.0,
+            noise_quart: None,
             relief_exact: false,
             relief_quality: ReliefQuality::Auto,
             threads: resources::default_threads(),
@@ -546,7 +547,6 @@ impl State {
                     ui.noise[parameter as usize] = Overlay { shown: true, opacity };
                 }
                 Command::Noise(None) => ui.noise.iter_mut().for_each(|noise| noise.shown = false),
-                Command::Veins(on) => ui.veins.shown = on,
                 Command::OpenFirstMatch => ui.script_open_first_match(),
                 Command::SearchSeeds(text) => ui.seed_search.script_start(&text, ui.seed, false),
                 Command::SearchLocations(text) => ui.seed_search.script_start(&text, ui.seed, true),
@@ -852,7 +852,6 @@ impl Ui {
         self.hovered_biome = None;
         self.hovered_height = None;
         self.noise_field = None;
-        self.vein_field = None;
         self.terrain = None;
         self.queries.set_world(FinderWorld {
             seed: self.seed,
@@ -910,12 +909,15 @@ impl Ui {
         let screen = root.ctx().content_rect().size();
         let narrow = screen.x < 500.0;
         egui::Window::new("cubox")
-            .auto_sized()
+            .resizable(true)
             .default_open(!narrow)
             .default_pos(egui::pos2(8.0, 8.0))
-            .max_width((screen.x - 16.0).min(360.0))
+            .default_size([(screen.x - 16.0).min(360.0), (screen.y - 16.0).min(640.0)])
+            .max_size(screen - egui::vec2(16.0, 16.0))
             .show(root.ctx(), |ui| {
-                egui::ScrollArea::vertical().max_height(screen.y - 60.0).show(ui, |ui| {
+                // fills the window however it is resized
+                let scroll = egui::ScrollArea::vertical().auto_shrink([false, false]);
+                scroll.show(ui, |ui| {
                     egui::Grid::new("settings").num_columns(2).show(ui, |ui| {
                         ui.label("Seed")
                             .on_hover_text("A number, negative too, or any text like in Minecraft");
@@ -1000,9 +1002,6 @@ impl Ui {
                         let name = &self.hovered_biome.as_ref().unwrap().1;
                         let height = height.map_or(String::new(), |y| format!(" y {y}"));
                         ui.label(format!("x {} z {}{height}: {name}", q[0] * 4, q[1] * 4));
-                        for line in self.hovered_overlays(q) {
-                            ui.label(line);
-                        }
                     } else {
                         ui.label("");
                     }
@@ -1017,10 +1016,8 @@ impl Ui {
                         },
                         self.queries.waiting()
                     ));
-                    if !self.markers.is_empty() {
-                        let plural = if self.markers.len() == 1 { "" } else { "s" };
-                        ui.label(format!("{} marker{plural}", self.markers.len()));
-                    }
+                    let plural = if self.markers.len() == 1 { "" } else { "s" };
+                    ui.label(format!("{} marker{plural}", self.markers.len()));
                     ui.separator();
                     self.structures_menu(ui);
                     self.biomes_menu(ui);

@@ -27,7 +27,6 @@ use crate::{
 const WORKER_SCRIPT: &str = "./worker.js";
 /// How noise tiles are told apart from relief ones in requests, above the numbers of `Detail`.
 const FIRST_NOISE_NUMBER: u8 = 200;
-const VEINS_NUMBER: u8 = 199;
 
 pub struct Executor {
     inner: Rc<RefCell<Inner>>,
@@ -189,7 +188,6 @@ fn encode_request(params: &WorldParams, key: TileKey, task: &Task) -> (Array, Ar
             Layer::Biome => 0.into(),
             Layer::Relief { detail, .. } => detail.encode().into(),
             Layer::Noise(parameter) => (FIRST_NOISE_NUMBER + parameter as u8).into(),
-            Layer::Veins => VEINS_NUMBER.into(),
         },
         matches!(key.layer, Layer::Relief { sea_floor: true, .. }).into(),
         matches!(task, Task::Numbers).into(),
@@ -244,12 +242,10 @@ pub fn worker_run(request: &Array) -> Result<Array, JsValue> {
     let noise = layer_number
         .checked_sub(FIRST_NOISE_NUMBER)
         .and_then(|index| NoiseParameter::ALL.get(index as usize).copied());
-    let veins = layer_number == VEINS_NUMBER;
-    let detail = Detail::decode(layer_number).filter(|_| noise.is_none() && !veins);
-    let relief = detail.is_some() || noise.is_some() || veins;
+    let detail = Detail::decode(layer_number).filter(|_| noise.is_none());
+    let relief = detail.is_some() || noise.is_some();
     let key = TileKey {
         layer: match (noise, detail) {
-            _ if veins => Layer::Veins,
             (Some(parameter), _) => Layer::Noise(parameter),
             (None, Some(detail)) => Layer::Relief {
                 detail,

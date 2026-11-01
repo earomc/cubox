@@ -121,10 +121,6 @@ const VEININESS: f32 = 0.4;
 /// ends, where it makes veins thinner. Copper is at y 0 to 50, iron at y -60 to -8.
 const COPPER_HEIGHTS: [i32; 3] = [15, 25, 35];
 const IRON_HEIGHTS: [i32; 3] = [-44, -34, -24];
-/// Vein tiles are sampled every this many pixels.
-const VEIN_TILE_STEP: usize = 2;
-const COPPER_COLOR: [u8; 4] = [232, 120, 60, 255];
-const IRON_COLOR: [u8; 4] = [225, 215, 205, 255];
 
 /// Where the large ore veins of an overworld are. Says where they run: the blocks in them are
 /// random, and caves can cut through them.
@@ -173,33 +169,6 @@ impl VeinField {
                 generated::router_material_ore_vein_1_density(&self.noises, &cache.overworld, at.0, at.1, at.2)
             }
         }
-    }
-
-    /// The RGBA pixels of a tile, clear where there is no vein.
-    pub fn tile(&self, key: TileKey, keep_going: &dyn Fn() -> bool) -> Option<Vec<u8>> {
-        let size = key.tile_size_px;
-        let (origin_x, origin_z) = key.origin();
-        let stride = key.stride();
-        let mut rgba = vec![0; size * size * 4];
-        for z in (0..size).step_by(VEIN_TILE_STEP) {
-            if !keep_going() {
-                return None;
-            }
-            for x in (0..size).step_by(VEIN_TILE_STEP) {
-                let block = |origin: i32, pixel: usize| (origin + pixel as i32 * stride) * 4;
-                let color = match self.at(block(origin_x, x), block(origin_z, z)) {
-                    Some(Ore::Copper) => COPPER_COLOR,
-                    Some(Ore::Iron) => IRON_COLOR,
-                    None => continue,
-                };
-                for row in z..(z + VEIN_TILE_STEP).min(size) {
-                    for column in x..(x + VEIN_TILE_STEP).min(size) {
-                        rgba[(row * size + column) * 4..][..4].copy_from_slice(&color);
-                    }
-                }
-            }
-        }
-        Some(rgba)
     }
 }
 

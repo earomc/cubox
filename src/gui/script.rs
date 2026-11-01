@@ -10,7 +10,6 @@
 //! structure village      # show a kind of structure, or `all`, or `none`
 //! relief on              # terrain on the map (off to hide it)
 //! noise erosion 0.5      # show a climate noise too, with this opacity (off hides all)
-//! veins on               # show the large ore veins (off to hide them)
 //! grid on                # the distance grid (off to hide it)
 //! grid_over_markers on   # draw it after the structure markers
 //! search_seeds biome desert present within 500 of spawn   # finds seeds, `;` separates conditions, prints them
@@ -61,7 +60,6 @@ pub enum Command {
     GridOverMarkers(bool),
     SearchSeeds(String),
     OpenFirstMatch,
-    Veins(bool),
     SearchLocations(String),
     PrintSearchStatus,
     EditSearch(String),
@@ -141,7 +139,6 @@ impl Command {
             "search_locations" => Command::SearchLocations(args.join(" ").replace(';', "\n")),
             "edit_search" => Command::EditSearch(args.join(" ").replace(';', "\n")),
             "print_search_status" => Command::PrintSearchStatus,
-            "veins" => Command::Veins(args.first() != Some(&"off")),
             "open_first_match" => Command::OpenFirstMatch,
             "search_seeds" => Command::SearchSeeds(args.join(" ").replace(';', "\n")),
             "goto" => Command::Goto(num(0)?, num(1)?),

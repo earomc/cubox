@@ -93,7 +93,7 @@ impl TileCache {
     pub fn pending_noise(&self) -> usize {
         self.pending
             .iter()
-            .filter(|key| matches!(key.layer, Layer::Noise(_) | Layer::Veins))
+            .filter(|key| matches!(key.layer, Layer::Noise(_)))
             .count()
     }
 
@@ -152,7 +152,7 @@ impl TileCache {
         if self.pending.contains(&key) || self.entries.contains_key(&key) {
             return;
         }
-        if matches!(key.layer, Layer::Relief { .. } | Layer::Noise(_) | Layer::Veins) {
+        if matches!(key.layer, Layer::Relief { .. } | Layer::Noise(_)) {
             if allow_sampling {
                 self.queue(key, Task::Relief);
             }
@@ -254,7 +254,7 @@ impl TileCache {
             let texture = Rc::new(match done.key.layer {
                 Layer::Biome => renderer.create_tile(device, queue, &tile.rgb, TILE_SIZE as u32, done.key.scale == 0),
 
-                Layer::Relief { .. } | Layer::Noise(_) | Layer::Veins => {
+                Layer::Relief { .. } | Layer::Noise(_) => {
                     renderer.create_rgba_tile(device, queue, &tile.rgb, TILE_SIZE as u32, true)
                 }
             });

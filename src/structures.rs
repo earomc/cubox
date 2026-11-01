@@ -21,7 +21,9 @@ use steel_worldgen::{
 use crate::{
     dimension::Dimension,
     features::{feature_of, ring_gateways},
+    noise::VeinField,
     seed::generator_seed,
+    seedfind::spec::Ore,
     terrain::{Noises, init_registry},
     tile_renderer::WORLD_BORDER_QUARTS,
 };
@@ -149,6 +151,8 @@ pub const STRUCTURE_KINDS: &[StructureKind] = &[
     kind("end_gateway", "End gateway after the dragon", End, &[]),
     kind("end_gateway_scattered", "Scattered end gateway (maybe there)", End, &[]),
     kind("geode", "Geode (maybe there)", Overworld, &[]),
+    kind("copper_vein", "Large copper vein", Overworld, &[]),
+    kind("iron_vein", "Large iron vein", Overworld, &[]),
     StructureKind {
         with_piece: Some("end_city/ship"),
         ..kind("end_city_ship", "End city with ship", End, &["end_city"])
@@ -189,6 +193,9 @@ pub fn spread(kind: usize) -> Option<Spread> {
                 if feature_of(kind.id).is_some() {
                     return Some(Spread::Grid(1));
                 }
+                if ore_of(kind.id).is_some() {
+                    return Some(Spread::Grid(VEIN_CELL_CHUNKS));
+                }
                 if kind.structures.is_empty() {
                     return Some(Spread::Rings);
                 }
@@ -203,9 +210,24 @@ pub fn spread(kind: usize) -> Option<Spread> {
     SPREADS[kind]
 }
 
+/// The grid of vein markers, in chunks: one marker at most in each cell.
+const VEIN_CELL_CHUNKS: i32 = 32;
+/// Spots looked at per side of a cell.
+const VEIN_SAMPLES: i32 = 4;
+/// How many of those spots need veins for a marker.
+const VEIN_MIN_SAMPLES: usize = 7;
+
+fn ore_of(id: &str) -> Option<Ore> {
+    match id {
+        "copper_vein" => Some(Ore::Copper),
+        "iron_vein" => Some(Ore::Iron),
+        _ => None,
+    }
+}
+
 /// Whether where a kind can be only depends on the lower 48 bits of the seed.
 pub fn depends_on_lower_bits(kind: usize) -> bool {
-    feature_of(STRUCTURE_KINDS[kind].id).is_none()
+    feature_of(STRUCTURE_KINDS[kind].id).is_none() && ore_of(STRUCTURE_KINDS[kind].id).is_none()
 }
 
 /// Whether a kind is a structure of the game, unlike the spawn point.
@@ -218,6 +240,7 @@ pub fn is_structure(kind: usize) -> bool {
 pub fn marker_margin(kind: usize) -> i32 {
     match STRUCTURE_KINDS[kind].id {
         "swamp_hut" | "geode" | "end_gateway_scattered" | "end_gateway" => 16,
+        "copper_vein" | "iron_vein" => 380,
         "desert_pyramid" | "jungle_temple" | "igloo" | "buried_treasure" | "ocean_monument" => 64,
         _ => 512,
     }
@@ -228,6 +251,24 @@ pub fn marker_margin(kind: usize) -> i32 {
 /// that isn't on a grid has none. Structures depend on nothing but the lower 48 bits of the seed,
 /// see `depends_on_lower_bits`.
 pub fn candidates(seed: i64, kind: usize, center: [i32; 2], radius: i32, out: &mut Vec<([i32; 2], [i32; 2])>) {
+    if ore_of(STRUCTURE_KINDS[kind].id).is_some() {
+        // only the noise says where they are, every cell in reach is a candidate
+        let size = (VEIN_CELL_CHUNKS * 16) as i64;
+        let reach = radius as i64 + marker_margin(kind) as i64;
+        let cells = |middle: i32| {
+            ((middle as i64 - reach).div_euclid(size) as i32)..=((middle as i64 + reach).div_euclid(size) as i32)
+        };
+        for z in cells(center[1]) {
+            for x in cells(center[0]) {
+                let middle = [x * size as i32 + size as i32 / 2, z * size as i32 + size as i32 / 2];
+                let (dx, dz) = ((middle[0] - center[0]) as i64, (middle[1] - center[1]) as i64);
+                if dx * dx + dz * dz <= reach * reach {
+                    out.push(([x, z], middle));
+                }
+            }
+        }
+        return;
+    }
     if let Some(feature) = feature_of(STRUCTURE_KINDS[kind].id) {
         let reach = radius as i64 + marker_margin(kind) as i64;
         let chunks = |middle: i32| {
@@ -321,12 +362,16 @@ const RARITY_ORDER: &[&str] = &[
     "end_city_ship",
     "end_city",
     "geode",
+    "iron_vein",
+    "copper_vein",
 ];
 
 /// How many of a grid's candidates really generate, measured over thousands of cells on several
 /// seeds. Depends a little on the seed, it is used to know how many to look for.
 const REAL_RATES: &[(&str, f64)] = &[
     ("geode", 0.041),
+    ("copper_vein", 0.006),
+    ("iron_vein", 0.004),
     ("end_gateway_scattered", 0.0004),
     ("village", 0.233),
     ("pillager_outpost", 0.032),
@@ -394,6 +439,8 @@ pub struct Finder {
     /// assemble all pieces like the game, only to test that it comes to the same
     assemble_all: bool,
     dimension: Dimension,
+    /// only made when vein markers are wanted
+    veins: OnceLock<VeinField>,
 }
 
 struct KindSet {
@@ -512,6 +559,7 @@ impl Finder {
             ring_generator: OnceLock::new(),
             assemble_all: false,
             dimension,
+            veins: OnceLock::new(),
         })
     }
 
@@ -523,6 +571,32 @@ impl Finder {
 
     /// The structure of `kind` in a grid cell of its `Spread::Grid`, if one really generates.
     pub fn in_cell(&self, kind: usize, cell_x: i32, cell_z: i32) -> Option<Found> {
+        if let Some(ore) = ore_of(STRUCTURE_KINDS[kind].id) {
+            if self.dimension != Overworld {
+                return None;
+            }
+            let veins = self.veins.get_or_init(|| VeinField::new(self.seed));
+            let (size, step) = (VEIN_CELL_CHUNKS * 16, VEIN_CELL_CHUNKS * 16 / VEIN_SAMPLES);
+            let (mut hits, mut sum) = (0, [0i64; 2]);
+            for dz in 0..VEIN_SAMPLES {
+                for dx in 0..VEIN_SAMPLES {
+                    let (x, z) = (
+                        cell_x * size + dx * step + step / 2,
+                        cell_z * size + dz * step + step / 2,
+                    );
+                    if veins.at(x, z) == Some(ore) {
+                        hits += 1;
+                        sum[0] += x as i64;
+                        sum[1] += z as i64;
+                    }
+                }
+            }
+            return (hits >= VEIN_MIN_SAMPLES).then(|| Found {
+                kind,
+                x: (sum[0] / hits as i64) as i32,
+                z: (sum[1] / hits as i64) as i32,
+            });
+        }
         if let Some(feature) = feature_of(STRUCTURE_KINDS[kind].id) {
             if feature.dimension != self.dimension {
                 return None;

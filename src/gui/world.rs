@@ -10,7 +10,7 @@ use steel_worldgen::biomes::BiomeSourceKind;
 
 use crate::{
     dimension::Dimension,
-    noise::{NoiseField, VeinField},
+    noise::NoiseField,
     terrain::Terrain,
     tile_renderer::{
         Estimate, Lab, Layer, Shading, Tile, TileKey, calibrate, downsample, render_numbers, render_tile, world_mean,
@@ -112,8 +112,6 @@ pub struct World {
     terrain: OnceLock<Terrain>,
     /// only made when noise tiles are wanted
     noise: OnceLock<Option<NoiseField>>,
-    /// only made when vein tiles are wanted
-    veins: OnceLock<VeinField>,
 }
 
 impl World {
@@ -125,7 +123,6 @@ impl World {
             shadings: Default::default(),
             terrain: OnceLock::new(),
             noise: OnceLock::new(),
-            veins: OnceLock::new(),
         }
     }
 
@@ -174,14 +171,6 @@ impl World {
 
     /// A relief tile: its `rgb` are RGBA pixels and it has no estimates.
     fn relief(&self, key: TileKey, keep_going: &dyn Fn() -> bool) -> Option<Tile> {
-        if key.layer == Layer::Veins {
-            let field = self.veins.get_or_init(|| VeinField::new(self.params.seed));
-            return field.tile(key, keep_going).map(|rgb| Tile {
-                rgb,
-                estimates: Vec::new(),
-                biomes: Vec::new(),
-            });
-        }
         if let Layer::Noise(parameter) = key.layer {
             let field = self
                 .noise

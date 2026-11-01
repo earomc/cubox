@@ -28,7 +28,7 @@ checked first.
 | `any`, conditions on their own lines, `end` | one of them passes |
 
 Areas are around `spawn`, a position `x,z`, or `here`, see below. Noise parameters are `temperature`, `humidity`,
-`continentalness`, `erosion`, `weirdness` and `depth`. Structures have the names of their icons in `assets/icons`, among them `end_gateway` (the 20 the dragon opens), and `geode` and `end_gateway_scattered`, which are maybe there: their random numbers are exact, but terrain the game looks at can still stop them,
+`continentalness`, `erosion`, `weirdness` and `depth`. Structures have the names of their icons in `assets/icons`, among them `copper_vein`, `iron_vein`, `end_gateway` (the 20 the dragon opens), and `geode` and `end_gateway_scattered`, which are maybe there: their random numbers are exact, but terrain the game looks at can still stop them,
 biomes their names in the game. `#` starts a comment.
 
 ## Options

@@ -10,7 +10,9 @@ The release workflow publishes the section of a version as its release notes.
 
 ### Changed
 
-- Several noises and the ore veins can be shown at once, each with its own opacity.
+- Several noises can be shown at once, each with its own opacity, and one slider changes all of them.
+- Large ore veins are markers instead of something drawn over the map.
+- The settings window can be resized.
 
 ## [0.5.0] - 2026-11-01
 
