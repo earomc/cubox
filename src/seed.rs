@@ -1,3 +1,5 @@
+//! Seeds: what is typed, what the generator takes, and random ones.
+
 /// Turns the text typed as a seed into a seed, exactly like Minecraft's `WorldOptions.parseSeed`:
 /// a number (negative ones included) is used as is, any other text becomes the Java `hashCode`
 /// of the string. Returns None for blank text, where Minecraft would pick a random seed.

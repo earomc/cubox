@@ -1,3 +1,5 @@
+//! Draws map tiles with wgpu, under what egui draws.
+
 use std::rc::Rc;
 
 /// Background of the map where there are no tiles (yet), as sRGB.

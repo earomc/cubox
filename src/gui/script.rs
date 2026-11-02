@@ -12,6 +12,18 @@
 //! noise erosion 0.5      # show a climate noise too, with this opacity (off hides all)
 //! grid on                # the distance grid (off to hide it)
 //! grid_over_markers on   # draw it after the structure markers
+//! quality high          # of exact heights: auto, low, medium, high or full
+//! exact on               # exact heights when zoomed in (off for the estimate only)
+//! sea_floor off          # the relief of the water instead of the sea floor
+//! marker_gap 8           # the space between markers, in points
+//! marker_overlap off     # let markers overlap (on) or keep them apart (off)
+//! max_markers 5000       # how many at most while they may overlap
+//! prioritize_rare off    # whether the rarest kinds get the space first
+//! print_markers          # prints how many markers are shown
+//! highlight desert       # keep a biome bright and darken the others, `none` to stop
+//! grid_spacing 512       # fixed grid lines, this many blocks apart
+//! threads 4              # how many threads may work at once
+//! zoom_buttons on        # the buttons over the map (off to hide them)
 //! search_seeds biome desert present within 500 of spawn   # finds seeds, `;` separates conditions, prints them
 //! search_locations 5000 0 0 biome desert present within 500   # locations within 5000 of 0,0 in this seed
 //! edit_search biome desert present within 500 of spawn   # changes the conditions like the panel does

@@ -10,8 +10,8 @@ cubox find --file search.txt --limit 20
 ```
 
 Matches go to stdout, one per line: the seed, its score, and the `x,z` of what was found. How it is going goes to
-stderr, and after 5 matches an estimate of how rare they are. The order of the conditions doesn't matter, the cheap ones are
-checked first.
+stderr, and after 5 matches an estimate of how rare they are. The order of the conditions doesn't change what passes, the
+cheap ones are checked first. It only decides the score, see `--tested`.
 
 ## Conditions
 
@@ -26,31 +26,38 @@ checked first.
 | `not <condition>` | the condition doesn't pass |
 | `any`, conditions on their own lines, `end` | one of them passes |
 
-Areas are around `spawn`, a position `x,z`, or `here`, see below. Noise parameters are `temperature`, `humidity`,
+Areas are around `spawn` or a position `x,z`, in blocks of the dimension the condition is about. Spawn is the world's
+spawn in the overworld and the platform at 100,0 in the end. The nether has none, name a position there. Noise parameters are `temperature`, `humidity`,
 `continentalness`, `erosion`, `weirdness` and `depth`. Structures have the names of their icons in `assets/icons`, among them `copper_vein`, `iron_vein`, `end_gateway` (the 20 the dragon opens), and `geode` and `end_gateway_scattered`, which are maybe there: their random numbers are exact, but terrain the game looks at can still stop them,
 biomes their names in the game. `#` starts a comment.
 
+Biomes are looked at from above, at y 256 in the overworld, so caves can't be searched for: `deep_dark`, `dripstone_caves`,
+`lush_caves`, `sulfur_caves` and `ice_caves` are refused, and so is `the_void`, which doesn't generate. Noise values are
+also those at y 256, which matters for `depth`.
+
 ## Options
 
-- `--limit 10`: stop after this many matches.
+- `--limit 10`: stop after this many matches. Without it, 10 seeds or all locations.
 - `--tested 100000 --top 10`: cover this many seeds, then show the best ones, by the score of the first condition
   that has one: the biggest area or share, the most in a cluster, the nearest structure (its distance, below 0 so that more is better).
-- `--from 0`: count up from a seed instead of trying random ones. `--seeds file` tries the seeds of a file.
+- `--from 0`: count up from a seed instead of trying random ones. `--seeds file` tries the seeds of a file, one per
+  line, numbers or text.
 - `--threads 4`: use fewer threads.
 - `--in-seed 12345`: find locations in one seed instead of seeds, see below.
 
 ## Finding locations in one seed
 
-With `--in-seed` or "Find locations in this seed", an `area` line says where to look and `here` means each spot in it:
+With `--in-seed` or "Find locations in this seed" you search one seed for places. Where to look is a setting, and
+conditions have no `of`: they are around each spot of that area, and a cluster only has its radius.
 
-```
-area within 10000 of 0,0
-structure village count>=1 within 200 of here
-biome desert present within 300 of here
+```sh
+cubox find --in-seed 12345 --within 10000 --of 0,0 "structure village count>=1 within 200
+biome desert present within 300"
 ```
 
-It goes through the area once, reports each place once and then ends. Spots are as far apart as the smallest
-`within ... of here`. Conditions without `here` are about one place, so they are only checked once.
+`--within` is 10000 and `--of` 0,0 if you leave them out. It goes through the area once, reports each place once and
+then ends. Spots are as far apart as the smallest distance allows, so nothing is missed. The area is in blocks of the
+dimension the conditions are about, a nether area is in nether blocks.
 
 ## How accurate it is
 

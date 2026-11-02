@@ -1,3 +1,5 @@
+//! The color of each biome on the map, and the numbers biomes have in mask tiles.
+
 const fn rgb(hex: u32) -> [u8; 3] {
     [(hex >> 16) as u8, (hex >> 8) as u8, hex as u8]
 }

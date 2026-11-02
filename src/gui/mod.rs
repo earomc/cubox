@@ -1,3 +1,7 @@
+//! The viewer: the window, its event loop and the settings window. `map_view` and `overlays` draw the
+//! map, `tiles` and `finder` decide what to generate, and the `executor` and `finder_pool` modules
+//! run that on threads on the desktop and in web workers in browsers.
+
 #[cfg(not(target_arch = "wasm32"))]
 mod capture;
 // tile tasks run on threads on the desktop and in web workers in browsers

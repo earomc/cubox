@@ -1,3 +1,6 @@
+//! Biome tiles: square images of the world at a level of the map pyramid, where level `n` has `2^n`
+//! quarts per pixel. Used by the viewer and by `cubox img`.
+
 use std::sync::LazyLock;
 
 use steel_worldgen::biomes::{BiomeSourceKind, ChunkBiomeSampler};
@@ -384,7 +387,7 @@ fn shade(estimates: Vec<Estimate>, biomes: Vec<u8>, shading: &Shading, weight: f
     Tile { rgb, estimates, biomes }
 }
 
-/// Renders one tile, TILE * TILE pixels.
+/// Renders one tile.
 /// Each pixel is the average of `samples * samples` evenly spaced biome samples over the area the
 /// pixel covers, shaded by `shading` (from `calibrate` for this key's level).
 /// `keep_going` is asked before every row, if it says no the tile is abandoned and None returned.
@@ -491,11 +494,6 @@ pub fn downsample(children: [&[Estimate]; 4], child_biomes: [&[u8]; 4], key: Til
 mod tests {
     use super::*;
 
-    /// Children with n samples per axis sample exactly the grid of the parent with 2n samples,
-    /// so downsampling them must give the same pixel estimates.
-    /// Not exactly the same though: the sampler's R-tree lookup starts from the last result,
-    /// which breaks ties between equally close biomes depending on the sampling order.
-    /// That flips a tiny fraction of samples, so allow a few pixels to differ.
     use crate::biome_colors::BIOMES;
 
     #[test]
@@ -597,6 +595,11 @@ mod tests {
         }
     }
 
+    /// Children with n samples per axis sample exactly the grid of the parent with 2n samples,
+    /// so downsampling them must give the same pixel estimates.
+    /// Not exactly the same though: the sampler's R-tree lookup starts from the last result,
+    /// which breaks ties between equally close biomes depending on the sampling order.
+    /// That flips a tiny fraction of samples, so allow a few pixels to differ.
     #[test]
     fn downsample_matches_direct_render() {
         let source = BiomeSourceKind::overworld(12345);

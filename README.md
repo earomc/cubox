@@ -103,10 +103,11 @@ cubox gui "my cool world"                 # text seeds work like in Minecraft
 cubox img -4172144997902289642            # negative seeds too
 cubox img 12345 --scale 6 --tiles 8       # render map.png: 8x8 tiles of 128 px, 1 px = 256 blocks
 cubox img 12345 -d end --scale 2 -y 64    # the end, 1 px = 16 blocks
+cubox img 12345 -y -32                    # below the surface, with cave biomes
 cubox --help                              # everything else
 ```
 
-`--scale` is the zoom level: each pixel covers 2<sup>scale</sup> quarts (4×4 blocks) per side. `--samples` sets the
+`--scale` is the level shown as "Level" in the viewer: each pixel covers 2<sup>scale</sup> quarts (4×4 blocks) per side. `--samples` sets the
 samples per pixel and axis, and `--exact` shows the raw sampled averages without the calibrated shading.
 
 `cubox gui --script file` drives the viewer from a script and saves screenshots, see
@@ -119,7 +120,7 @@ samples per pixel and axis, and `--exact` shows the raw sampled averages without
 
 ## Roadmap
 
-- **Features** like lava lakes, geodes and ores as markers when zoomed in. SteelMC only places them while building real
+- **Features** like lava lakes and single ores as markers when zoomed in. SteelMC only places them while building real
   chunks, in a part of it that doesn't build for browsers, and most positions can't be known without that.
 - **Large biomes** worlds, once SteelMC's world generator supports them.
 - macOS app bundle and code signing, and a Windows build without a console window.

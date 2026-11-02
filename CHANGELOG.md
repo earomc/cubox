@@ -8,6 +8,32 @@ The release workflow publishes the section of a version as its release notes.
 
 ## [Unreleased]
 
+### Changed
+
+- Finding locations in one seed has one way of saying where: the area is a setting next to the checkbox, `--within`
+  and `--of` with `cubox find`, and conditions have no `of`. **`area` lines and `of here` no longer work**, write
+  `structure village count>=1 within 200` and `cluster swamp_hut count>=2 radius 128`.
+- `of spawn` means the platform at 100,0 for end conditions, and is refused for nether ones, which have no spawn.
+- The Markers menu has a filter and is sorted by name, and its size slider moved there from Extras.
+- Samples are per axis in the Extras menu too, like everywhere else.
+- Presets are for finding seeds, so they aren't offered while finding locations.
+
+### Fixed
+
+- `cubox img -y` takes negative heights.
+- `cubox find` refuses what could never match instead of searching forever: cave biomes, which it can't see, and
+  impossible values like `coverage>=200%` or a noise range the wrong way round. `count>=0`, a negative `area>=` or
+  positions outside the world are refused too.
+- `--threads 0` is refused instead of hanging. Flags that exclude each other, like `--from` and `--seeds`, say so.
+- `--in-seed` and files for `--seeds` take text seeds.
+- Clusters near the middle of two spots aren't missed when finding locations.
+- Text in the window could stay garbled after a frame was skipped.
+- Old markers stayed up to half a second after changing the seed.
+- Moving the height slider restarted the search for markers.
+- Values in the text of a seed search are no longer changed by the panel showing them.
+- In the web version a worker that failed to load no longer leaves the map waiting forever.
+- `cubox gui` ends with an error code if it fails.
+
 ## [0.5.1] - 2026-11-01
 
 ### Changed

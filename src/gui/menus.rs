@@ -124,7 +124,7 @@ impl Ui {
                     ui.add(
                         egui::Slider::new(&mut self.marker_gap, MARKER_GAPS)
                             .logarithmic(true)
-.smallest_positive(1.0)
+                            .smallest_positive(1.0)
                             .fixed_decimals(0)
                             .suffix(" px"),
                     )

@@ -1,3 +1,5 @@
+//! Which tiles exist, which are wanted, and getting finished ones onto the GPU.
+
 use std::{
     collections::{HashMap, HashSet},
     rc::Rc,

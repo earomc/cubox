@@ -1,3 +1,6 @@
+//! The map on the screen: the camera, its input, and which tiles to draw. Tiles that aren't there yet
+//! are stood in for by cached ones of other levels.
+
 use std::rc::Rc;
 
 use egui::{Color32, Pos2, Rect, Sense, Stroke, StrokeKind, Vec2, pos2, vec2};

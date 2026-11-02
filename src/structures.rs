@@ -234,7 +234,8 @@ pub fn ore_of(id: &str) -> Option<Ore> {
     }
 }
 
-/// Whether where a kind can be only depends on the lower 48 bits of the seed.
+/// Whether the `candidates` of a kind only depend on the lower 48 bits of the seed. Kinds without
+/// candidates, like the spawn point, trivially do.
 pub fn depends_on_lower_bits(kind: usize) -> bool {
     feature_of(MARKER_KINDS[kind].id).is_none() && ore_of(MARKER_KINDS[kind].id).is_none()
 }
@@ -330,8 +331,8 @@ pub fn candidates(seed: i64, kind: usize, center: [i32; 2], radius: i32, out: &m
 }
 
 /// How many candidates of a bin are tried by the end of each round of looking for a structure, for
-/// a grid of this spacing and up to about `max_tries`. Those that fail mostly do so at the cheap checks. Tight grids have many
-/// candidates of which few are real.
+/// a grid of this spacing and up to about `max_tries`. Those that fail mostly do so at the cheap
+/// checks. Tight grids have many candidates of which few are real.
 pub fn bin_rounds(spacing: i32, max_tries: u32) -> [u32; 5] {
     let tries = [16, 128, 1024, 8192, 65536].map(|tries: u32| tries.min(max_tries));
     if spacing <= 4 { tries.map(|n| n * 8) } else { tries }

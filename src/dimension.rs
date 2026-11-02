@@ -1,3 +1,5 @@
+//! The three dimensions of a world.
+
 use steel_worldgen::biomes::BiomeSourceKind;
 
 use crate::seed::generator_seed;
