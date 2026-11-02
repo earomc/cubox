@@ -570,10 +570,30 @@ impl Ui {
     /// The height of a location that is copied: on the surface in the overworld. The other dimensions
     /// have no estimate of theirs, so there it is the height the biomes are shown for.
     fn location_height(&mut self, block: [i32; 2]) -> i32 {
-        if self.dimension == Dimension::Overworld {
-            self.surface(block, false).unwrap_or(self.sample_height)
-        } else {
-            self.sample_height
+        if self.dimension != Dimension::Overworld {
+            return self.sample_height;
+        }
+        match self.location_surface {
+            Some((at, height)) if at == block => height,
+            _ => {
+                let height = self.surface(block, false).unwrap_or(self.sample_height);
+                self.location_surface = Some((block, height));
+                height
+            }
+        }
+    }
+
+    /// A button of the map's menu that copies a text made with the height of `block`, which it shows
+    /// while hovered. That height is only looked up then, it can take a moment the first time.
+    fn copy_button(&mut self, ui: &mut egui::Ui, label: &str, block: [i32; 2], text: impl Fn(i32) -> String) {
+        let button = ui.button(label);
+        if button.hovered() || button.clicked() {
+            let text = text(self.location_height(block));
+            if button.clicked() {
+                copy(ui.ctx(), text.clone());
+                ui.close();
+            }
+            button.on_hover_text(text);
         }
     }
 
@@ -582,16 +602,11 @@ impl Ui {
         let Some(block) = self.map.menu_block else { return };
         map.context_menu(|ui| {
             ui.weak(format!("x {} z {}", block[0], block[1]));
-            if ui.button("Copy location").clicked() {
-                let y = self.location_height(block);
-                copy(ui.ctx(), format!("{} {y} {}", block[0], block[1]));
-                ui.close();
-            }
-            if ui.button("Copy teleport command").clicked() {
-                let y = self.location_height(block);
-                copy(ui.ctx(), self.dimension.teleport_command(block, y));
-                ui.close();
-            }
+            self.copy_button(ui, "Copy location", block, |y| format!("{} {y} {}", block[0], block[1]));
+            let dimension = self.dimension;
+            self.copy_button(ui, "Copy teleport command", block, |y| {
+                dimension.teleport_command(block, y)
+            });
             if let Some((dimension, exit)) = self.dimension.portal_exit(block) {
                 let label = match dimension {
                     Dimension::Nether => "Go to nether coordinates",

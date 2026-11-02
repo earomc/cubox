@@ -324,6 +324,8 @@ struct Ui {
     terrain: Option<Terrain>,
     /// height under the cursor, cached for the quart and the sea floor setting it was sampled at
     hovered_height: Option<([i32; 2], bool, i32)>,
+    /// the surface at the block of the map's menu, cached as its tooltips ask every frame
+    location_surface: Option<([i32; 2], i32)>,
     grid: Grid,
 }
 
@@ -478,6 +480,7 @@ impl State {
             zoom_buttons_shown: false,
             terrain: None,
             hovered_height: None,
+            location_surface: None,
             grid: Grid::default(),
         };
 
@@ -780,6 +783,7 @@ impl Ui {
     fn reset_tiles(&mut self) {
         self.hovered_biome = None;
         self.hovered_height = None;
+        self.location_surface = None;
         self.noise_field = None;
         self.terrain = None;
         self.queries.set_world(FinderWorld {
