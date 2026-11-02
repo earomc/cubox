@@ -577,23 +577,38 @@ fn controls_ui(ui: &mut egui::Ui, running: &mut Running) -> bool {
     start
 }
 
-/// The list of what was found. Returns the one clicked.
-fn results_ui(ui: &mut egui::Ui, running: &Running, label: impl Fn(&Match) -> String) -> Option<Match> {
+/// The list of what was found, whose entries can be removed. Returns the one clicked.
+fn results_ui(ui: &mut egui::Ui, running: &mut Running, label: impl Fn(&Match) -> String) -> Option<Match> {
+    if running.results.is_empty() {
+        return None;
+    }
+    if ui.small_button("Clear results").clicked() {
+        running.results.clear();
+    }
     let mut pick = None;
+    let mut remove = None;
     egui::ScrollArea::vertical()
         .id_salt("seed results")
         .max_height(180.0)
         .show(ui, |ui| {
-            for found in &running.results {
-                if ui
-                    .selectable_label(false, label(found))
-                    .on_hover_text("Go there and show its markers")
-                    .clicked()
-                {
-                    pick = Some(found.clone());
-                }
+            for (index, found) in running.results.iter().enumerate() {
+                ui.horizontal(|ui| {
+                    if ui.small_button("x").on_hover_text("Remove from the list").clicked() {
+                        remove = Some(index);
+                    }
+                    if ui
+                        .selectable_label(false, label(found))
+                        .on_hover_text("Go there and show its markers")
+                        .clicked()
+                    {
+                        pick = Some(found.clone());
+                    }
+                });
             }
         });
+    if let Some(index) = remove {
+        running.results.remove(index);
+    }
     pick
 }
 
@@ -759,7 +774,7 @@ impl Ui {
                     if controls_ui(ui, &mut search.seeds) {
                         search.start_seeds(threads);
                     }
-                    pick = results_ui(ui, &search.seeds, |found| {
+                    pick = results_ui(ui, &mut search.seeds, |found| {
                         // the nearest structure counts as the score below 0
                         let score = found.score.map_or(String::new(), |score| {
                             if score < 0.0 {
@@ -817,7 +832,7 @@ impl Ui {
                     if controls_ui(ui, &mut search.locations) {
                         search.start_locations(seed, threads);
                     }
-                    pick = results_ui(ui, &search.locations, |found| {
+                    pick = results_ui(ui, &mut search.locations, |found| {
                         found.hits.first().map_or(String::new(), |hit| {
                             let is_patch = hit.kind.is_none() && found.hits.len() == 1;
                             let size = found

@@ -22,6 +22,7 @@ The release workflow publishes the section of a version as its release notes.
 - `area>=` counts the part of a patch inside the area.
 - `present` and `absent` are gone: `biome desert within 300`, `not biome desert within 300`. `count>=1` can be left out.
 - Stop and Pause work in the middle of a seed.
+- Results can be removed from the list, one by one or all at once.
 
 ## [0.6.0] - 2026-11-02
 
