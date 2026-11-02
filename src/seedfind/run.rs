@@ -38,8 +38,12 @@ pub enum Seeds {
     /// counting up
     From(i64),
     List(Vec<i64>),
-    /// not seeds but the spots of the `area` card in one seed
-    Locations(i64),
+    /// not seeds but the spots within `radius` blocks of `center` in one seed
+    Locations {
+        seed: i64,
+        radius: i32,
+        center: [i32; 2],
+    },
 }
 
 /// How a search is going.
@@ -116,21 +120,17 @@ pub struct Search {
 impl Search {
     /// Starts it, or says what is wrong with the cards for these seeds.
     pub fn start(cards: &[Card], seeds: Seeds, threads: usize) -> Result<Self, String> {
-        let in_seed = match seeds {
-            Seeds::Locations(seed) => Some(seed),
-            _ => None,
-        };
-        spec::validate(cards, in_seed.is_some())?;
-        let location_world = in_seed.map(|seed| Arc::new(SeedWorld::new(seed)));
-        let (center, spots) = match &location_world {
-            Some(world) => {
-                let (center, spots) = area_spots(cards, world)?;
-                (Some(center), spots)
+        let in_seed = matches!(seeds, Seeds::Locations { .. });
+        spec::validate(cards, in_seed)?;
+        let (location_world, center, spots) = match seeds {
+            Seeds::Locations { seed, radius, center } => {
+                let spots = area_spots(cards, center, radius)?;
+                (Some(Arc::new(SeedWorld::new(seed))), Some(center), spots)
             }
-            None => (None, Vec::new()),
+            _ => (None, None, Vec::new()),
         };
         let total = match &seeds {
-            Seeds::Locations(_) => Some(spots.len() as u64),
+            Seeds::Locations { .. } => Some(spots.len() as u64),
             Seeds::List(list) => Some(list.len() as u64),
             _ => None,
         };
@@ -228,7 +228,8 @@ impl Search {
             let finished = self.counters.finished.load(Ordering::Relaxed);
             let total = self.total.unwrap_or(0);
             return if self.is_done() {
-                format!("Done: {matches} location{plural} in {total} spots")
+                let spots = if total == 1 { "spot" } else { "spots" };
+                format!("Done: {matches} location{plural} in {total} {spots}")
             } else {
                 format!("{finished} of {total} spots, {matches} location{plural}")
             };
@@ -259,30 +260,22 @@ impl Drop for Search {
     }
 }
 
-/// The middle of the area and the spots to try, nearest first. Conditions don't depend on the spot
-/// without `here`, so one is enough then. The grid is as fine as the closest `here` needs: all
-/// that is within a card's radius of some spot is then within it of a spot of the grid.
-fn area_spots(cards: &[Card], world: &SeedWorld) -> Result<([i32; 2], Vec<[i32; 2]>), String> {
-    let (center, radius) = cards
+/// The spots of an area to try, nearest first, as far apart as the cards allow.
+fn area_spots(cards: &[Card], center: [i32; 2], radius: i32) -> Result<Vec<[i32; 2]>, String> {
+    let step = cards
         .iter()
-        .find_map(|card| match card {
-            Card::Area { radius, anchor } => Some((world.center(*anchor, [0, 0]), *radius)),
-            _ => None,
-        })
-        .unwrap_or(([0, 0], 0));
-    let step = cards.iter().filter_map(spec::smallest_here).min();
-    let Some(step) = step else {
-        return Ok((center, vec![center]));
-    };
-    let step = step.max(16);
+        .filter_map(spec::spot_spacing)
+        .min()
+        .unwrap_or(radius)
+        .max(16);
     let across = 2 * (radius / step) as i64 + 1;
     if across * across > MAX_SPOTS {
         return Err(format!(
-            "that would be {} spots to try: make the area smaller or `within ... of here` larger",
+            "that would be {} spots to try: make the area smaller or the distances larger",
             rounded((across * across) as f64)
         ));
     }
-    Ok((center, spots(center, radius, step)))
+    Ok(spots(center, radius, step))
 }
 
 /// A number that looks random, the same for the same input.
@@ -368,7 +361,7 @@ impl Worker {
                     }
                     None => false,
                 },
-                Seeds::Locations(_) => match self.spots.get(index as usize) {
+                Seeds::Locations { .. } => match self.spots.get(index as usize) {
                     Some(spot) => {
                         self.spot(*spot, &mut cells);
                         self.counters.finished.fetch_add(1, Ordering::Relaxed);
@@ -454,9 +447,14 @@ impl Worker {
 mod tests {
     use super::*;
 
-    fn run_to_end(text: &str, seed: i64) -> (Vec<Match>, String) {
+    fn run_to_end(text: &str, seed: i64, radius: i32) -> (Vec<Match>, String) {
         let cards = spec::parse(text).unwrap();
-        let search = Search::start(&cards, Seeds::Locations(seed), 4).unwrap();
+        let seeds = Seeds::Locations {
+            seed,
+            radius,
+            center: [0, 0],
+        };
+        let search = Search::start(&cards, seeds, 4).unwrap();
         let start = Instant::now();
         let mut found = Vec::new();
         while !search.is_done() {
@@ -470,25 +468,28 @@ mod tests {
         (found, search.status())
     }
 
+    fn kind(id: &str) -> usize {
+        crate::structures::STRUCTURE_KINDS
+            .iter()
+            .position(|k| k.id == id)
+            .unwrap()
+    }
+
+    fn finder() -> crate::structures::Finder {
+        crate::structures::Finder::new(12345, crate::dimension::Dimension::Overworld).unwrap()
+    }
+
     #[test]
     fn an_area_is_gone_through_once_without_repeats() {
-        let (found, status) = run_to_end(
-            "area within 4000 of 0,0\nstructure village count>=1 within 400 of here",
-            12345,
-        );
+        let (found, status) = run_to_end("structure village count>=1 within 400", 12345, 4000);
         assert!(status.starts_with("Done"), "{status}");
         assert!(found.len() > 1, "{found:?}");
         let firsts: Vec<_> = found.iter().map(|f| (f.hits[0].x, f.hits[0].z)).collect();
         let unique: HashSet<_> = firsts.iter().collect();
         assert_eq!(unique.len(), firsts.len(), "{firsts:?}");
         // and it found them all
-        let finder = crate::structures::Finder::new(12345, crate::dimension::Dimension::Overworld).unwrap();
-        let village = crate::structures::STRUCTURE_KINDS
-            .iter()
-            .position(|k| k.id == "village")
-            .unwrap();
         let reported: HashSet<_> = found.iter().flat_map(|f| f.hits.iter().map(|h| (h.x, h.z))).collect();
-        for real in finder.around(village, [0, 0], 4000) {
+        for real in finder().around(kind("village"), [0, 0], 4000) {
             assert!(reported.contains(&(real.x, real.z)), "{real:?}");
         }
     }
@@ -496,38 +497,49 @@ mod tests {
     #[test]
     fn a_structure_next_to_a_biome_is_one_location() {
         let (found, _) = run_to_end(
-            "area within 3000 of 0,0\nstructure village count>=1 within 300 of here\nbiome plains present within 600 of here",
+            "structure village count>=1 within 300\nbiome plains present within 600",
             12345,
+            3000,
         );
-        let finder = crate::structures::Finder::new(12345, crate::dimension::Dimension::Overworld).unwrap();
-        let village = crate::structures::STRUCTURE_KINDS
-            .iter()
-            .position(|k| k.id == "village")
-            .unwrap();
-        let real = finder.around(village, [0, 0], 3300).len();
+        let real = finder().around(kind("village"), [0, 0], 3300).len();
         assert!(!found.is_empty() && found.len() <= real, "{} of {real}", found.len());
-        assert!(found.iter().all(|f| f.hits[0].kind == Some(village)));
+        assert!(found.iter().all(|f| f.hits[0].kind == Some(kind("village"))));
     }
 
+    /// Whatever two structures share a circle of the radius, one spot has them both in reach, which
+    /// a reach of twice the radius wouldn't do.
     #[test]
-    fn conditions_without_here_are_checked_once() {
-        let (found, status) = run_to_end(
-            "area within 90000 of 0,0\nstructure village count>=1 within 3000 of 0,0",
-            12345,
-        );
-        assert_eq!(found.len(), 1);
-        assert!(status.contains("in 1 spots"), "{status}");
+    fn spots_reach_every_cluster() {
+        let radius = 128;
+        let cards = spec::parse(&format!("cluster village count>=2 radius {radius}")).unwrap();
+        let grid = area_spots(&cards, [0, 0], 2000).unwrap();
+        let missed_with = |reach: i32| {
+            let reach = (reach as f64).powi(2);
+            let in_reach =
+                |spot: &[i32; 2], x: f64, z: f64| (spot[0] as f64 - x).powi(2) + (spot[1] as f64 - z).powi(2) <= reach;
+            let mut missed = 0;
+            for (x, z, turn) in (0..600).map(|i| ((i % 25) as f64 * 11.0, (i / 25) as f64 * 11.0, i as f64 * 0.37)) {
+                let (dx, dz) = (turn.cos() * radius as f64, turn.sin() * radius as f64);
+                let seen = grid
+                    .iter()
+                    .any(|spot| in_reach(spot, x + dx, z + dz) && in_reach(spot, x - dx, z - dz));
+                missed += !seen as i32;
+            }
+            missed
+        };
+        assert_eq!(missed_with(spec::cluster_reach(radius)), 0);
+        assert!(missed_with(radius * 2) > 0);
     }
 
     #[test]
     fn too_big_areas_are_refused() {
-        let cards = spec::parse("area within 30000000 of 0,0\nbiome desert present within 16 of here").unwrap();
-        assert!(
-            Search::start(&cards, Seeds::Locations(1), 1)
-                .err()
-                .unwrap()
-                .contains("spots")
-        );
+        let cards = spec::parse("biome desert present within 16").unwrap();
+        let seeds = Seeds::Locations {
+            seed: 1,
+            radius: 30_000_000,
+            center: [0, 0],
+        };
+        assert!(Search::start(&cards, seeds, 1).err().unwrap().contains("spots"));
     }
 
     #[test]

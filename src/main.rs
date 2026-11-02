@@ -141,7 +141,11 @@ fn find(matches: &clap::ArgMatches) {
     };
     let cards = spec::parse(&text).unwrap_or_else(|err| fail(err));
     let seeds = if let Some(seed) = matches.get_one::<i64>("in-seed") {
-        Seeds::Locations(*seed)
+        Seeds::Locations {
+            seed: *seed,
+            radius: *matches.get_one::<i32>("within").unwrap(),
+            center: *matches.get_one::<[i32; 2]>("of").unwrap(),
+        }
     } else if let Some(from) = matches.get_one::<i64>("from") {
         Seeds::From(*from)
     } else if let Some(path) = matches.get_one::<std::path::PathBuf>("seeds") {

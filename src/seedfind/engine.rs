@@ -7,7 +7,7 @@ use steel_worldgen::biomes::BiomeSourceKind;
 use crate::{
     dimension::Dimension,
     noise::{NoiseCache, NoiseField},
-    seedfind::spec::{Anchor, BiomeTest, Card},
+    seedfind::spec::{Anchor, BiomeTest, Card, cluster_reach},
     structures::{
         Finder, Found, STRUCTURE_KINDS, Spread, allowed_by_biomes, candidates, depends_on_lower_bits, spread,
     },
@@ -21,6 +21,9 @@ const MAX_STEP: i32 = 256;
 const MAX_PATCH_SAMPLES: usize = 1 << 16;
 /// How much of a wanted patch the coarse look has to see before the fine one is done.
 const COARSE_SHARE: f64 = 0.5;
+
+/// The obsidian platform everyone arrives on in the end.
+const END_SPAWN: [i32; 2] = [100, 0];
 
 /// Room for the grid cells and chunk middles of candidates, see `candidates`.
 pub type Cells = Vec<([i32; 2], [i32; 2])>;
@@ -79,24 +82,26 @@ impl SeedWorld {
             .as_ref()
     }
 
-    pub fn spawn(&self) -> [i32; 2] {
+    fn overworld_spawn(&self) -> [i32; 2] {
         *self.spawn.get_or_init(|| {
             let spawn = self.source(Dimension::Overworld).initial_spawn_search_origin();
             [spawn.x(), spawn.z()]
         })
     }
 
-    pub fn center(&self, anchor: Anchor, here: [i32; 2]) -> [i32; 2] {
-        match anchor {
-            Anchor::Spawn => self.spawn(),
-            Anchor::At(x, z) => [x, z],
-            Anchor::Here => here,
+    /// Where a card about `dimension` is around. `validate` keeps spawn out of the nether.
+    fn center(&self, anchor: Anchor, dimension: Dimension, spot: [i32; 2]) -> [i32; 2] {
+        match (anchor, dimension) {
+            (Anchor::At(x, z), _) => [x, z],
+            (Anchor::Spot, _) => spot,
+            (Anchor::Spawn, Dimension::End) => END_SPAWN,
+            (Anchor::Spawn, _) => self.overworld_spawn(),
         }
     }
 }
 
 /// The dimension a biome is in.
-fn biome_dimension(biome: &str) -> Dimension {
+pub fn biome_dimension(biome: &str) -> Dimension {
     static NAMES: OnceLock<[Vec<String>; 3]> = OnceLock::new();
     let names = NAMES.get_or_init(|| {
         Dimension::ALL.map(|dimension| {
@@ -275,8 +280,16 @@ fn largest_patch(
     best
 }
 
-fn check_biome(world: &SeedWorld, biome: &str, test: BiomeTest, radius: i32, center: [i32; 2]) -> Option<Passed> {
+fn check_biome(
+    world: &SeedWorld,
+    biome: &str,
+    test: BiomeTest,
+    radius: i32,
+    anchor: Anchor,
+    spot: [i32; 2],
+) -> Option<Passed> {
     let dimension = biome_dimension(biome);
+    let center = world.center(anchor, dimension, spot);
     let source = world.source(dimension);
     let mut sampler = source.chunk_sampler();
     let qy = dimension.default_height() >> 2;
@@ -339,7 +352,7 @@ impl SeedWorld {
                 radius,
                 anchor,
             } => {
-                let center = self.center(*anchor, here);
+                let center = self.center(*anchor, STRUCTURE_KINDS[*kind].dimension, here);
                 if spread(*kind) != Some(Spread::Rings) {
                     cells.clear();
                     candidates(self.seed, *kind, center, *radius, cells);
@@ -371,10 +384,15 @@ impl SeedWorld {
                 within,
                 anchor,
             } => {
-                let center = self.center(*anchor, here);
+                let center = self.center(*anchor, STRUCTURE_KINDS[*kind].dimension, here);
+                let within = if *anchor == Anchor::Spot {
+                    cluster_reach(*radius)
+                } else {
+                    *within
+                };
                 if spread(*kind) != Some(Spread::Rings) {
                     cells.clear();
-                    candidates(self.seed, *kind, center, *within, cells);
+                    candidates(self.seed, *kind, center, within, cells);
                     let margin = crate::structures::marker_margin(*kind);
                     if !could_cluster(cells, radius + margin, *count) {
                         return None;
@@ -386,7 +404,7 @@ impl SeedWorld {
                 }
                 let found = self
                     .finder(STRUCTURE_KINDS[*kind].dimension)?
-                    .around(*kind, center, *within);
+                    .around(*kind, center, within);
                 let points: Vec<[i32; 2]> = found.iter().map(|f| [f.x, f.z]).collect();
                 let (best, middle) = best_circle(&points, *radius);
                 if best < *count as usize {
@@ -406,7 +424,7 @@ impl SeedWorld {
                 test,
                 radius,
                 anchor,
-            } => check_biome(self, biome, *test, *radius, self.center(*anchor, here)),
+            } => check_biome(self, biome, *test, *radius, *anchor, here),
             Card::Noise {
                 parameter,
                 min,
@@ -415,7 +433,7 @@ impl SeedWorld {
                 radius,
                 anchor,
             } => {
-                let center = self.center(*anchor, here);
+                let center = self.center(*anchor, Dimension::Overworld, here);
                 let climate = self
                     .climate
                     .get_or_init(|| NoiseField::new(Dimension::Overworld, self.seed))
@@ -457,7 +475,6 @@ impl SeedWorld {
                 None => Some(Passed::default()),
             },
             Card::Any(cards) => cards.iter().find_map(|card| self.check(card, here, cells)),
-            Card::Area { .. } => Some(Passed::default()),
         }
     }
 }
@@ -507,7 +524,6 @@ fn cost(card: &Card) -> u32 {
         Card::Biome { anchor, .. } | Card::Noise { anchor, .. } => 2 + anchored(anchor),
         Card::Not(card) => cost(card),
         Card::Any(cards) => cards.iter().map(cost).sum(),
-        Card::Area { .. } => 0,
     }
 }
 
@@ -568,7 +584,7 @@ impl Plan {
         })
     }
 
-    /// Checks all cards, `here` is what `Anchor::Here` means.
+    /// Checks all cards, `here` is what `Anchor::Spot` means.
     pub fn check(&self, world: &SeedWorld, here: [i32; 2], cells: &mut Cells) -> Option<Match> {
         let mut passed = Vec::with_capacity(self.cards.len());
         for (index, card) in &self.cards {
@@ -595,6 +611,31 @@ mod tests {
             .unwrap()
             .join()
             .unwrap();
+    }
+
+    #[test]
+    fn spawn_is_where_the_dimension_has_it() {
+        let world = SeedWorld::new(12345);
+        let spawn = Dimension::Overworld.biome_source(12345).initial_spawn_search_origin();
+        let center = |dimension| world.center(Anchor::Spawn, dimension, [7, 7]);
+        assert_eq!(center(Dimension::Overworld), [spawn.x(), spawn.z()]);
+        assert_eq!(center(Dimension::End), END_SPAWN);
+    }
+
+    /// Their search would run forever, so the parser refuses them.
+    #[test]
+    fn biomes_refused_by_the_parser_are_really_never_sampled() {
+        let source = Dimension::Overworld.biome_source(1);
+        let mut sampler = source.chunk_sampler();
+        let qy = Dimension::Overworld.default_height() >> 2;
+        for i in 0..250_000 {
+            let biome = sampler.sample((i % 500 - 250) * 64, qy, (i / 500 - 250) * 64);
+            assert!(
+                crate::seedfind::spec::searchable_biomes().any(|name| name == &*biome.key.path),
+                "{}",
+                biome.key.path
+            );
+        }
     }
 
     #[test]

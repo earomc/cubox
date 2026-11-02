@@ -1,5 +1,8 @@
 use clap::{Arg, ArgAction, Command, crate_description, crate_name, crate_version, value_parser};
-use cubox::seed::parse_seed;
+use cubox::{
+    seed::parse_seed,
+    seedfind::spec::{MAX_BLOCKS, position},
+};
 
 /// The longest side of `img`, in pixels. Its 3 bytes per pixel come to about 3.2 GiB, and the tiles need that again.
 pub(crate) const MAX_IMAGE_SIDE: u64 = 32768;
@@ -60,7 +63,7 @@ pub(crate) fn build_cmd() -> Command {
                     .help("Height / y-level at which to sample the biomes at. If you sample lower you will see cave biomes")
                     .long("sample-height")
                     .short('y')
-                    .short_alias('y')
+                    .allow_negative_numbers(true)
                     .value_parser(value_parser!(i32))
                     .default_value("256")
                 )
@@ -132,14 +135,29 @@ pub(crate) fn build_cmd() -> Command {
                 )
                 .arg(Arg::new("in-seed")
                     .long("in-seed")
-                    .help("Find locations in this seed instead of seeds, in the `area` line. `here` in conditions means each spot of it")
-                    .allow_negative_numbers(true)
-                    .value_parser(value_parser!(i64))
+                    .help("Find locations in this seed instead of seeds. Conditions then have no `of`: they are around each spot of the area")
+                    .allow_hyphen_values(true)
+                    .value_parser(parse_seed_arg)
+                )
+                .arg(Arg::new("within")
+                    .long("within")
+                    .help("With --in-seed: how far the area reaches, in blocks")
+                    .requires("in-seed")
+                    .value_parser(value_parser!(i32).range(1..=MAX_BLOCKS as i64))
+                    .default_value("10000")
+                )
+                .arg(Arg::new("of")
+                    .long("of")
+                    .help("With --in-seed: the middle of the area, x,z")
+                    .requires("in-seed")
+                    .allow_hyphen_values(true)
+                    .value_parser(position)
+                    .default_value("0,0")
                 )
                 .arg(Arg::new("threads")
                     .long("threads")
                     .help("Threads to use, all by default")
-                    .value_parser(value_parser!(usize))
+                    .value_parser(clap::builder::RangedU64ValueParser::<usize>::new().range(1..))
                 )
         )
 }
