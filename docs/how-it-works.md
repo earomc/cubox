@@ -8,7 +8,11 @@ Each pixel averages several biome samples spread over its area. Up close that is
 pixel covers thousands of biomes and its few samples are mostly noise, so shown as is the map would look like
 confetti. cubox measures, per world and zoom level, how much the true area averages vary and how far the samples are
 off, and pulls the samples toward the world's average color just enough that the map varies as much as the real
-averages do. That's why zooming out ends in a uniform blue-green: the whole world averaged.
+averages do. That's why zooming out ends in a uniform blue-green: the whole world averaged. The end's biomes are so
+small that it gets there soonest, from level 9 on.
+
+Tiles built from finer ones have more samples and so less error, which each tile keeps track of, and are shaded
+accordingly. They vary as much as tiles next to them that were sampled, but with more real structure in it.
 
 ## The code
 

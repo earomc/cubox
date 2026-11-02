@@ -31,6 +31,10 @@ The release workflow publishes the section of a version as its release notes.
 - `--threads 0` is refused instead of hanging. Flags that exclude each other, like `--from` and `--seeds`, say so.
 - `--in-seed` and files for `--seeds` take text seeds.
 - Clusters near the middle of two spots aren't missed when finding locations.
+- Highlighted biomes flickered while tiles were generated: tiles don't fade in while biomes are highlighted.
+- Tiles built from ones further in looked duller than those next to them. They now have the same contrast.
+- Far out, detail that isn't real came back at some levels, most of all in the end. Once a level is the plain average
+  of the world, so are all coarser ones. In the end that is from level 9 on.
 - Text in the window could stay garbled after a frame was skipped.
 - Old markers stayed up to half a second after changing the seed.
 - Moving the height slider restarted the search for markers.

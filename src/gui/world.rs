@@ -33,7 +33,8 @@ pub type Biomes = Arc<Vec<u8>>;
 /// Work for one tile. The variants are ordered by priority, cheap work first.
 pub enum Task {
     /// average 4 finished children, no sampling needed
-    Downsample([Estimates; 4], [Biomes; 4]),
+    /// and how far their estimates are off
+    Downsample([Estimates; 4], [Biomes; 4], [f32; 4]),
     /// sample the tile
     Render,
     /// only the biome numbers of a tile that was made without them
@@ -152,15 +153,17 @@ impl World {
                     rgb: Vec::new(),
                     estimates: Vec::new(),
                     biomes,
+                    error: 0.0,
                 });
             }
             _ => {}
         }
         let shading = self.shading(key);
         match task {
-            Task::Downsample(children, biomes) => Some(downsample(
+            Task::Downsample(children, biomes, errors) => Some(downsample(
                 children.each_ref().map(|c| c.as_slice()),
                 biomes.each_ref().map(|b| b.as_slice()),
+                errors,
                 key,
                 &shading,
             )),
@@ -194,6 +197,7 @@ impl World {
             rgb,
             estimates: Vec::new(),
             biomes: Vec::new(),
+            error: 0.0,
         })
     }
 }

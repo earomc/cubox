@@ -153,12 +153,12 @@ fn spawn_worker(inner: &Rc<RefCell<Inner>>, index: usize) -> Result<Worker, JsVa
 /// `[seed, dimension, sample height, samples setting, level, x, z, tile size, samples, children,
 /// relief detail or 0, relief of the sea floor, only biome numbers]`.
 /// The seed is a string, JavaScript numbers can't hold all 64 bits. `children` are the estimates, then the biome numbers,
-/// of the 4 children for downsampling, or null to sample the tile.
+/// and the errors of the 4 children for downsampling, or null to sample the tile.
 fn encode_request(params: &WorldParams, key: TileKey, task: &Task) -> (Array, Array) {
     let transfer = Array::new();
     let children = match task {
         Task::Render | Task::Numbers | Task::Overlay => JsValue::NULL,
-        Task::Downsample(children, biomes) => {
+        Task::Downsample(children, biomes, errors) => {
             let array = Array::new();
             for child in children {
                 let estimates = Uint16Array::from(child.as_flattened());
@@ -169,6 +169,9 @@ fn encode_request(params: &WorldParams, key: TileKey, task: &Task) -> (Array, Ar
                 let numbers = Uint8Array::from(child.as_slice());
                 transfer.push(&numbers.buffer());
                 array.push(&numbers);
+            }
+            for error in errors {
+                array.push(&(*error).into());
             }
             array.into()
         }
@@ -195,7 +198,7 @@ fn encode_request(params: &WorldParams, key: TileKey, task: &Task) -> (Array, Ar
     (request, transfer)
 }
 
-/// `[rgb, estimates, biomes]` from `worker_run`, or None if the worker reported an error.
+/// `[rgb, estimates, biomes, error]` from `worker_run`, or None if the worker reported an error.
 fn decode_tile(data: &JsValue) -> Option<Tile> {
     let reply: Array = data.clone().dyn_into().ok()?;
     let rgb: Uint8Array = reply.get(0).dyn_into().ok()?;
@@ -206,6 +209,7 @@ fn decode_tile(data: &JsValue) -> Option<Tile> {
         rgb: rgb.to_vec(),
         estimates: estimates.as_chunks::<3>().0.to_vec(),
         biomes: biomes.to_vec(),
+        error: reply.get(3).as_f64()? as f32,
     })
 }
 
@@ -214,7 +218,7 @@ thread_local! {
     static WORLD: RefCell<Option<Rc<World>>> = const { RefCell::new(None) };
 }
 
-/// Runs one request from `encode_request` in a worker. Returns `[rgb, estimates, biomes]`.
+/// Runs one request from `encode_request` in a worker. Returns `[rgb, estimates, biomes, error]`.
 pub fn worker_run(request: &Array) -> Result<Array, JsValue> {
     let number = |i: u32| {
         request
@@ -277,9 +281,17 @@ pub fn worker_run(request: &Array) -> Result<Array, JsValue> {
             let numbers: Uint8Array = children.get(i).dyn_into()?;
             Ok(Arc::new(numbers.to_vec()))
         };
+        let error = |i: u32| {
+            children
+                .get(i)
+                .as_f64()
+                .map(|error| error as f32)
+                .ok_or("bad tile error")
+        };
         Task::Downsample(
             [child(0)?, child(1)?, child(2)?, child(3)?],
             [numbers(4)?, numbers(5)?, numbers(6)?, numbers(7)?],
+            [error(8)?, error(9)?, error(10)?, error(11)?],
         )
     };
 
@@ -294,5 +306,6 @@ pub fn worker_run(request: &Array) -> Result<Array, JsValue> {
         Uint8Array::from(tile.rgb.as_slice()).into(),
         Uint16Array::from(tile.estimates.as_flattened()).into(),
         Uint8Array::from(tile.biomes.as_slice()).into(),
+        tile.error.into(),
     ]))
 }

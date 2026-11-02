@@ -191,6 +191,8 @@ pub struct Tile {
     pub estimates: Vec<Estimate>,
     /// the number of the biome at each pixel, see `biome_number`, for highlighting
     pub biomes: Vec<u8>,
+    /// the variance of the error of the estimates, which gets smaller the more samples went into them
+    pub error: f32,
 }
 
 /// Biome color at a quart position, in Oklab.
@@ -333,7 +335,7 @@ pub fn calibrate(source: &BiomeSourceKind, key: TileKey, mean: Lab) -> Shading {
         // pixels this small are sampled completely, the estimates are exact
         return Shading::exact(mean);
     }
-    let (samples, reference) = (offsets(stride, n), offsets(stride, reference_n));
+    let samples = offsets(stride, n);
     let qy = key.sample_height >> 2;
     let mut sampler = source.chunk_sampler();
 
@@ -346,7 +348,7 @@ pub fn calibrate(source: &BiomeSourceKind, key: TileKey, mean: Lab) -> Shading {
         let x = -WORLD_BORDER_QUARTS + (h % range) as i32;
         let z = -WORLD_BORDER_QUARTS + ((h >> 32) % range) as i32;
         let estimate = average(&mut sampler, x, qy, z, &samples);
-        let truth = average(&mut sampler, x, qy, z, &reference);
+        let truth = jittered_average(&mut sampler, x, qy, z, stride, reference_n, h);
         error += (0..3).map(|ch| (estimate[ch] - truth[ch]).powi(2)).sum::<f32>();
         truths.push(truth);
     }
@@ -360,11 +362,33 @@ pub fn calibrate(source: &BiomeSourceKind, key: TileKey, mean: Lab) -> Shading {
         / (count - 1.0);
     // the reference has an error too, about noise * samples / reference samples if samples are independent
     let reference_noise = noise * (n * n) as f32 / (reference_n * reference_n) as f32;
+    let signal = spread - reference_noise;
+    // less than this much can be chance: the measured spread itself is only so exact
+    let uncertainty = 2.0 * spread * (2.0 / (count - 1.0)).sqrt();
     Shading {
         mean,
-        signal: (spread - reference_noise).max(0.0),
+        signal: if signal > uncertainty { signal } else { 0.0 },
         noise,
     }
+}
+
+/// Average color of `n * n` samples of a pixel, each somewhere random in its part of the pixel. With
+/// samples on a regular grid, areas seemed to vary more the further out they were, in the end most
+/// of all, which real averages don't do. Probably because such samples are all at the same place in
+/// the cells of the noises. With random ones it is gone, see the test `once_a_level_is_flat_the_coarser_ones_are_too`.
+fn jittered_average(sampler: &mut ChunkBiomeSampler, x: i32, y: i32, z: i32, stride: i32, n: i32, seed: u64) -> Lab {
+    let mut sum = [0f32; 3];
+    let part = stride / n;
+    for row in 0..n {
+        for column in 0..n {
+            let h = splitmix(seed ^ ((row as u64) << 48) ^ ((column as u64) << 40));
+            let dx = (h % part as u64) as i32;
+            let dz = ((h >> 32) % part as u64) as i32;
+            let c = sample_lab(sampler, x + column * part + dx, y, z + row * part + dz);
+            (0..3).for_each(|ch| sum[ch] += c[ch]);
+        }
+    }
+    sum.map(|s| s / (n * n) as f32)
 }
 
 fn splitmix(mut x: u64) -> u64 {
@@ -374,8 +398,9 @@ fn splitmix(mut x: u64) -> u64 {
     x ^ (x >> 31)
 }
 
-/// Shades estimates with `weight` (see `Shading::weight`) into sRGB colors.
-fn shade(estimates: Vec<Estimate>, biomes: Vec<u8>, shading: &Shading, weight: f32) -> Tile {
+/// Shades estimates with this variance of their error into sRGB colors.
+fn shade(estimates: Vec<Estimate>, biomes: Vec<u8>, shading: &Shading, error: f32) -> Tile {
+    let weight = shading.weight(error);
     let mut rgb = vec![0u8; estimates.len() * 3];
     for (pixel, &e) in rgb.as_chunks_mut::<3>().0.iter_mut().zip(&estimates) {
         let avg = unpack(e);
@@ -384,7 +409,12 @@ fn shade(estimates: Vec<Estimate>, biomes: Vec<u8>, shading: &Shading, weight: f
             pixel,
         );
     }
-    Tile { rgb, estimates, biomes }
+    Tile {
+        rgb,
+        estimates,
+        biomes,
+        error,
+    }
 }
 
 /// Renders one tile.
@@ -400,7 +430,12 @@ pub fn render_tile(
     let size = key.tile_size_px;
     if shading.is_flat() {
         // no samples at all, `render_numbers` gets the biomes if they are ever needed
-        return Some(shade(vec![pack(shading.mean); size * size], Vec::new(), shading, 0.0));
+        return Some(shade(
+            vec![pack(shading.mean); size * size],
+            Vec::new(),
+            shading,
+            shading.noise,
+        ));
     }
     let stride = key.stride();
     let (origin_x, origin_z) = key.origin();
@@ -423,7 +458,7 @@ pub fn render_tile(
             biomes.push(number);
         }
     }
-    Some(shade(estimates, biomes, shading, shading.weight(shading.noise)))
+    Some(shade(estimates, biomes, shading, shading.noise))
 }
 
 /// Only the biome numbers of a tile, for tiles that were made without them, one sample per pixel.
@@ -458,10 +493,17 @@ fn pixel_hash(tile_x: i32, tile_z: i32, x: usize, z: usize) -> usize {
 
 /// Builds a tile from the estimates of its 4 children one level finer by averaging 2x2 pixels.
 /// That is exactly what a mipmap level is, and costs no biome sampling at all. The averages have
-/// 4x the samples of a directly rendered tile, so less noise, and are shaded accordingly: they end
-/// up varying just as much as the true averages, like rendered tiles.
-/// `children` are ordered top left, top right, bottom left, bottom right.
-pub fn downsample(children: [&[Estimate]; 4], child_biomes: [&[u8]; 4], key: TileKey, shading: &Shading) -> Tile {
+/// 4x the samples of their children, so a quarter of their error, however many levels they were
+/// built through, and are shaded accordingly: they end up varying just as much as the true
+/// averages, like rendered tiles. `children` are ordered top left, top right, bottom left, bottom
+/// right, and `child_errors` are their `Tile::error`.
+pub fn downsample(
+    children: [&[Estimate]; 4],
+    child_biomes: [&[u8]; 4],
+    child_errors: [f32; 4],
+    key: TileKey,
+    shading: &Shading,
+) -> Tile {
     let size = key.tile_size_px;
     let half = size / 2;
     let mut estimates = Vec::with_capacity(size * size);
@@ -487,7 +529,7 @@ pub fn downsample(children: [&[Estimate]; 4], child_biomes: [&[u8]; 4], key: Til
             }
         }
     }
-    shade(estimates, biomes, shading, shading.weight(shading.noise / 4.0))
+    shade(estimates, biomes, shading, child_errors.iter().sum::<f32>() / 16.0)
 }
 
 #[cfg(test)]
@@ -546,6 +588,7 @@ mod tests {
         let built = downsample(
             [&estimates, &estimates, &estimates, &estimates],
             [&numbers, &[], &numbers, &numbers],
+            [0.0; 4],
             TileKey { level: 13, ..key },
             &exact,
         );
@@ -579,6 +622,7 @@ mod tests {
         let tile = downsample(
             [&estimates, &estimates, &estimates, &estimates],
             [&mixed, &mixed, &mixed, &mixed],
+            [0.0; 4],
             key,
             &exact,
         );
@@ -631,6 +675,7 @@ mod tests {
             let down = downsample(
                 std::array::from_fn(|i| children[i].as_slice()),
                 std::array::from_fn(|_| no_biomes.as_slice()),
+                [0.0; 4],
                 parent,
                 &exact,
             )
@@ -646,6 +691,111 @@ mod tests {
                 differing * 100 <= pixels,
                 "level {level}: {differing} of {pixels} pixels differ"
             );
+        }
+    }
+
+    /// The contrast of each channel of a tile.
+    fn contrast(tile: &Tile) -> f64 {
+        let pixels = tile.rgb.as_chunks::<3>().0;
+        (0..3)
+            .map(|ch| {
+                let mean = pixels.iter().map(|p| p[ch] as f64).sum::<f64>() / pixels.len() as f64;
+                pixels.iter().map(|p| (p[ch] as f64 - mean).powi(2)).sum::<f64>() / pixels.len() as f64
+            })
+            .sum::<f64>()
+            .sqrt()
+    }
+
+    /// A tile as the map gets it after looking at `depth` levels further in. `shadings` are per level.
+    fn built(source: &BiomeSourceKind, key: TileKey, depth: u32, shadings: &[Shading]) -> Tile {
+        let shading = &shadings[key.level as usize];
+        if depth == 0 {
+            return render_tile(source, key, shading, &|| true).unwrap();
+        }
+        let children =
+            [(0, 0), (1, 0), (0, 1), (1, 1)].map(|(dx, dz)| built(source, key.child(dx, dz), depth - 1, shadings));
+        downsample(
+            children.each_ref().map(|c| c.estimates.as_slice()),
+            children.each_ref().map(|c| c.biomes.as_slice()),
+            children.each_ref().map(|c| c.error),
+            key,
+            shading,
+        )
+    }
+
+    /// Tiles next to each other have to look alike, whatever they were made from.
+    #[test]
+    fn built_tiles_have_the_contrast_of_rendered_ones() {
+        for (dimension, height) in [
+            (crate::dimension::Dimension::Overworld, 256),
+            (crate::dimension::Dimension::End, 64),
+        ] {
+            let source = dimension.biome_source(12345);
+            let mean = world_mean(&source, height);
+            let shadings: Vec<Shading> = (0..=MAX_LEVEL)
+                .map(|level| {
+                    let key = TileKey {
+                        layer: Layer::Biome,
+                        level,
+                        sample_height: height,
+                        tile_size_px: 64,
+                        samples: 1,
+                        x: 0,
+                        z: 0,
+                    };
+                    calibrate(&source, key, mean)
+                })
+                .collect();
+            for level in [6, 8, 9, 10] {
+                let (mut rendered, mut deep) = (0.0, 0.0);
+                for (x, z) in [(3, -2), (-5, 4), (7, 7), (-2, -9)] {
+                    let key = TileKey {
+                        layer: Layer::Biome,
+                        level,
+                        sample_height: height,
+                        tile_size_px: 64,
+                        samples: 1,
+                        x,
+                        z,
+                    };
+                    rendered += contrast(&built(&source, key, 0, &shadings));
+                    deep += contrast(&built(&source, key, 3, &shadings));
+                }
+                assert!(
+                    (deep - rendered).abs() <= rendered * 0.15 + 4.0,
+                    "{dimension:?} level {level}: built {deep} rendered {rendered}"
+                );
+            }
+        }
+    }
+
+    /// Bigger pixels can't vary more, what looks like it is sampling on a regular grid.
+    #[test]
+    fn once_a_level_is_flat_the_coarser_ones_are_too() {
+        for (dimension, height) in [
+            (crate::dimension::Dimension::Overworld, 256),
+            (crate::dimension::Dimension::End, 64),
+        ] {
+            for seed in [12345, 1, -987654321, 7, 424242] {
+                let source = dimension.biome_source(seed);
+                let flat: Vec<bool> = (0..=MAX_LEVEL)
+                    .map(|level| {
+                        let key = TileKey {
+                            layer: Layer::Biome,
+                            level,
+                            sample_height: height,
+                            tile_size_px: 128,
+                            samples: 1,
+                            x: 0,
+                            z: 0,
+                        };
+                        calibrate(&source, key, [0.0; 3]).is_flat()
+                    })
+                    .collect();
+                let first = flat.iter().position(|flat| *flat).unwrap_or(flat.len());
+                assert!(flat[first..].iter().all(|flat| *flat), "{dimension:?} {seed}: {flat:?}");
+                assert!(first >= 5, "{dimension:?} {seed}: {flat:?}");
+            }
         }
     }
 

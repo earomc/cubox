@@ -30,6 +30,7 @@ struct Entry {
     /// used to build the parent tile
     estimates: Estimates,
     biomes: Biomes,
+    error: f32,
     /// the biome numbers on the GPU, for highlighting
     mask: Option<Rc<TileTexture>>,
     last_used_frame: u64,
@@ -155,8 +156,8 @@ impl TileCache {
             if allow_sampling {
                 self.queue(key, Task::Overlay);
             }
-        } else if let Some((children, biomes)) = self.finished_children(&key) {
-            self.queue(key, Task::Downsample(children, biomes));
+        } else if let Some(task) = self.downsample_task(&key) {
+            self.queue(key, task);
         } else if self.buildable(&key, MAX_BUILD_DEPTH) {
             for child in children(&key) {
                 self.plan(child, rank, false, ranks);
@@ -207,15 +208,17 @@ impl TileCache {
         self.unknown_mask.clone()
     }
 
-    fn finished_children(&self, key: &TileKey) -> Option<([Estimates; 4], [Biomes; 4])> {
+    /// The task of building a tile from its children, if they are all there.
+    fn downsample_task(&self, key: &TileKey) -> Option<Task> {
         if key.level == 0 {
             return None;
         }
         let [a, b, c, d] = children(key).map(|child| self.entries.get(&child));
         let [a, b, c, d] = [a?, b?, c?, d?];
-        Some((
+        Some(Task::Downsample(
             [a, b, c, d].map(|e| e.estimates.clone()),
             [a, b, c, d].map(|e| e.biomes.clone()),
+            [a, b, c, d].map(|e| e.error),
         ))
     }
 
@@ -258,6 +261,7 @@ impl TileCache {
                 .then(|| Rc::new(renderer.create_mask_tile(device, queue, &tile.biomes, TILE_SIZE as u32)));
             let estimates = Arc::new(tile.estimates);
             let biomes = Arc::new(tile.biomes);
+            let error = tile.error;
             self.entries.insert(
                 done.key,
                 Entry {
@@ -265,6 +269,7 @@ impl TileCache {
                     arrived: now,
                     estimates,
                     biomes,
+                    error,
                     mask,
                     last_used_frame: self.frame,
                 },
