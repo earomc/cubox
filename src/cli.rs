@@ -4,7 +4,7 @@ use clap::{Arg, ArgAction, Command, crate_description, crate_name, crate_version
 use cubox::{
     seed::parse_seed,
     seedfind::spec::{MAX_BLOCKS, position},
-    tile_renderer::MAX_SCALE,
+    tile_renderer::MAX_LEVEL,
 };
 
 /// The longest side of `img`, in pixels. Its 3 bytes per pixel come to about 3.2 GiB, and the tiles need that again.
@@ -70,10 +70,10 @@ pub(crate) fn build_cmd() -> Command {
                     .value_parser(value_parser!(i32))
                     .default_value("256")
                 )
-                .arg(Arg::new("scale")
-                    .long("scale")
-                    .help("Scale in powers of two. 0 means each pixel represents one quart (4x4 blocks), 1 -> 8x8 blocks per pixel, 2 -> 16x16 blocks per pixel etc.")
-                    .value_parser(value_parser!(u8).range(0..=MAX_SCALE as i64))
+                .arg(Arg::new("level")
+                    .long("level")
+                    .help("Level of the map, as in the viewer, in powers of two. 0 means each pixel represents one quart (4x4 blocks), 1 -> 8x8 blocks per pixel, 2 -> 16x16 blocks per pixel etc.")
+                    .value_parser(value_parser!(u8).range(0..=MAX_LEVEL as i64))
                     .default_value("0")
                 )
                 .arg(Arg::new("samples")

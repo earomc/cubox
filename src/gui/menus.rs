@@ -578,15 +578,15 @@ impl Ui {
         Some(height)
     }
 
-    /// `structure` of a script.
+    /// `marker` of a script.
     #[cfg(not(target_arch = "wasm32"))]
-    pub(super) fn script_structure(&mut self, which: &str) {
+    pub(super) fn script_marker(&mut self, which: &str) {
         match which {
             "all" => self.shown_kinds.fill(true),
             "none" => self.shown_kinds.fill(false),
             _ => match MARKER_KINDS.iter().position(|kind| kind.id == which) {
                 Some(kind) => self.shown_kinds[kind] = true,
-                None => log::error!("no structure {which}"),
+                None => log::error!("no marker {which}"),
             },
         }
     }

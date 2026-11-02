@@ -15,7 +15,7 @@ use crate::{
         tiles::TILE_SIZE,
         world::{Finished, Queue, Task, World, WorldParams},
     },
-    tile_renderer::{Layer, MAX_SCALE, TileKey},
+    tile_renderer::{Layer, MAX_LEVEL, TileKey},
 };
 
 pub struct Executor {
@@ -98,7 +98,7 @@ fn new_world(params: WorldParams) -> Arc<World> {
     let weak = Arc::downgrade(&world);
     // a plain thread, not a rayon job: workers wait for these results and must not be needed for them
     std::thread::spawn(move || {
-        for scale in 0..=MAX_SCALE {
+        for level in 0..=MAX_LEVEL {
             // the setting and the one sample cover tiles, once if they are the same
             for samples in if params.samples == 1 {
                 vec![1]
@@ -109,7 +109,7 @@ fn new_world(params: WorldParams) -> Arc<World> {
                 let Some(world) = weak.upgrade() else { return };
                 world.shading(TileKey {
                     layer: Layer::Biome,
-                    scale,
+                    level,
                     sample_height: params.sample_height,
                     tile_size_px: TILE_SIZE,
                     samples,

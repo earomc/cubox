@@ -17,7 +17,7 @@ use crate::{
 const WORLD_BORDER_QUARTS: f64 = tile_renderer::WORLD_BORDER_QUARTS as f64;
 const MIN_ZOOM: f64 = -4.0; // 16 screen points per quart
 const MAX_ZOOM: f64 = 15.0;
-const MAX_LEVEL: i32 = tile_renderer::MAX_SCALE as i32;
+const MAX_LEVEL: i32 = tile_renderer::MAX_LEVEL as i32;
 /// Seconds the zoom level has to stay unchanged before tiles get sampled.
 const LEVEL_SETTLE_SECONDS: f64 = 0.12;
 /// Cached tiles of other levels stand in for visible tiles that aren't there yet: coarser ones
@@ -164,7 +164,7 @@ impl MapView {
         let tile_quarts = (TILE_SIZE as f64) * (level as f64).exp2();
         let key_at = |level: i32, x: i32, z: i32| TileKey {
             layer: Layer::Biome,
-            scale: level as u8,
+            level: level as u8,
             sample_height: settings.sample_height,
             tile_size_px: TILE_SIZE,
             samples: settings.samples,
@@ -448,7 +448,7 @@ fn cached(tiles: &TileCache, key: TileKey) -> Option<TileKey> {
 
 /// The closest cached coarser tile covering `key`, and how many levels up it is.
 fn ancestor(tiles: &TileCache, key: &TileKey) -> Option<(TileKey, i32)> {
-    (1..=MAX_STAND_IN_UP.min(MAX_LEVEL - key.scale as i32))
+    (1..=MAX_STAND_IN_UP.min(MAX_LEVEL - key.level as i32))
         .find_map(|up| cached(tiles, key.ancestor(up)).map(|parent| (parent, up)))
 }
 
@@ -456,13 +456,13 @@ fn ancestor(tiles: &TileCache, key: &TileKey) -> Option<(TileKey, i32)> {
 fn has_stand_in(tiles: &TileCache, key: &TileKey) -> bool {
     tiles.is_finished(&key.cover())
         || ancestor(tiles, key).is_some()
-        || (1..=MAX_STAND_IN_DOWN.min(key.scale as i32)).any(|down| {
+        || (1..=MAX_STAND_IN_DOWN.min(key.level as i32)).any(|down| {
             let n = 1 << down;
             (0..n * n).any(|i| {
                 cached(
                     tiles,
                     TileKey {
-                        scale: key.scale - down as u8,
+                        level: key.level - down as u8,
                         x: key.x * n + i % n,
                         z: key.z * n + i / n,
                         ..*key
@@ -499,7 +499,7 @@ fn cached_mask(tiles: &mut TileCache, key: TileKey) -> Option<Rc<TileTexture>> {
 }
 
 fn has_finer_mask(tiles: &mut TileCache, key: TileKey, depth: i32) -> bool {
-    key.scale > 0
+    key.level > 0
         && depth > 0
         && [(0, 0), (1, 0), (0, 1), (1, 1)].into_iter().any(|(dx, dz)| {
             let child = key.child(dx, dz);
@@ -526,7 +526,7 @@ fn draw_mask_stand_ins(out: &mut Quads, tiles: &mut TileCache, key: TileKey, scr
             }
         }
     } else {
-        let parent = (1..=MAX_STAND_IN_UP.min(MAX_LEVEL - key.scale as i32))
+        let parent = (1..=MAX_STAND_IN_UP.min(MAX_LEVEL - key.level as i32))
             .find_map(|up| cached_mask(tiles, key.ancestor(up)).map(|tex| (tex, up)));
         if let Some((tex, up)) = parent {
             out.push(tex, screen, part_of_ancestor(&key, up), alpha);
@@ -538,7 +538,7 @@ fn draw_mask_stand_ins(out: &mut Quads, tiles: &mut TileCache, key: TileKey, scr
 
 /// Draws the cached finer tiles inside `key`, up to `depth` levels down.
 fn draw_descendants(out: &mut Quads, tiles: &mut TileCache, now: f64, key: TileKey, screen: Rect, depth: i32) {
-    if key.scale == 0 || depth == 0 {
+    if key.level == 0 || depth == 0 {
         return;
     }
     let half = screen.size() / 2.0;

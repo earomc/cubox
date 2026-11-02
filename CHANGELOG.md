@@ -12,11 +12,15 @@ The release workflow publishes the section of a version as its release notes.
 
 - Finding locations in one seed has one way of saying where: the area is a setting next to the checkbox, `--within`
   and `--of` with `cubox find`, and conditions have no `of`. **`area` lines and `of here` no longer work**, write
-  `structure village count>=1 within 200` and `cluster swamp_hut count>=2 radius 128`.
+  `poi village count>=1 within 200` and `cluster swamp_hut count>=2 radius 128`.
 - `of spawn` means the platform at 100,0 for end conditions, and is refused for nether ones, which have no spawn.
 - The Markers menu has a filter and is sorted by name, and its size slider moved there from Extras.
 - Samples are per axis in the Extras menu too, like everywhere else.
 - Presets are for finding seeds, so they aren't offered while finding locations.
+
+- The search keyword `structure` is now `poi`, as it also finds geodes, ore veins and gateways:
+  `poi village count>=1 within 500 of spawn`. **Saved searches need this change.**
+- `cubox img --scale` is now `--level`, what the viewer calls it. In scripts `structure` is now `marker`.
 
 ### Fixed
 

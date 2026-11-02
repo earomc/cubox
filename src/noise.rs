@@ -322,7 +322,7 @@ mod tests {
         let field = NoiseField::new(Dimension::Overworld, 7).unwrap();
         let key = TileKey {
             layer: Layer::Noise(NoiseParameter::Erosion),
-            scale: 3,
+            level: 3,
             sample_height: 256,
             tile_size_px: 128,
             samples: 1,

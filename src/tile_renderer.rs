@@ -12,8 +12,8 @@ use crate::biome_colors::{UNKNOWN_BIOME, biome_color, biome_number};
 /// The world border is at ±29,999,984 blocks.
 pub const WORLD_BORDER_QUARTS: i32 = 29_999_984 / 4;
 
-/// The coarsest level of the map: a pixel covers `2^MAX_SCALE` quarts per side.
-pub const MAX_SCALE: u8 = 16;
+/// The coarsest level of the map: a pixel covers `2^MAX_LEVEL` quarts per side.
+pub const MAX_LEVEL: u8 = 16;
 
 /// A color in Oklab. Colors are averaged in Oklab because it is perceptual: mixed areas keep their
 /// perceived lightness and color. Averaging linear light makes mixes pale, averaging sRGB bytes dark.
@@ -64,7 +64,7 @@ impl Detail {
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct TileKey {
     pub layer: Layer,
-    pub scale: u8,           // scale of sampling
+    pub level: u8,           // level of sampling
     pub sample_height: i32,  // the y coordinate in blocks
     pub tile_size_px: usize, // size of the tile in pixels
     pub samples: u8,         // samples per axis per pixel, averaged together (supersampling)
@@ -76,7 +76,7 @@ pub struct TileKey {
 
 impl TileKey {
     pub fn stride(&self) -> i32 {
-        1 << self.scale
+        1 << self.level
     }
 
     /// Samples per axis that are actually taken. A pixel never covers less than one quart,
@@ -88,13 +88,13 @@ impl TileKey {
     /// World origin of the tile in quarts.
     pub fn origin(&self) -> (i32, i32) {
         let size = self.tile_size_px as i32;
-        ((self.x * size) << self.scale, (self.z * size) << self.scale)
+        ((self.x * size) << self.level, (self.z * size) << self.level)
     }
 
     /// The tile `up` levels coarser that covers this one.
     pub fn ancestor(self, up: i32) -> Self {
         Self {
-            scale: self.scale + up as u8,
+            level: self.level + up as u8,
             x: self.x >> up,
             z: self.z >> up,
             ..self
@@ -104,7 +104,7 @@ impl TileKey {
     /// One of the 4 tiles one level finer inside this one, `dx` and `dz` are 0 or 1.
     pub fn child(self, dx: i32, dz: i32) -> Self {
         Self {
-            scale: self.scale - 1,
+            level: self.level - 1,
             x: self.x * 2 + dx,
             z: self.z * 2 + dz,
             ..self
@@ -342,7 +342,7 @@ pub fn calibrate(source: &BiomeSourceKind, key: TileKey, mean: Lab) -> Shading {
     let range = (2 * WORLD_BORDER_QUARTS - stride) as u64;
     for i in 0..CALIBRATION_PIXELS {
         // deterministic positions, so a level always gets the same shading
-        let h = splitmix(i ^ ((key.scale as u64) << 32));
+        let h = splitmix(i ^ ((key.level as u64) << 32));
         let x = -WORLD_BORDER_QUARTS + (h % range) as i32;
         let z = -WORLD_BORDER_QUARTS + ((h >> 32) % range) as i32;
         let estimate = average(&mut sampler, x, qy, z, &samples);
@@ -456,7 +456,7 @@ fn pixel_hash(tile_x: i32, tile_z: i32, x: usize, z: usize) -> usize {
     (mixed >> 62) as usize
 }
 
-/// Builds a tile from the estimates of its 4 children one scale finer by averaging 2x2 pixels.
+/// Builds a tile from the estimates of its 4 children one level finer by averaging 2x2 pixels.
 /// That is exactly what a mipmap level is, and costs no biome sampling at all. The averages have
 /// 4x the samples of a directly rendered tile, so less noise, and are shaded accordingly: they end
 /// up varying just as much as the true averages, like rendered tiles.
@@ -501,7 +501,7 @@ mod tests {
         let source = BiomeSourceKind::overworld(12345);
         let key = TileKey {
             layer: Layer::Biome,
-            scale: 4,
+            level: 4,
             sample_height: 256,
             tile_size_px: 16,
             samples: 1,
@@ -526,7 +526,7 @@ mod tests {
         let source = BiomeSourceKind::overworld(12345);
         let key = TileKey {
             layer: Layer::Biome,
-            scale: 12,
+            level: 12,
             sample_height: 256,
             tile_size_px: 16,
             samples: 1,
@@ -546,7 +546,7 @@ mod tests {
         let built = downsample(
             [&estimates, &estimates, &estimates, &estimates],
             [&numbers, &[], &numbers, &numbers],
-            TileKey { scale: 13, ..key },
+            TileKey { level: 13, ..key },
             &exact,
         );
         assert!(built.biomes.is_empty());
@@ -561,7 +561,7 @@ mod tests {
         let estimates = vec![[0u16; 3]; size * size];
         let key = TileKey {
             layer: Layer::Biome,
-            scale: 5,
+            level: 5,
             sample_height: 64,
             tile_size_px: size,
             samples: 1,
@@ -604,10 +604,10 @@ mod tests {
     fn downsample_matches_direct_render() {
         let source = BiomeSourceKind::overworld(12345);
         let exact = Shading::exact([0.5, 0.0, -0.02]);
-        for (scale, size) in [(3, 32), (6, 32), (9, 16)] {
+        for (level, size) in [(3, 32), (6, 32), (9, 16)] {
             let parent = TileKey {
                 layer: Layer::Biome,
-                scale,
+                level,
                 sample_height: 256,
                 tile_size_px: size,
                 samples: 4,
@@ -618,7 +618,7 @@ mod tests {
                 .iter()
                 .map(|&(dx, dz)| {
                     let child = TileKey {
-                        scale: scale - 1,
+                        level: level - 1,
                         samples: 2,
                         x: parent.x * 2 + dx,
                         z: parent.z * 2 + dz,
@@ -644,7 +644,7 @@ mod tests {
             let pixels = parent.tile_size_px * parent.tile_size_px;
             assert!(
                 differing * 100 <= pixels,
-                "scale {scale}: {differing} of {pixels} pixels differ"
+                "level {level}: {differing} of {pixels} pixels differ"
             );
         }
     }
@@ -653,9 +653,9 @@ mod tests {
     #[test]
     fn calibration_fades_out_with_distance() {
         let source = BiomeSourceKind::overworld(12345);
-        let key = |scale| TileKey {
+        let key = |level| TileKey {
             layer: Layer::Biome,
-            scale,
+            level,
             sample_height: 256,
             tile_size_px: 128,
             samples: 2,

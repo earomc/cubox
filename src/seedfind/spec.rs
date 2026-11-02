@@ -1,12 +1,12 @@
 //! What a search looks for, as conditions and as the text they are saved as, one condition per line:
 //!
 //! ```text
-//! structure village count>=2 within 500 of spawn
+//! poi village count>=2 within 500 of spawn
 //! cluster swamp_hut count>=2 radius 128 within 3000 of 0,0
 //! biome mushroom_fields area>=4000000 within 5000 of spawn
 //! biome ocean absent within 300 of spawn
 //! noise continentalness -1.2..-1.05 coverage>=5% within 1000 of spawn
-//! not structure stronghold count>=1 within 2000 of spawn
+//! not poi stronghold count>=1 within 2000 of spawn
 //! any
 //!   biome desert present within 500 of spawn
 //!   biome badlands present within 500 of spawn
@@ -17,7 +17,7 @@
 //! being searched, and clusters only have their radius:
 //!
 //! ```text
-//! structure village count>=1 within 200
+//! poi village count>=1 within 200
 //! cluster swamp_hut count>=2 radius 128
 //! ```
 
@@ -48,7 +48,8 @@ pub enum BiomeTest {
 
 #[derive(Clone, PartialEq, Debug)]
 pub enum Condition {
-    Structure {
+    /// `count` of a kind in the area
+    Poi {
         kind: usize,
         count: u32,
         radius: i32,
@@ -92,7 +93,7 @@ pub fn cluster_reach(radius: i32) -> i32 {
 /// some place is then within its radius of a spot.
 pub fn spot_spacing(condition: &Condition) -> Option<i32> {
     match condition {
-        Condition::Structure { radius, .. } | Condition::Biome { radius, .. } | Condition::Noise { radius, .. } => {
+        Condition::Poi { radius, .. } | Condition::Biome { radius, .. } | Condition::Noise { radius, .. } => {
             Some(*radius)
         }
         Condition::Cluster { radius, .. } => Some(radius * 2),
@@ -104,7 +105,7 @@ pub fn spot_spacing(condition: &Condition) -> Option<i32> {
 /// The dimension a condition's place is in, for those about one.
 fn dimension_of(condition: &Condition) -> Option<Dimension> {
     match condition {
-        Condition::Structure { kind, .. } | Condition::Cluster { kind, .. } => Some(MARKER_KINDS[*kind].dimension),
+        Condition::Poi { kind, .. } | Condition::Cluster { kind, .. } => Some(MARKER_KINDS[*kind].dimension),
         Condition::Biome { biome, .. } => Some(biome_dimension(biome)),
         Condition::Noise { .. } => Some(Dimension::Overworld),
         Condition::Not(_) | Condition::Any(_) => None,
@@ -113,7 +114,7 @@ fn dimension_of(condition: &Condition) -> Option<Dimension> {
 
 fn anchor_of(condition: &Condition) -> Option<Anchor> {
     match condition {
-        Condition::Structure { anchor, .. }
+        Condition::Poi { anchor, .. }
         | Condition::Cluster { anchor, .. }
         | Condition::Biome { anchor, .. }
         | Condition::Noise { anchor, .. } => Some(*anchor),
@@ -170,9 +171,11 @@ pub fn searchable_biomes() -> impl Iterator<Item = &'static str> {
 
 fn kind_named(id: &str) -> Result<usize, String> {
     match MARKER_KINDS.iter().position(|kind| kind.id == id) {
-        Some(kind) if !crate::structures::is_searchable(kind) => Err(format!("{id} is not a structure")),
+        Some(kind) if !crate::structures::is_searchable(kind) => {
+            Err(format!("{id} can't be searched for, it is what `of spawn` means"))
+        }
         Some(kind) => Ok(kind),
-        None => Err(format!("no structure called {id}")),
+        None => Err(format!("no poi called {id}")),
     }
 }
 
@@ -239,9 +242,9 @@ impl Condition {
     fn parse_line(words: &[&str]) -> Result<Self, String> {
         match words {
             ["not", rest @ ..] => Ok(Condition::Not(Box::new(Self::parse_line(rest)?))),
-            ["structure", kind, count, rest @ ..] => {
+            ["poi", kind, count, rest @ ..] => {
                 let (radius, anchor) = area(rest)?;
-                Ok(Condition::Structure {
+                Ok(Condition::Poi {
                     kind: kind_named(kind)?,
                     count: self::count(count)?,
                     radius,
@@ -379,14 +382,14 @@ impl fmt::Display for Within {
 impl fmt::Display for Condition {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            Condition::Structure {
+            Condition::Poi {
                 kind,
                 count,
                 radius,
                 anchor,
             } => write!(
                 f,
-                "structure {} count>={count} {}",
+                "poi {} count>={count} {}",
                 MARKER_KINDS[*kind].id,
                 Within(*radius, *anchor)
             ),
@@ -461,7 +464,7 @@ pub const PRESETS: &[(&str, &str)] = &[
     ),
     (
         "Speedrun",
-        "structure village count>=1 within 200 of spawn\nstructure ruined_portal count>=1 within 200 of spawn\nstructure stronghold count>=1 within 2000 of spawn\n",
+        "poi village count>=1 within 200 of spawn\npoi ruined_portal count>=1 within 200 of spawn\npoi stronghold count>=1 within 2000 of spawn\n",
     ),
     (
         "Mushroom island",
@@ -476,20 +479,20 @@ mod tests {
     #[test]
     fn text_reads_back_the_same() {
         for text in [
-            "structure village count>=2 within 500 of spawn
+            "poi village count>=2 within 500 of spawn
 cluster swamp_hut count>=2 radius 128 within 3000 of 0,-5
 biome mushroom_fields area>=4000000 within 5000 of spawn
 biome ocean absent within 300 of spawn
 biome jungle coverage>=20% within 1000 of 7,7
 noise continentalness -1.2..-1.05 coverage>=5% within 1000 of spawn
 noise erosion 0..0.5 within 10 of 1,2
-not structure stronghold count>=1 within 2000 of spawn
+not poi stronghold count>=1 within 2000 of spawn
 any
   biome desert present within 500 of spawn
   not biome badlands present within 500 of spawn
 end
 ",
-            "structure village count>=1 within 200
+            "poi village count>=1 within 200
 cluster swamp_hut count>=2 radius 128
 not biome desert present within 300
 ",
@@ -526,27 +529,27 @@ not biome desert present within 300
     fn the_nether_has_no_spawn_but_the_end_does() {
         let check = |text: &str| validate(&parse(text).unwrap(), false);
         assert!(
-            check("structure fortress count>=1 within 500 of spawn")
+            check("poi fortress count>=1 within 500 of spawn")
                 .unwrap_err()
                 .contains("nether")
         );
         assert!(check("biome crimson_forest present within 500 of spawn").is_err());
-        assert!(check("not structure bastion count>=1 within 500 of spawn").is_err());
-        assert!(check("structure fortress count>=1 within 500 of 8,8").is_ok());
-        assert!(check("structure end_city count>=1 within 500 of spawn").is_ok());
+        assert!(check("not poi bastion count>=1 within 500 of spawn").is_err());
+        assert!(check("poi fortress count>=1 within 500 of 8,8").is_ok());
+        assert!(check("poi end_city count>=1 within 500 of spawn").is_ok());
         assert!(check("biome the_end present within 500 of spawn").is_ok());
     }
 
     #[test]
     fn errors_say_where() {
         for (text, wanted) in [
-            ("structure nothing count>=1 within 5 of spawn", "no structure"),
-            ("structure spawn count>=1 within 5 of spawn", "not a structure"),
+            ("poi nothing count>=1 within 5 of spawn", "no poi"),
+            ("poi spawn count>=1 within 5 of spawn", "can't be searched"),
             ("\nbiome nothing present within 5 of spawn", "line 2: no biome"),
-            ("structure village count>=x within 5 of spawn", "count>="),
-            ("structure village count>=1 within 0 of spawn", "not a distance"),
-            ("structure village count>=0 within 5 of spawn", "count>="),
-            ("structure village count>=3% within 5 of spawn", "count>="),
+            ("poi village count>=x within 5 of spawn", "count>="),
+            ("poi village count>=1 within 0 of spawn", "not a distance"),
+            ("poi village count>=0 within 5 of spawn", "count>="),
+            ("poi village count>=3% within 5 of spawn", "count>="),
             ("cluster swamp_hut count>=2 radius -5 within 5 of 0,0", "not a distance"),
             ("cluster swamp_hut count>=2 radius 2147483647", "not a distance"),
             ("cluster swamp_hut count>=2 radius 9 within 5", "only has its radius"),
@@ -558,7 +561,7 @@ not biome desert present within 300
             ("biome lush_caves present within 5 of 0,0", "can't be searched"),
             ("biome the_void present within 5 of 0,0", "can't be searched"),
             ("area within 5 of 0,0", "don't know"),
-            ("structure village count>=1 near spawn", "within"),
+            ("poi village count>=1 near spawn", "within"),
             ("hello", "don't know"),
             ("any\nbiome desert present within 5 of spawn", "without `end`"),
             ("end", "without `any`"),

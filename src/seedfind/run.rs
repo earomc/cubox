@@ -478,7 +478,7 @@ mod tests {
 
     #[test]
     fn an_area_is_gone_through_once_without_repeats() {
-        let (found, status) = run_to_end("structure village count>=1 within 400", 12345, 4000);
+        let (found, status) = run_to_end("poi village count>=1 within 400", 12345, 4000);
         assert!(status.starts_with("Done"), "{status}");
         assert!(found.len() > 1, "{found:?}");
         let firsts: Vec<_> = found.iter().map(|f| (f.hits[0].x, f.hits[0].z)).collect();
@@ -494,7 +494,7 @@ mod tests {
     #[test]
     fn a_structure_next_to_a_biome_is_one_location() {
         let (found, _) = run_to_end(
-            "structure village count>=1 within 300\nbiome plains present within 600",
+            "poi village count>=1 within 300\nbiome plains present within 600",
             12345,
             3000,
         );

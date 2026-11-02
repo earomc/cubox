@@ -150,7 +150,7 @@ fn spawn_worker(inner: &Rc<RefCell<Inner>>, index: usize) -> Result<Worker, JsVa
     Ok(worker)
 }
 
-/// `[seed, dimension, sample height, samples setting, scale, x, z, tile size, samples, children,
+/// `[seed, dimension, sample height, samples setting, level, x, z, tile size, samples, children,
 /// relief detail or 0, relief of the sea floor, only biome numbers]`.
 /// The seed is a string, JavaScript numbers can't hold all 64 bits. `children` are the estimates, then the biome numbers,
 /// of the 4 children for downsampling, or null to sample the tile.
@@ -178,7 +178,7 @@ fn encode_request(params: &WorldParams, key: TileKey, task: &Task) -> (Array, Ar
         params.dimension.name().into(),
         params.sample_height.into(),
         params.samples.into(),
-        key.scale.into(),
+        key.level.into(),
         key.x.into(),
         key.z.into(),
         (key.tile_size_px as u32).into(),
@@ -253,7 +253,7 @@ pub fn worker_run(request: &Array) -> Result<Array, JsValue> {
             },
             (None, None) => Layer::Biome,
         },
-        scale: number(4)? as u8,
+        level: number(4)? as u8,
         x: number(5)? as i32,
         z: number(6)? as i32,
         tile_size_px: number(7)? as usize,

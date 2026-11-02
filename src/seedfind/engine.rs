@@ -344,7 +344,7 @@ fn check_biome(
 impl SeedWorld {
     fn check(&self, condition: &Condition, here: [i32; 2], cells: &mut Cells) -> Option<Passed> {
         match condition {
-            Condition::Structure {
+            Condition::Poi {
                 kind,
                 count,
                 radius,
@@ -514,7 +514,7 @@ pub struct Plan {
 fn cost(condition: &Condition) -> u32 {
     let anchored = |anchor: &Anchor| if *anchor == Anchor::Spawn { 3 } else { 0 };
     match condition {
-        Condition::Structure { kind, anchor, .. } | Condition::Cluster { kind, anchor, .. } => {
+        Condition::Poi { kind, anchor, .. } | Condition::Cluster { kind, anchor, .. } => {
             if spread(*kind) == Some(Spread::Rings) {
                 100
             } else {
@@ -535,7 +535,7 @@ impl Plan {
             .iter()
             .enumerate()
             .filter(|(_, (_, condition))| match condition {
-                Condition::Structure { kind, anchor, .. } | Condition::Cluster { kind, anchor, .. } => {
+                Condition::Poi { kind, anchor, .. } | Condition::Cluster { kind, anchor, .. } => {
                     matches!(anchor, Anchor::At(..))
                         && spread(*kind) != Some(Spread::Rings)
                         && depends_on_lower_bits(*kind)
@@ -558,7 +558,7 @@ impl Plan {
     /// False if no seed with the same lower 48 bits can pass. Needs no world, takes nanoseconds.
     pub fn lower_bits_pass(&self, seed: i64, cells: &mut Cells) -> bool {
         self.positional.iter().all(|&i| match &self.conditions[i].1 {
-            Condition::Structure {
+            Condition::Poi {
                 kind,
                 count,
                 radius,
@@ -666,10 +666,10 @@ mod tests {
     fn plan_finds_the_same_as_checking_everything() {
         with_stack(|| {
             let cases = [
-                "structure swamp_hut count>=1 within 1500 of 0,0\nbiome plains present within 800 of 0,0",
+                "poi swamp_hut count>=1 within 1500 of 0,0\nbiome plains present within 800 of 0,0",
                 "cluster swamp_hut count>=2 radius 200 within 3000 of 100,-100",
-                "structure village count>=2 within 1500 of 0,0\nnot biome mushroom_fields present within 500 of 0,0",
-                "any\n  structure igloo count>=1 within 2000 of 0,0\n  biome desert present within 300 of 0,0\nend",
+                "poi village count>=2 within 1500 of 0,0\nnot biome mushroom_fields present within 500 of 0,0",
+                "any\n  poi igloo count>=1 within 2000 of 0,0\n  biome desert present within 300 of 0,0\nend",
             ];
             let mut matches = 0;
             for text in cases {
@@ -681,7 +681,7 @@ mod tests {
                     let world = SeedWorld::new(seed);
                     // every condition, no shortcut: `around` asks the finder about all candidates
                     let plain = conditions.iter().all(|condition| match condition {
-                        Condition::Structure {
+                        Condition::Poi {
                             kind,
                             count,
                             radius,

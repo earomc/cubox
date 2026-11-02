@@ -180,7 +180,7 @@ fn convert_condition(condition: &mut Condition, in_seed: bool) {
         };
     };
     match condition {
-        Condition::Structure { kind, anchor, .. } => {
+        Condition::Poi { kind, anchor, .. } => {
             new_anchor(anchor, MARKER_KINDS[*kind].dimension != Dimension::Nether);
         }
         Condition::Cluster { within, anchor, .. } => {
@@ -279,13 +279,13 @@ fn kind_ui(ui: &mut egui::Ui, salt: usize, kind: &mut usize) -> bool {
 fn condition_ui(ui: &mut egui::Ui, salt: usize, condition: &mut Condition) -> bool {
     let mut changed = false;
     match condition {
-        Condition::Structure {
+        Condition::Poi {
             kind,
             count,
             radius,
             anchor,
         } => {
-            ui.label("structure");
+            ui.label("poi");
             changed |= kind_ui(ui, salt, kind);
             ui.label("count>=");
             changed |= number_ui(ui, count, 1..=64, 0.1);
@@ -472,8 +472,8 @@ impl Ui {
                 let far = if here { Anchor::Spot } else { Anchor::At(0, 0) };
                 for (name, condition) in [
                     (
-                        "+ structure",
-                        Condition::Structure {
+                        "+ poi",
+                        Condition::Poi {
                             kind: crate::structures::kind_index("village"),
                             count: 1,
                             radius: 500,

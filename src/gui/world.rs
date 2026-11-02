@@ -106,7 +106,7 @@ pub struct World {
     source: BiomeSourceKind,
     /// average color of the world, computed by the first worker that needs it
     mean: OnceLock<Lab>,
-    /// shading per scale and samples setting, each calibrated by the first worker that needs it
+    /// shading per level and samples setting, each calibrated by the first worker that needs it
     shadings: Mutex<HashMap<(u8, u8), Arc<ShadingCell>>>,
     /// only made when relief tiles are wanted
     terrain: OnceLock<Terrain>,
@@ -137,7 +137,7 @@ impl World {
             .shadings
             .lock()
             .unwrap()
-            .entry((key.scale, key.samples))
+            .entry((key.level, key.samples))
             .or_default()
             .clone();
         *cell.get_or_init(|| calibrate(&self.source, key, self.mean()))

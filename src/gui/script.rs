@@ -7,7 +7,7 @@
 //! seed 12345             # a number or text, like the seed field
 //! samples 2              # samples per pixel and axis
 //! panel off              # hide the settings window (on to show it again)
-//! structure village      # show a kind of structure, or `all`, or `none`
+//! marker village         # show a kind of marker, or `all`, or `none`
 //! relief on              # terrain on the map (off to hide it)
 //! noise erosion 0.5      # show a climate noise too, with this opacity (off hides all)
 //! grid on                # the distance grid (off to hide it)
@@ -53,7 +53,7 @@ pub enum Command {
     Dimension(Dimension),
     Samples(u8),
     Panel(bool),
-    Structure(String),
+    Marker(String),
     Relief(bool),
     Quality(ReliefQuality),
     Exact(bool),
@@ -115,7 +115,7 @@ impl Command {
             ),
             "samples" => Command::Samples(num(0)? as u8),
             "panel" => Command::Panel(args.first() != Some(&"off")),
-            "structure" => Command::Structure(args.first().context("structure: which")?.to_string()),
+            "marker" => Command::Marker(args.first().context("marker: which")?.to_string()),
             "relief" => Command::Relief(args.first() != Some(&"off")),
             "quality" => Command::Quality(
                 ReliefQuality::ALL

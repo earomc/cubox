@@ -101,13 +101,13 @@ Unpack it and run `cubox`. Each release also lists SHA-256 checksums.
 cubox gui 12345 --dimension nether        # open the viewer with a seed and dimension
 cubox gui "my cool world"                 # text seeds work like in Minecraft
 cubox img -4172144997902289642            # negative seeds too
-cubox img 12345 --scale 6 --tiles 8       # render map.png: 8x8 tiles of 128 px, 1 px = 256 blocks
-cubox img 12345 -d end --scale 2 -y 64    # the end, 1 px = 16 blocks
+cubox img 12345 --level 6 --tiles 8       # render map.png: 8x8 tiles of 128 px, 1 px = 256 blocks
+cubox img 12345 -d end --level 2 -y 64    # the end, 1 px = 16 blocks
 cubox img 12345 -y -32                    # below the surface, with cave biomes
 cubox --help                              # everything else
 ```
 
-`--scale` is the level shown as "Level" in the viewer: each pixel covers 2<sup>scale</sup> quarts (4×4 blocks) per side. `--samples` sets the
+`--level` is the "Level" the viewer shows: each pixel covers 2<sup>level</sup> quarts (4×4 blocks) per side. `--samples` sets the
 samples per pixel and axis, and `--exact` shows the raw sampled averages without the calibrated shading.
 
 `cubox gui --script file` drives the viewer from a script and saves screenshots, see

@@ -44,7 +44,7 @@ fn img(matches: &clap::ArgMatches) {
     let seed = *matches.get_one::<i64>("seed").unwrap();
     let tiles_per_side = *matches.get_one::<i32>("tiles").unwrap();
     let tile_size_px = *matches.get_one::<u32>("tile-size").unwrap() as usize;
-    let scale = *matches.get_one::<u8>("scale").unwrap();
+    let level = *matches.get_one::<u8>("level").unwrap();
     let sample_height = *matches.get_one::<i32>("sample-height").unwrap();
     let samples = *matches.get_one::<u8>("samples").unwrap();
     let dimension = Dimension::from_name(matches.get_one::<String>("dimension").unwrap()).unwrap();
@@ -67,7 +67,7 @@ fn img(matches: &clap::ArgMatches) {
         .flat_map(|tz| {
             (0..tiles_per_side).map(move |tx| TileKey {
                 layer: Layer::Biome,
-                scale,
+                level,
                 sample_height,
                 tile_size_px,
                 samples,
@@ -91,11 +91,11 @@ fn img(matches: &clap::ArgMatches) {
         .collect();
     println!("generated {} tiles in {:?}", tiles.len(), start.elapsed());
 
-    let side_quarts = side_px << scale;
+    let side_quarts = side_px << level;
     println!(
         "image: {side_px}x{side_px} px, visible area: {side_quarts}x{side_quarts} quarts ({0}x{0} blocks), 1px = {1}x{1} blocks",
         side_quarts * 4,
-        4u64 << scale
+        4u64 << level
     );
 
     // stitch the tiles together, row by row of pixels

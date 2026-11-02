@@ -531,7 +531,7 @@ impl State {
                     ui.reset_tiles();
                 }
                 Command::Panel(on) => ui.panel = on,
-                Command::Structure(which) => ui.script_structure(&which),
+                Command::Marker(which) => ui.script_marker(&which),
                 Command::Relief(on) => ui.relief = on,
                 Command::Quality(quality) => ui.relief_quality = quality,
                 Command::Exact(on) => ui.relief_exact = on,

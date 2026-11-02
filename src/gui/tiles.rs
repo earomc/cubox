@@ -170,7 +170,7 @@ impl TileCache {
     /// Whether the tile is cached or can be built from cached tiles up to `depth` levels down.
     fn buildable(&self, key: &TileKey, depth: u32) -> bool {
         self.entries.contains_key(key)
-            || (depth > 0 && key.scale > 0 && children(key).iter().all(|child| self.buildable(child, depth - 1)))
+            || (depth > 0 && key.level > 0 && children(key).iter().all(|child| self.buildable(child, depth - 1)))
     }
 
     fn queue(&mut self, key: TileKey, task: Task) {
@@ -211,7 +211,7 @@ impl TileCache {
     }
 
     fn finished_children(&self, key: &TileKey) -> Option<([Estimates; 4], [Biomes; 4])> {
-        if key.scale == 0 {
+        if key.level == 0 {
             return None;
         }
         let [a, b, c, d] = children(key).map(|child| self.entries.get(&child));
@@ -252,7 +252,7 @@ impl TileCache {
             }
             // nearest at the finest level so single quarts stay crisp when zoomed in
             let texture = Rc::new(match done.key.layer {
-                Layer::Biome => renderer.create_tile(device, queue, &tile.rgb, TILE_SIZE as u32, done.key.scale == 0),
+                Layer::Biome => renderer.create_tile(device, queue, &tile.rgb, TILE_SIZE as u32, done.key.level == 0),
 
                 Layer::Relief { .. } | Layer::Noise(_) => {
                     renderer.create_rgba_tile(device, queue, &tile.rgb, TILE_SIZE as u32, true)
@@ -297,7 +297,7 @@ impl TileCache {
     }
 }
 
-/// The 4 tiles one scale finer covering `key`: top left, top right, bottom left, bottom right.
+/// The 4 tiles one level finer covering `key`: top left, top right, bottom left, bottom right.
 fn children(key: &TileKey) -> [TileKey; 4] {
     [(0, 0), (1, 0), (0, 1), (1, 1)].map(|(dx, dz)| key.child(dx, dz))
 }
