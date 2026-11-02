@@ -8,8 +8,8 @@ use crate::{
         overlays::{GridSpacing, MARKER_GAPS, line_visibility},
         resources,
     },
-    seedfind::spec::NoiseParameter,
-    structures::STRUCTURE_KINDS,
+    noise::NoiseParameter,
+    structures::MARKER_KINDS,
     terrain::Terrain,
     tile_renderer::{Detail, Layer},
 };
@@ -23,7 +23,7 @@ const ARROW_POINTS_PER_SECOND: f64 = 600.0;
 const MAX_EXACT_LEVEL: i32 = 3;
 
 /// Values most people never need to change.
-pub struct Advanced {
+pub struct Extras {
     pub marker_size: f32,
     /// candidates an empty spot is given
     pub marker_tries: u32,
@@ -34,7 +34,7 @@ pub struct Advanced {
     pub fade_seconds: f32,
 }
 
-impl Default for Advanced {
+impl Default for Extras {
     fn default() -> Self {
         Self {
             marker_size: 22.0,
@@ -104,10 +104,10 @@ impl ReliefQuality {
 
 impl Ui {
     fn kinds_here(&self) -> impl Iterator<Item = usize> + use<'_> {
-        (0..STRUCTURE_KINDS.len()).filter(|&kind| STRUCTURE_KINDS[kind].dimension == self.dimension)
+        (0..MARKER_KINDS.len()).filter(|&kind| MARKER_KINDS[kind].dimension == self.dimension)
     }
 
-    pub(super) fn structures_menu(&mut self, ui: &mut egui::Ui) {
+    pub(super) fn markers_menu(&mut self, ui: &mut egui::Ui) {
         egui::CollapsingHeader::new("Markers").show(ui, |ui| {
             ui.horizontal(|ui| {
                 let kinds: Vec<usize> = self.kinds_here().collect();
@@ -149,7 +149,7 @@ impl Ui {
             ui.horizontal(|ui| {
                 ui.label("Size");
                 ui.add(
-                    egui::Slider::new(&mut self.advanced.marker_size, 10.0..=64.0)
+                    egui::Slider::new(&mut self.extras.marker_size, 10.0..=64.0)
                         .fixed_decimals(0)
                         .suffix(" px"),
                 )
@@ -163,15 +163,15 @@ impl Ui {
             let filter = self.marker_filter.trim().to_lowercase();
             let mut kinds: Vec<usize> = self
                 .kinds_here()
-                .filter(|&kind| STRUCTURE_KINDS[kind].name.to_lowercase().contains(&filter))
+                .filter(|&kind| MARKER_KINDS[kind].name.to_lowercase().contains(&filter))
                 .collect();
-            kinds.sort_by_key(|&kind| STRUCTURE_KINDS[kind].name);
+            kinds.sort_by_key(|&kind| MARKER_KINDS[kind].name);
             for kind in kinds {
                 ui.horizontal(|ui| {
                     if let Some(icons) = &self.icons {
                         ui.add(icons.image(kind, ICON_SIZE));
                     }
-                    ui.checkbox(&mut self.shown_kinds[kind], STRUCTURE_KINDS[kind].name);
+                    ui.checkbox(&mut self.shown_kinds[kind], MARKER_KINDS[kind].name);
                     if self.sampled[kind] {
                         ui.weak("some shown")
                             .on_hover_text("Too many to look at all of them: zoom in to see every one");
@@ -280,7 +280,7 @@ impl Ui {
             });
             if self.dimension != Dimension::Overworld {
                 ui.weak("Only in the overworld");
-            } else if self.relief && level > self.advanced.max_relief_level {
+            } else if self.relief && level > self.extras.max_relief_level {
                 ui.weak("Zoom in to see terrain");
             } else if self.relief && (!self.relief_exact || self.relief_quality.detail(level) == Detail::Estimate) {
                 ui.weak("Estimated heights, usually 5 to 15 blocks off");
@@ -303,7 +303,7 @@ impl Ui {
                         .changed();
                 }
             });
-            let advanced = &mut self.advanced;
+            let extras = &mut self.extras;
             let row = |ui: &mut egui::Ui, name: &str, slider: egui::Slider, hint: &str| {
                 ui.horizontal(|ui| {
                     ui.label(name);
@@ -313,37 +313,37 @@ impl Ui {
             row(
                 ui,
                 "Marker tries",
-                egui::Slider::new(&mut advanced.marker_tries, 16..=65536).logarithmic(true),
+                egui::Slider::new(&mut extras.marker_tries, 16..=65536).logarithmic(true),
                 "How many candidates an empty spot is given to find a structure. More fills more gaps, more slowly.",
             );
             row(
                 ui,
                 "Marker detail",
-                egui::Slider::new(&mut advanced.marker_fineness, 1..=4),
+                egui::Slider::new(&mut extras.marker_fineness, 1..=4),
                 "How many candidates are searched for each marker that fits. More fills more gaps, with much more work.",
             );
             row(
                 ui,
                 "Height map zoom",
-                egui::Slider::new(&mut advanced.max_relief_level, 0..=10).prefix("level "),
+                egui::Slider::new(&mut extras.max_relief_level, 0..=10).prefix("level "),
                 "The furthest zoom level with a height map. From about level 6 on it is mostly noise.",
             );
             row(
                 ui,
                 "Height map strength",
-                egui::Slider::new(&mut advanced.relief_strength, 0.1..=1.8).fixed_decimals(1),
+                egui::Slider::new(&mut extras.relief_strength, 0.1..=1.8).fixed_decimals(1),
                 "How strongly the height map is drawn over the biomes",
             );
             row(
                 ui,
                 "Tile fade",
-                egui::Slider::new(&mut advanced.fade_seconds, 0.0..=1.0)
+                egui::Slider::new(&mut extras.fade_seconds, 0.0..=1.0)
                     .fixed_decimals(2)
                     .suffix(" s"),
                 "How long new tiles take to fade in",
             );
             if ui.button("Reset").clicked() {
-                *advanced = Advanced::default();
+                *extras = Extras::default();
                 changed |= self.samples != 1;
                 self.samples = 1;
             }
@@ -584,7 +584,7 @@ impl Ui {
         match which {
             "all" => self.shown_kinds.fill(true),
             "none" => self.shown_kinds.fill(false),
-            _ => match STRUCTURE_KINDS.iter().position(|kind| kind.id == which) {
+            _ => match MARKER_KINDS.iter().position(|kind| kind.id == which) {
                 Some(kind) => self.shown_kinds[kind] = true,
                 None => log::error!("no structure {which}"),
             },

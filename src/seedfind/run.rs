@@ -469,10 +469,7 @@ mod tests {
     }
 
     fn kind(id: &str) -> usize {
-        crate::structures::STRUCTURE_KINDS
-            .iter()
-            .position(|k| k.id == id)
-            .unwrap()
+        crate::structures::kind_index(id)
     }
 
     fn finder() -> crate::structures::Finder {

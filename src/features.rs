@@ -149,9 +149,9 @@ fn biomes_of(roll: &FeatureRoll) -> &'static FxHashSet<Identifier> {
 }
 
 impl FeatureRoll {
-    /// The block a chunk's random numbers say the feature is at, if any, with the height if it has
-    /// its own. Takes about 100 ns and depends on all bits of the seed.
-    pub fn in_chunk(&self, seed: i64, chunk: [i32; 2]) -> Option<([i32; 2], Option<i32>)> {
+    /// What a chunk's random numbers say: the block the feature is at, if any, with the height if
+    /// it has its own, and the random numbers to go on with.
+    fn roll(&self, seed: i64, chunk: [i32; 2]) -> Option<([i32; 2], Option<i32>, WorldgenRandom)> {
         let (number, step) = number_of(self);
         let mut random = WorldgenRandom::from_seed(0);
         let decoration_seed = random.set_decoration_seed(seed, chunk[0] * 16, chunk[1] * 16);
@@ -164,23 +164,20 @@ impl FeatureRoll {
         let y = self
             .heights
             .map(|(lowest, highest)| random.next_i32_between(lowest, highest));
-        Some(([x, z], y))
+        Some(([x, z], y, random))
+    }
+
+    /// The block a chunk's random numbers say the feature is at, if any, with the height if it has
+    /// its own. Takes about 100 ns and depends on all bits of the seed.
+    pub fn in_chunk(&self, seed: i64, chunk: [i32; 2]) -> Option<([i32; 2], Option<i32>)> {
+        self.roll(seed, chunk).map(|(block, y, _)| (block, y))
     }
 
     /// The blocks the game looks at for a geode at this chunk: it gives up if more than one of them
     /// isn't solid. They come next in the same random numbers.
     pub fn geode_points(seed: i64, chunk: [i32; 2]) -> Option<([i32; 3], Vec<[i32; 3]>)> {
-        let (number, step) = number_of(&GEODE);
-        let mut random = WorldgenRandom::from_seed(0);
-        let decoration_seed = random.set_decoration_seed(seed, chunk[0] * 16, chunk[1] * 16);
-        random.set_feature_seed(decoration_seed, number, step);
-        if random.next_f32() >= 1.0 / GEODE.chance as f32 {
-            return None;
-        }
-        let x = chunk[0] * 16 + random.next_i32_bounded(16);
-        let z = chunk[1] * 16 + random.next_i32_bounded(16);
-        let (lowest, highest) = GEODE.heights?;
-        let y = random.next_i32_between(lowest, highest);
+        let ([x, z], y, mut random) = GEODE.roll(seed, chunk)?;
+        let y = y?;
         // how `GeodeFeature` goes on, with its defaults: 3 to 4 points, 4 to 6 blocks away
         let points = random.next_i32_between(3, 4);
         random.next_f64(); // the size of its crack

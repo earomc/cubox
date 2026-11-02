@@ -15,11 +15,8 @@ use crate::{
         tiles::TILE_SIZE,
         world::{Finished, Queue, Task, World, WorldParams},
     },
-    tile_renderer::{Layer, TileKey},
+    tile_renderer::{Layer, MAX_SCALE, TileKey},
 };
-
-/// The coarsest level, see `MapView`.
-const MAX_SCALE: u8 = 16;
 
 pub struct Executor {
     shared: Arc<Shared>,

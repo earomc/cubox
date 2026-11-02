@@ -21,15 +21,14 @@ use steel_worldgen::{
 use crate::{
     dimension::Dimension,
     features::{FeatureRoll, feature_of, ring_gateways},
-    noise::{NoiseCache, VeinField},
-    seed::generator_seed,
-    seedfind::spec::Ore,
+    noise::{NoiseCache, Ore, Underground},
     terrain::{Noises, init_registry},
     tile_renderer::WORLD_BORDER_QUARTS,
 };
 
-/// A kind of structure as a player thinks of it, which can be several structures in the game.
-pub struct StructureKind {
+/// A kind of marker as a player thinks of it: a structure, which can be several in the game, or
+/// something else with a place on the map, like the spawn point or an ore vein.
+pub struct MarkerKind {
     /// also the name of its icon in `assets/icons`
     pub id: &'static str,
     pub name: &'static str,
@@ -40,7 +39,7 @@ pub struct StructureKind {
     with_piece: Option<&'static str>,
 }
 
-impl StructureKind {
+impl MarkerKind {
     fn is_in(&self, set: &StructureSet) -> bool {
         set.structures
             .iter()
@@ -53,8 +52,8 @@ const fn kind(
     name: &'static str,
     dimension: Dimension,
     structures: &'static [&'static str],
-) -> StructureKind {
-    StructureKind {
+) -> MarkerKind {
+    MarkerKind {
         id,
         name,
         dimension,
@@ -65,7 +64,7 @@ const fn kind(
 
 use Dimension::{End, Nether, Overworld};
 
-pub const STRUCTURE_KINDS: &[StructureKind] = &[
+pub const MARKER_KINDS: &[MarkerKind] = &[
     // not a structure, but marked like one. No game structures: it is found in another way
     kind("spawn", "Spawn point", Overworld, &[]),
     kind(
@@ -153,13 +152,21 @@ pub const STRUCTURE_KINDS: &[StructureKind] = &[
     kind("geode", "Geode (maybe there)", Overworld, &[]),
     kind("copper_vein", "Copper ore vein", Overworld, &[]),
     kind("iron_vein", "Iron ore vein", Overworld, &[]),
-    StructureKind {
+    MarkerKind {
         with_piece: Some("end_city/ship"),
         ..kind("end_city_ship", "End city with ship", End, &["end_city"])
     },
 ];
 
-/// A structure that really generates. `kind` is an index into `STRUCTURE_KINDS`, x and z are blocks.
+/// The index in `MARKER_KINDS` of the kind with this id.
+pub fn kind_index(id: &str) -> usize {
+    MARKER_KINDS
+        .iter()
+        .position(|kind| kind.id == id)
+        .unwrap_or_else(|| panic!("no kind {id}"))
+}
+
+/// A structure that really generates. `kind` is an index into `MARKER_KINDS`, x and z are blocks.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct Found {
     pub kind: usize,
@@ -187,7 +194,7 @@ pub fn spread(kind: usize) -> Option<Spread> {
     static SPREADS: LazyLock<Vec<Option<Spread>>> = LazyLock::new(|| {
         init_registry();
         let sets = load_vanilla_structure_sets();
-        STRUCTURE_KINDS
+        MARKER_KINDS
             .iter()
             .map(|kind| {
                 if feature_of(kind.id).is_some() {
@@ -214,12 +221,12 @@ pub fn spread(kind: usize) -> Option<Spread> {
 const VEIN_CELL_CHUNKS: i32 = 32;
 /// Spots looked at per side of a cell.
 const VEIN_SAMPLES: i32 = 4;
-/// Blocks of ore a look around a spot has to find, of what it looks at. See `VeinField::ore_near`.
+/// Blocks of ore a look around a spot has to find, of what it looks at. See `Underground::ore_near`.
 const VEIN_MIN_ORE: u32 = 6;
 /// How many of those spots need veins for a marker.
 const VEIN_MIN_SAMPLES: usize = 4;
 
-fn ore_of(id: &str) -> Option<Ore> {
+pub fn ore_of(id: &str) -> Option<Ore> {
     match id {
         "copper_vein" => Some(Ore::Copper),
         "iron_vein" => Some(Ore::Iron),
@@ -229,18 +236,18 @@ fn ore_of(id: &str) -> Option<Ore> {
 
 /// Whether where a kind can be only depends on the lower 48 bits of the seed.
 pub fn depends_on_lower_bits(kind: usize) -> bool {
-    feature_of(STRUCTURE_KINDS[kind].id).is_none() && ore_of(STRUCTURE_KINDS[kind].id).is_none()
+    feature_of(MARKER_KINDS[kind].id).is_none() && ore_of(MARKER_KINDS[kind].id).is_none()
 }
 
-/// Whether a kind is a structure of the game, unlike the spawn point.
-pub fn is_structure(kind: usize) -> bool {
-    STRUCTURE_KINDS[kind].id != "spawn"
+/// Whether a search can look for a kind, unlike the spawn point it is measured from.
+pub fn is_searchable(kind: usize) -> bool {
+    MARKER_KINDS[kind].id != "spawn"
 }
 
 /// How far from the middle of its chunk a structure's marker can be, in blocks. See the test
 /// `markers_stay_within_their_margin`.
 pub fn marker_margin(kind: usize) -> i32 {
-    match STRUCTURE_KINDS[kind].id {
+    match MARKER_KINDS[kind].id {
         "swamp_hut" | "geode" | "end_gateway_scattered" | "end_gateway" => 16,
         "copper_vein" | "iron_vein" => 380,
         "desert_pyramid" | "jungle_temple" | "igloo" | "buried_treasure" | "ocean_monument" => 64,
@@ -253,7 +260,7 @@ pub fn marker_margin(kind: usize) -> i32 {
 /// that isn't on a grid has none. Structures depend on nothing but the lower 48 bits of the seed,
 /// see `depends_on_lower_bits`.
 pub fn candidates(seed: i64, kind: usize, center: [i32; 2], radius: i32, out: &mut Vec<([i32; 2], [i32; 2])>) {
-    if ore_of(STRUCTURE_KINDS[kind].id).is_some() {
+    if ore_of(MARKER_KINDS[kind].id).is_some() {
         // only the noise says where they are, every cell in reach is a candidate
         let size = (VEIN_CELL_CHUNKS * 16) as i64;
         let reach = radius as i64 + marker_margin(kind) as i64;
@@ -271,7 +278,7 @@ pub fn candidates(seed: i64, kind: usize, center: [i32; 2], radius: i32, out: &m
         }
         return;
     }
-    if let Some(feature) = feature_of(STRUCTURE_KINDS[kind].id) {
+    if let Some(feature) = feature_of(MARKER_KINDS[kind].id) {
         let reach = radius as i64 + marker_margin(kind) as i64;
         let chunks = |middle: i32| {
             ((middle as i64 - reach).div_euclid(16) as i32)..=((middle as i64 + reach).div_euclid(16) as i32)
@@ -404,14 +411,14 @@ const REAL_RATES: &[(&str, f64)] = &[
 pub fn real_rate(kind: usize) -> f64 {
     REAL_RATES
         .iter()
-        .find(|(id, _)| *id == STRUCTURE_KINDS[kind].id)
+        .find(|(id, _)| *id == MARKER_KINDS[kind].id)
         .map_or(1.0, |(_, rate)| *rate)
 }
 
 /// The place of a kind in `RARITY_ORDER`, lower is rarer.
 pub fn rarity(kind: usize) -> usize {
     static RANKS: LazyLock<Vec<usize>> = LazyLock::new(|| {
-        STRUCTURE_KINDS
+        MARKER_KINDS
             .iter()
             .map(|kind| RARITY_ORDER.iter().position(|id| *id == kind.id).unwrap_or(usize::MAX))
             .collect()
@@ -442,7 +449,7 @@ pub struct Finder {
     assemble_all: bool,
     dimension: Dimension,
     /// only made when vein markers are wanted
-    veins: OnceLock<VeinField>,
+    veins: OnceLock<Underground>,
 }
 
 struct KindSet {
@@ -458,7 +465,7 @@ fn kind_sets() -> &'static [Option<KindSet>] {
     static SETS: LazyLock<Vec<Option<KindSet>>> = LazyLock::new(|| {
         init_registry();
         let sets = load_vanilla_structure_sets();
-        STRUCTURE_KINDS
+        MARKER_KINDS
             .iter()
             .map(|kind| {
                 let (_, set) = sets.iter().find(|(_, set)| kind.is_in(set))?;
@@ -532,7 +539,6 @@ const CHECK_HEIGHTS: [i32; 21] = [
 impl Finder {
     pub fn new(seed: i64, dimension: Dimension) -> anyhow::Result<Self> {
         init_registry();
-        let raw_seed = generator_seed(seed);
         let source = dimension.biome_source(seed);
         let without_rings = load_vanilla_structure_sets()
             .into_iter()
@@ -541,7 +547,7 @@ impl Finder {
         let generator = POOL.with(|pool| {
             let pool = pool.as_ref().map_err(|err| anyhow::anyhow!("{err}"))?;
             anyhow::Ok(StructureGenerator::vanilla_with_structure_sets(
-                raw_seed as i64,
+                seed,
                 None,
                 &source,
                 without_rings,
@@ -554,7 +560,7 @@ impl Finder {
             Dimension::End => AnyNoises::End(Noises::new(seed)),
         };
         Ok(Self {
-            seed: raw_seed as i64,
+            seed,
             source,
             noises,
             generator,
@@ -568,16 +574,16 @@ impl Finder {
     fn set(&self, kind: usize) -> Option<&KindSet> {
         kind_sets()[kind]
             .as_ref()
-            .filter(|_| STRUCTURE_KINDS[kind].dimension == self.dimension)
+            .filter(|_| MARKER_KINDS[kind].dimension == self.dimension)
     }
 
     /// The structure of `kind` in a grid cell of its `Spread::Grid`, if one really generates.
     pub fn in_cell(&self, kind: usize, cell_x: i32, cell_z: i32) -> Option<Found> {
-        if let Some(ore) = ore_of(STRUCTURE_KINDS[kind].id) {
+        if let Some(ore) = ore_of(MARKER_KINDS[kind].id) {
             if self.dimension != Overworld {
                 return None;
             }
-            let veins = self.veins.get_or_init(|| VeinField::new(self.seed));
+            let veins = self.veins.get_or_init(|| Underground::new(self.seed));
             let (size, step) = (VEIN_CELL_CHUNKS * 16, VEIN_CELL_CHUNKS * 16 / VEIN_SAMPLES);
             let mut hits = Vec::new();
             for dz in 0..VEIN_SAMPLES {
@@ -608,7 +614,7 @@ impl Finder {
                 .find(|hit| veins.ore_near(&mut cache, ore, hit[0], hit[1]) >= VEIN_MIN_ORE)?;
             return Some(Found { kind, x, z });
         }
-        if let Some(feature) = feature_of(STRUCTURE_KINDS[kind].id) {
+        if let Some(feature) = feature_of(MARKER_KINDS[kind].id) {
             if feature.dimension != self.dimension {
                 return None;
             }
@@ -690,12 +696,12 @@ impl Finder {
     /// What the game looks at in the terrain before placing a feature, as far as noise can tell.
     /// Caves carved later aren't known.
     fn terrain_allows(&self, kind: usize, cell_x: i32, cell_z: i32, block: [i32; 2]) -> bool {
-        match (&self.noises, STRUCTURE_KINDS[kind].id) {
+        match (&self.noises, MARKER_KINDS[kind].id) {
             (AnyNoises::Overworld(_), "geode") => {
                 let Some((_, points)) = FeatureRoll::geode_points(self.seed, [cell_x, cell_z]) else {
                     return false;
                 };
-                let veins = self.veins.get_or_init(|| VeinField::new(self.seed));
+                let veins = self.veins.get_or_init(|| Underground::new(self.seed));
                 let mut cache = NoiseCache::default();
                 let not_solid = points
                     .iter()
@@ -723,13 +729,13 @@ impl Finder {
 
     /// All structures of a kind with `Spread::Rings`, which really generate.
     pub fn rings(&self, kind: usize) -> Vec<Found> {
-        if STRUCTURE_KINDS[kind].id == "end_gateway" {
+        if MARKER_KINDS[kind].id == "end_gateway" {
             return ring_gateways(self.seed)
                 .into_iter()
                 .map(|[x, z]| Found { kind, x, z })
                 .collect();
         }
-        if STRUCTURE_KINDS[kind].structures.is_empty() {
+        if MARKER_KINDS[kind].structures.is_empty() {
             let spawn = self.source.initial_spawn_search_origin();
             return vec![Found {
                 kind,
@@ -749,7 +755,7 @@ impl Finder {
         let Some(generator) = generator else {
             return Vec::new();
         };
-        let structures: Vec<_> = STRUCTURE_KINDS[kind]
+        let structures: Vec<_> = MARKER_KINDS[kind]
             .structures
             .iter()
             .map(|path| Identifier::vanilla_static(path))
@@ -766,7 +772,7 @@ impl Finder {
     /// Runs the game's structure start generation for a chunk. The position of structures made of
     /// jigsaw pieces is that of their center piece, like a village's meeting point.
     fn at_chunk(&self, generator: &StructureGenerator, kind: usize, chunk: ChunkPos) -> Option<Found> {
-        let structures = STRUCTURE_KINDS[kind].structures;
+        let structures = MARKER_KINDS[kind].structures;
         let starts = match &self.noises {
             AnyNoises::Overworld(noises) => self.starts(generator, noises, chunk, kind),
             AnyNoises::Nether(noises) => self.starts(generator, noises, chunk, kind),
@@ -776,7 +782,7 @@ impl Finder {
             .into_iter()
             .find(|start| !start.pieces.is_empty() && structures.contains(&&*start.structure.path))
             .filter(|start| {
-                STRUCTURE_KINDS[kind]
+                MARKER_KINDS[kind]
                     .with_piece
                     .is_none_or(|piece| start.pieces.iter().any(|p| has_template(p, piece)))
             })
@@ -820,7 +826,7 @@ impl Finder {
         // The game measures an end city's 4 corners before it looks at any of them. The first is
         // always the middle of the chunk, and most candidates that fail already fail there.
         if !self.assemble_all
-            && STRUCTURE_KINDS[kind].structures == ["end_city"]
+            && MARKER_KINDS[kind].structures == ["end_city"]
             && ctx.base_height_full(chunk_x * 16 + 7, chunk_z * 16 + 7, false) - 1 < END_CITY_MIN_HEIGHT
         {
             return Vec::new();
@@ -888,7 +894,7 @@ mod tests {
 
         with_big_stack(|| {
             let finder = Finder::new(12345, Dimension::Overworld).unwrap();
-            let kind = STRUCTURE_KINDS.iter().position(|k| k.id == "shipwreck").unwrap();
+            let kind = kind_index("shipwreck");
             let mut found = 0;
             for (x, z) in (-8..8).flat_map(|x| (-8..8).map(move |z| (x, z))) {
                 let Some(far) = finder.in_bin(kind, 3, x, z, 0..16) else {
@@ -913,7 +919,7 @@ mod tests {
         with_big_stack(|| {
             for dimension in Dimension::ALL {
                 let finder = Finder::new(12345, dimension).unwrap();
-                for (kind, def) in STRUCTURE_KINDS.iter().enumerate() {
+                for (kind, def) in MARKER_KINDS.iter().enumerate() {
                     if def.dimension != dimension || spread(kind) == Some(Spread::Rings) {
                         continue;
                     }
@@ -936,7 +942,7 @@ mod tests {
 
     #[test]
     fn candidates_depend_on_the_lower_48_bits_only() {
-        for (kind, _) in STRUCTURE_KINDS.iter().enumerate() {
+        for (kind, _) in MARKER_KINDS.iter().enumerate() {
             if !depends_on_lower_bits(kind) {
                 continue;
             }
@@ -946,7 +952,7 @@ mod tests {
                 let (mut a, mut b) = (Vec::new(), Vec::new());
                 candidates(seed, kind, [0, 0], 5000, &mut a);
                 candidates(other, kind, [0, 0], 5000, &mut b);
-                assert_eq!(a, b, "{}", STRUCTURE_KINDS[kind].id);
+                assert_eq!(a, b, "{}", MARKER_KINDS[kind].id);
             }
         }
     }
@@ -978,9 +984,9 @@ mod tests {
         with_big_stack(|| {
             for seed in [12345, 1, -987_654_321, 77] {
                 let finder = Finder::new(seed, Dimension::Overworld).unwrap();
-                let veins = VeinField::new(seed);
+                let veins = Underground::new(seed);
                 for (id, ore) in [("copper_vein", Ore::Copper), ("iron_vein", Ore::Iron)] {
-                    let kind = STRUCTURE_KINDS.iter().position(|k| k.id == id).unwrap();
+                    let kind = kind_index(id);
                     let found = finder.around(kind, [0, 0], 10_000);
                     assert!(found.len() > 50, "{id} of {seed}: {}", found.len());
                     for marker in found {
@@ -1006,7 +1012,7 @@ mod tests {
                             StructureGenerator::vanilla(finder.seed, None, &finder.source, pool.as_ref().unwrap())
                         });
                         let mut real = 0;
-                        for (kind, def) in STRUCTURE_KINDS.iter().enumerate() {
+                        for (kind, def) in MARKER_KINDS.iter().enumerate() {
                             if def.dimension != dimension {
                                 continue;
                             }
@@ -1064,7 +1070,7 @@ mod tests {
                 let mut whole = Finder::new(seed, Dimension::End).unwrap();
                 whole.assemble_all = true;
                 for id in ["end_city", "end_city_ship"] {
-                    let kind = STRUCTURE_KINDS.iter().position(|kind| kind.id == id).unwrap();
+                    let kind = kind_index(id);
                     for (x, z) in (20..50).flat_map(|x| (20..50).map(move |z| (x, z))) {
                         let ours = finder.in_cell(kind, x, z);
                         assert_eq!(ours, whole.in_cell(kind, x, z), "{id} of {seed} at {x} {z}");
@@ -1084,7 +1090,7 @@ mod tests {
             whole.assemble_all = true;
             let mut real = 0;
             for id in ["village", "pillager_outpost", "ancient_city", "trail_ruins"] {
-                let kind = STRUCTURE_KINDS.iter().position(|k| k.id == id).unwrap();
+                let kind = kind_index(id);
                 for (x, z) in (0..14).flat_map(|x| (0..14).map(move |z| (x * 13 - 90, z * 11 + 50))) {
                     let (center, assembled) = (finder.in_cell(kind, x, z), whole.in_cell(kind, x, z));
                     assert_eq!(center.is_some(), assembled.is_some(), "{id} at {x} {z}");
@@ -1104,7 +1110,7 @@ mod tests {
     fn rounds_find_the_same_as_one_long_search() {
         with_big_stack(|| {
             let finder = Finder::new(12345, Dimension::Overworld).unwrap();
-            let kind = STRUCTURE_KINDS.iter().position(|k| k.id == "swamp_hut").unwrap();
+            let kind = kind_index("swamp_hut");
             let mut found = 0;
             for (x, z) in (-5..5).flat_map(|x| (-5..5).map(move |z| (x, z))) {
                 let long = finder.in_bin(kind, 8, x, z, 0..256);
@@ -1125,7 +1131,7 @@ mod tests {
         for dimension in Dimension::ALL {
             with_big_stack(move || {
                 let finder = Finder::new(987_654, dimension).unwrap();
-                for (kind, def) in STRUCTURE_KINDS.iter().enumerate() {
+                for (kind, def) in MARKER_KINDS.iter().enumerate() {
                     if def.dimension != dimension {
                         continue;
                     }
@@ -1154,7 +1160,7 @@ mod tests {
     #[test]
     fn the_spawn_point_is_one_marker_near_the_origin() {
         with_big_stack(|| {
-            let kind = STRUCTURE_KINDS.iter().position(|k| k.id == "spawn").unwrap();
+            let kind = kind_index("spawn");
             assert_eq!(spread(kind), Some(Spread::Rings));
             for seed in [1, 12345, -987] {
                 let finder = Finder::new(seed, Dimension::Overworld).unwrap();
@@ -1170,12 +1176,12 @@ mod tests {
 
     #[test]
     fn every_kind_has_a_rarity() {
-        let mut ranks: Vec<usize> = (0..STRUCTURE_KINDS.len()).map(rarity).collect();
+        let mut ranks: Vec<usize> = (0..MARKER_KINDS.len()).map(rarity).collect();
         ranks.sort();
         ranks.dedup();
-        assert_eq!(ranks.len(), STRUCTURE_KINDS.len());
+        assert_eq!(ranks.len(), MARKER_KINDS.len());
         assert!(ranks.iter().all(|rank| *rank != usize::MAX));
-        let rank = |id| rarity(STRUCTURE_KINDS.iter().position(|k| k.id == id).unwrap());
+        let rank = |id| rarity(kind_index(id));
         assert!(rank("end_city_ship") < rank("end_city"));
     }
 
@@ -1183,7 +1189,7 @@ mod tests {
     fn ships_are_some_of_the_end_cities() {
         with_big_stack(|| {
             let finder = Finder::new(12345, Dimension::End).unwrap();
-            let index = |id| STRUCTURE_KINDS.iter().position(|k| k.id == id).unwrap();
+            let index = |id| kind_index(id);
             let (city, ship) = (index("end_city"), index("end_city_ship"));
             let (mut cities, mut ships) = (0, 0);
             for (x, z) in (-30..30).flat_map(|x| (-30..30).map(move |z| (x, z))) {
@@ -1203,7 +1209,7 @@ mod tests {
     #[test]
     fn a_thread_can_find_in_several_worlds() {
         with_big_stack(|| {
-            let kind = STRUCTURE_KINDS.iter().position(|k| k.id == "stronghold").unwrap();
+            let kind = kind_index("stronghold");
             for seed in [1, 2, 3] {
                 assert_eq!(Finder::new(seed, Dimension::Overworld).unwrap().rings(kind).len(), 128);
             }
@@ -1217,8 +1223,8 @@ mod tests {
             for entry in &set.structures {
                 let path = &*entry.structure.path;
                 assert!(
-                    STRUCTURE_KINDS.iter().any(|kind| kind.structures.contains(&path)),
-                    "{key}: {path} is missing in STRUCTURE_KINDS"
+                    MARKER_KINDS.iter().any(|kind| kind.structures.contains(&path)),
+                    "{key}: {path} is missing in MARKER_KINDS"
                 );
             }
         }
@@ -1230,7 +1236,7 @@ mod tests {
             let finder = Finder::new(12345, Dimension::Overworld).unwrap();
             let source = Dimension::Overworld.biome_source(12345);
             let mut sampler = source.chunk_sampler();
-            let index = |id| STRUCTURE_KINDS.iter().position(|k| k.id == id).unwrap();
+            let index = |id| kind_index(id);
             assert_eq!(finder.rings(index("stronghold")).len(), 128);
 
             let cells = |kind: usize| {

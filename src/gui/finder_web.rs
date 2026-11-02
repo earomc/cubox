@@ -9,7 +9,8 @@ use web_sys::{MessageEvent, Worker, WorkerOptions, WorkerType};
 
 use crate::{
     dimension::Dimension,
-    gui::finder::{FinderWorld, Job, Reply, WorldQueries},
+    gui::finder::{FinderWorld, Job, WorldQueries, decode_found, encode_found},
+    structures::Found,
 };
 
 /// Each worker is a copy of the wasm module with all of the structure data, this many are the most
@@ -24,7 +25,7 @@ pub struct Pool {
 
 struct Inner {
     workers: Vec<Slot>,
-    finished: Vec<(u64, Job, Reply)>,
+    finished: Vec<(u64, Job, Vec<Found>)>,
     /// how many workers may work at once, others only keep their memory until the page is left
     limit: usize,
 }
@@ -84,7 +85,7 @@ impl Pool {
         }
     }
 
-    pub fn finished(&mut self) -> impl Iterator<Item = (u64, Job, Reply)> + '_ {
+    pub fn finished(&mut self) -> impl Iterator<Item = (u64, Job, Vec<Found>)> + '_ {
         std::mem::take(&mut self.inner.borrow_mut().finished).into_iter()
     }
 }
@@ -101,10 +102,10 @@ fn spawn_worker(inner: &Rc<RefCell<Inner>>, index: usize) -> Result<Worker, JsVa
             return;
         };
         // a failed job counts as nothing found, so that it isn't asked again and again
-        let reply = event.data().as_string().and_then(|line| Reply::decode(&line));
+        let reply = event.data().as_string().and_then(|line| decode_found(&line));
         let reply = reply.unwrap_or_else(|| {
             log::error!("a finder worker failed: {:?}", event.data());
-            Reply::Found(Vec::new())
+            Vec::new()
         });
         inner.finished.push((generation, job, reply));
     });
@@ -136,5 +137,5 @@ pub fn worker_run(message: &str) -> Result<String, JsValue> {
         }
         queries.clone().unwrap()
     });
-    Ok(queries.run(&job).encode())
+    Ok(encode_found(&queries.run(&job)))
 }

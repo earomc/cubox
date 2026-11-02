@@ -176,4 +176,5 @@ pub fn biome_number(path: &str) -> u8 {
     NUMBERS.get(path).copied().unwrap_or(UNKNOWN_BIOME)
 }
 
+/// Not the number of a biome, so the table of `MapRenderer::set_darkening` darkens it.
 pub const UNKNOWN_BIOME: u8 = 255;

@@ -8,9 +8,7 @@ use crate::{
     dimension::Dimension,
     noise::{NoiseCache, NoiseField},
     seedfind::spec::{Anchor, BiomeTest, Condition, cluster_reach},
-    structures::{
-        Finder, Found, STRUCTURE_KINDS, Spread, allowed_by_biomes, candidates, depends_on_lower_bits, spread,
-    },
+    structures::{Finder, Found, MARKER_KINDS, Spread, allowed_by_biomes, candidates, depends_on_lower_bits, spread},
 };
 
 /// Samples of a condition's area, whatever its size.
@@ -352,21 +350,21 @@ impl SeedWorld {
                 radius,
                 anchor,
             } => {
-                let center = self.center(*anchor, STRUCTURE_KINDS[*kind].dimension, here);
+                let center = self.center(*anchor, MARKER_KINDS[*kind].dimension, here);
                 if spread(*kind) != Some(Spread::Rings) {
                     cells.clear();
                     candidates(self.seed, *kind, center, *radius, cells);
                     if cells.len() < *count as usize {
                         return None;
                     }
-                    let source = self.source(STRUCTURE_KINDS[*kind].dimension);
+                    let source = self.source(MARKER_KINDS[*kind].dimension);
                     allowed_by_biomes(source, *kind, cells);
                     if cells.len() < *count as usize {
                         return None;
                     }
                 }
                 let found = self
-                    .finder(STRUCTURE_KINDS[*kind].dimension)?
+                    .finder(MARKER_KINDS[*kind].dimension)?
                     .around(*kind, center, *radius);
                 if found.len() < *count as usize {
                     return None;
@@ -384,7 +382,7 @@ impl SeedWorld {
                 within,
                 anchor,
             } => {
-                let center = self.center(*anchor, STRUCTURE_KINDS[*kind].dimension, here);
+                let center = self.center(*anchor, MARKER_KINDS[*kind].dimension, here);
                 let within = if *anchor == Anchor::Spot {
                     cluster_reach(*radius)
                 } else {
@@ -397,13 +395,13 @@ impl SeedWorld {
                     if !could_cluster(cells, radius + margin, *count) {
                         return None;
                     }
-                    allowed_by_biomes(self.source(STRUCTURE_KINDS[*kind].dimension), *kind, cells);
+                    allowed_by_biomes(self.source(MARKER_KINDS[*kind].dimension), *kind, cells);
                     if !could_cluster(cells, radius + margin, *count) {
                         return None;
                     }
                 }
                 let found = self
-                    .finder(STRUCTURE_KINDS[*kind].dimension)?
+                    .finder(MARKER_KINDS[*kind].dimension)?
                     .around(*kind, center, within);
                 let points: Vec<[i32; 2]> = found.iter().map(|f| [f.x, f.z]).collect();
                 let (best, middle) = best_circle(&points, *radius);
@@ -489,7 +487,7 @@ fn distance(found: &Found, center: [i32; 2]) -> f64 {
 fn found_hit(found: &Found) -> Hit {
     Hit {
         kind: Some(found.kind),
-        dimension: STRUCTURE_KINDS[found.kind].dimension,
+        dimension: MARKER_KINDS[found.kind].dimension,
         x: found.x,
         z: found.z,
     }
@@ -604,7 +602,7 @@ impl Plan {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::seedfind::spec::{NoiseParameter, parse};
+    use crate::{noise::NoiseParameter, seedfind::spec::parse};
 
     fn with_stack(f: impl FnOnce() + Send + 'static) {
         std::thread::Builder::new()
@@ -689,7 +687,7 @@ mod tests {
                             radius,
                             anchor: Anchor::At(x, z),
                         } => world
-                            .finder(STRUCTURE_KINDS[*kind].dimension)
+                            .finder(MARKER_KINDS[*kind].dimension)
                             .is_some_and(|f| f.around(*kind, [*x, *z], *radius).len() >= *count as usize),
                         condition => world.check(condition, [0, 0], &mut cells).is_some(),
                     });

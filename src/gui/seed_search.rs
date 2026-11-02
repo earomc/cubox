@@ -5,12 +5,13 @@ use std::time::{Duration, Instant};
 use crate::{
     dimension::Dimension,
     gui::Ui,
+    noise::NoiseParameter,
     seedfind::{
         engine::{Match, biome_dimension},
         run::{Search, Seeds},
-        spec::{self, Anchor, BiomeTest, Condition, MAX_BLOCKS, NoiseParameter, PRESETS},
+        spec::{self, Anchor, BiomeTest, Condition, MAX_BLOCKS, PRESETS},
     },
-    structures::{STRUCTURE_KINDS, is_structure},
+    structures::{MARKER_KINDS, is_searchable},
 };
 
 /// Matches kept in the list, the best ones.
@@ -180,7 +181,7 @@ fn convert_condition(condition: &mut Condition, in_seed: bool) {
     };
     match condition {
         Condition::Structure { kind, anchor, .. } => {
-            new_anchor(anchor, STRUCTURE_KINDS[*kind].dimension != Dimension::Nether);
+            new_anchor(anchor, MARKER_KINDS[*kind].dimension != Dimension::Nether);
         }
         Condition::Cluster { within, anchor, .. } => {
             new_anchor(anchor, false);
@@ -262,11 +263,11 @@ fn within_ui(ui: &mut egui::Ui, salt: usize, radius: &mut i32, anchor: &mut Anch
 fn kind_ui(ui: &mut egui::Ui, salt: usize, kind: &mut usize) -> bool {
     let mut changed = false;
     egui::ComboBox::from_id_salt(("kind", salt))
-        .selected_text(STRUCTURE_KINDS[*kind].id)
+        .selected_text(MARKER_KINDS[*kind].id)
         .width(120.0)
         .show_ui(ui, |ui| {
-            for (index, def) in STRUCTURE_KINDS.iter().enumerate() {
-                if is_structure(index) {
+            for (index, def) in MARKER_KINDS.iter().enumerate() {
+                if is_searchable(index) {
                     changed |= ui.selectable_value(kind, index, def.id).changed();
                 }
             }
@@ -288,7 +289,7 @@ fn condition_ui(ui: &mut egui::Ui, salt: usize, condition: &mut Condition) -> bo
             changed |= kind_ui(ui, salt, kind);
             ui.label("count>=");
             changed |= number_ui(ui, count, 1..=64, 0.1);
-            let spawn_exists = STRUCTURE_KINDS[*kind].dimension != Dimension::Nether;
+            let spawn_exists = MARKER_KINDS[*kind].dimension != Dimension::Nether;
             changed |= within_ui(ui, salt, radius, anchor, spawn_exists);
         }
         Condition::Cluster {
@@ -305,7 +306,7 @@ fn condition_ui(ui: &mut egui::Ui, salt: usize, condition: &mut Condition) -> bo
             ui.label("radius");
             changed |= number_ui(ui, radius, 1..=MAX_BLOCKS, 4.0);
             if *anchor != Anchor::Spot {
-                let spawn_exists = STRUCTURE_KINDS[*kind].dimension != Dimension::Nether;
+                let spawn_exists = MARKER_KINDS[*kind].dimension != Dimension::Nether;
                 changed |= within_ui(ui, salt, within, anchor, spawn_exists);
             }
         }
@@ -469,12 +470,11 @@ impl Ui {
             ui.horizontal_wrapped(|ui| {
                 let anchor = if here { Anchor::Spot } else { Anchor::Spawn };
                 let far = if here { Anchor::Spot } else { Anchor::At(0, 0) };
-                let id_of = |id: &str| STRUCTURE_KINDS.iter().position(|kind| kind.id == id).unwrap_or(0);
                 for (name, condition) in [
                     (
                         "+ structure",
                         Condition::Structure {
-                            kind: id_of("village"),
+                            kind: crate::structures::kind_index("village"),
                             count: 1,
                             radius: 500,
                             anchor,
@@ -483,7 +483,7 @@ impl Ui {
                     (
                         "+ cluster",
                         Condition::Cluster {
-                            kind: id_of("swamp_hut"),
+                            kind: crate::structures::kind_index("swamp_hut"),
                             count: 2,
                             radius: 128,
                             within: 3000,
@@ -623,11 +623,9 @@ impl Ui {
         let dimension = found.hits.first().map_or(Dimension::Overworld, |hit| hit.dimension);
         if found.seed != self.seed {
             self.seed_text = found.seed.to_string();
-            self.set_seed(found.seed);
-            self.reset_tiles();
         }
-        if dimension != self.dimension {
-            self.set_dimension(dimension);
+        if found.seed != self.seed || dimension != self.dimension {
+            self.set_world(found.seed, dimension);
         }
         for kind in found.hits.iter().filter_map(|hit| hit.kind) {
             self.shown_kinds[kind] = true;

@@ -23,9 +23,9 @@
 
 use std::fmt;
 
-use crate::{
-    biome_colors::BIOMES, dimension::Dimension, seedfind::engine::biome_dimension, structures::STRUCTURE_KINDS,
-};
+use crate::noise::NoiseParameter;
+
+use crate::{biome_colors::BIOMES, dimension::Dimension, seedfind::engine::biome_dimension, structures::MARKER_KINDS};
 
 /// Where the area of a condition is around.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -44,56 +44,6 @@ pub enum BiomeTest {
     Coverage(f32),
     /// one connected patch of at least this many square blocks
     Area(i64),
-}
-
-#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
-pub enum NoiseParameter {
-    Temperature,
-    Humidity,
-    Continentalness,
-    Erosion,
-    Weirdness,
-    Depth,
-}
-
-impl NoiseParameter {
-    pub const ALL: [Self; 6] = [
-        Self::Temperature,
-        Self::Humidity,
-        Self::Continentalness,
-        Self::Erosion,
-        Self::Weirdness,
-        Self::Depth,
-    ];
-
-    pub fn name(self) -> &'static str {
-        match self {
-            Self::Temperature => "temperature",
-            Self::Humidity => "humidity",
-            Self::Continentalness => "continentalness",
-            Self::Erosion => "erosion",
-            Self::Weirdness => "weirdness",
-            Self::Depth => "depth",
-        }
-    }
-}
-
-/// The ores of large veins.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum Ore {
-    Copper,
-    Iron,
-}
-
-impl Ore {
-    pub const ALL: [Self; 2] = [Self::Copper, Self::Iron];
-
-    pub fn name(self) -> &'static str {
-        match self {
-            Self::Copper => "copper",
-            Self::Iron => "iron",
-        }
-    }
 }
 
 #[derive(Clone, PartialEq, Debug)]
@@ -154,7 +104,7 @@ pub fn spot_spacing(condition: &Condition) -> Option<i32> {
 /// The dimension a condition's place is in, for those about one.
 fn dimension_of(condition: &Condition) -> Option<Dimension> {
     match condition {
-        Condition::Structure { kind, .. } | Condition::Cluster { kind, .. } => Some(STRUCTURE_KINDS[*kind].dimension),
+        Condition::Structure { kind, .. } | Condition::Cluster { kind, .. } => Some(MARKER_KINDS[*kind].dimension),
         Condition::Biome { biome, .. } => Some(biome_dimension(biome)),
         Condition::Noise { .. } => Some(Dimension::Overworld),
         Condition::Not(_) | Condition::Any(_) => None,
@@ -219,8 +169,8 @@ pub fn searchable_biomes() -> impl Iterator<Item = &'static str> {
 }
 
 fn kind_named(id: &str) -> Result<usize, String> {
-    match STRUCTURE_KINDS.iter().position(|kind| kind.id == id) {
-        Some(kind) if !crate::structures::is_structure(kind) => Err(format!("{id} is not a structure")),
+    match MARKER_KINDS.iter().position(|kind| kind.id == id) {
+        Some(kind) if !crate::structures::is_searchable(kind) => Err(format!("{id} is not a structure")),
         Some(kind) => Ok(kind),
         None => Err(format!("no structure called {id}")),
     }
@@ -437,7 +387,7 @@ impl fmt::Display for Condition {
             } => write!(
                 f,
                 "structure {} count>={count} {}",
-                STRUCTURE_KINDS[*kind].id,
+                MARKER_KINDS[*kind].id,
                 Within(*radius, *anchor)
             ),
             Condition::Cluster {
@@ -447,11 +397,7 @@ impl fmt::Display for Condition {
                 within,
                 anchor,
             } => {
-                write!(
-                    f,
-                    "cluster {} count>={count} radius {radius}",
-                    STRUCTURE_KINDS[*kind].id
-                )?;
+                write!(f, "cluster {} count>={count} radius {radius}", MARKER_KINDS[*kind].id)?;
                 if *anchor != Anchor::Spot {
                     write!(f, " {}", Within(*within, *anchor))?;
                 }

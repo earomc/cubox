@@ -29,7 +29,7 @@ pub struct MapRenderer {
     /// for highlighting biomes, only used while some are
     mask_pipeline: wgpu::RenderPipeline,
     mask_layout: wgpu::BindGroupLayout,
-    /// how much each biome is darkened, in the alpha of a 256x1 texture
+    /// how much each biome is darkened, in a 256x1 texture
     darkening: wgpu::Texture,
     darkening_view: wgpu::TextureView,
     last_darkening: [u8; 256],
@@ -87,38 +87,14 @@ impl MapRenderer {
             bind_group_layouts: &[Some(&screen_layout), Some(&tile_layout)],
             immediate_size: 0,
         });
-        let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("map tiles"),
-            layout: Some(&pipeline_layout),
-            vertex: wgpu::VertexState {
-                module: &shader,
-                entry_point: Some("vs_tile"),
-                compilation_options: Default::default(),
-                buffers: &[Some(wgpu::VertexBufferLayout {
-                    array_stride: (QUAD_FLOATS * 4) as u64,
-                    step_mode: wgpu::VertexStepMode::Instance,
-                    attributes: &wgpu::vertex_attr_array![0 => Float32x4, 1 => Float32x4, 2 => Float32],
-                })],
-            },
-            primitive: wgpu::PrimitiveState {
-                topology: wgpu::PrimitiveTopology::TriangleStrip,
-                ..Default::default()
-            },
-            depth_stencil: None,
-            multisample: Default::default(),
-            fragment: Some(wgpu::FragmentState {
-                module: &shader,
-                entry_point: Some("fs_tile"),
-                compilation_options: Default::default(),
-                targets: &[Some(wgpu::ColorTargetState {
-                    format: surface_format,
-                    blend: Some(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING),
-                    write_mask: wgpu::ColorWrites::ALL,
-                })],
-            }),
-            multiview_mask: None,
-            cache: None,
-        });
+        let pipeline = quad_pipeline(
+            device,
+            &shader,
+            "map tiles",
+            &pipeline_layout,
+            "fs_tile",
+            surface_format,
+        );
 
         let mask_entry = |binding| wgpu::BindGroupLayoutEntry {
             binding,
@@ -139,38 +115,14 @@ impl MapRenderer {
             bind_group_layouts: &[Some(&screen_layout), Some(&mask_layout)],
             immediate_size: 0,
         });
-        let mask_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("biome masks"),
-            layout: Some(&mask_pipeline_layout),
-            vertex: wgpu::VertexState {
-                module: &shader,
-                entry_point: Some("vs_tile"),
-                compilation_options: Default::default(),
-                buffers: &[Some(wgpu::VertexBufferLayout {
-                    array_stride: (QUAD_FLOATS * 4) as u64,
-                    step_mode: wgpu::VertexStepMode::Instance,
-                    attributes: &wgpu::vertex_attr_array![0 => Float32x4, 1 => Float32x4, 2 => Float32],
-                })],
-            },
-            primitive: wgpu::PrimitiveState {
-                topology: wgpu::PrimitiveTopology::TriangleStrip,
-                ..Default::default()
-            },
-            depth_stencil: None,
-            multisample: Default::default(),
-            fragment: Some(wgpu::FragmentState {
-                module: &shader,
-                entry_point: Some("fs_mask"),
-                compilation_options: Default::default(),
-                targets: &[Some(wgpu::ColorTargetState {
-                    format: surface_format,
-                    blend: Some(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING),
-                    write_mask: wgpu::ColorWrites::ALL,
-                })],
-            }),
-            multiview_mask: None,
-            cache: None,
-        });
+        let mask_pipeline = quad_pipeline(
+            device,
+            &shader,
+            "biome masks",
+            &mask_pipeline_layout,
+            "fs_mask",
+            surface_format,
+        );
         let darkening = device.create_texture(&wgpu::TextureDescriptor {
             label: Some("biome darkening"),
             size: wgpu::Extent3d {
@@ -267,37 +219,15 @@ impl MapRenderer {
         size: u32,
         nearest: bool,
     ) -> TileTexture {
-        let extent = wgpu::Extent3d {
-            width: size,
-            height: size,
-            depth_or_array_layers: 1,
-        };
-        let texture = device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("map tile"),
-            size: extent,
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Rgba8UnormSrgb,
-            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
-            view_formats: &[],
-        });
-        queue.write_texture(
-            wgpu::TexelCopyTextureInfo {
-                texture: &texture,
-                mip_level: 0,
-                origin: wgpu::Origin3d::ZERO,
-                aspect: wgpu::TextureAspect::All,
-            },
+        let view = upload_texture(
+            device,
+            queue,
+            "map tile",
+            wgpu::TextureFormat::Rgba8UnormSrgb,
             rgba,
-            wgpu::TexelCopyBufferLayout {
-                offset: 0,
-                bytes_per_row: Some(size * 4),
-                rows_per_image: None,
-            },
-            extent,
+            size,
+            4,
         );
-        let view = texture.create_view(&Default::default());
         let sampler = if nearest {
             &self.nearest_sampler
         } else {
@@ -331,37 +261,15 @@ impl MapRenderer {
         biomes: &[u8],
         size: u32,
     ) -> TileTexture {
-        let extent = wgpu::Extent3d {
-            width: size,
-            height: size,
-            depth_or_array_layers: 1,
-        };
-        let texture = device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("biome mask"),
-            size: extent,
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::R8Unorm,
-            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
-            view_formats: &[],
-        });
-        queue.write_texture(
-            wgpu::TexelCopyTextureInfo {
-                texture: &texture,
-                mip_level: 0,
-                origin: wgpu::Origin3d::ZERO,
-                aspect: wgpu::TextureAspect::All,
-            },
+        let view = upload_texture(
+            device,
+            queue,
+            "biome mask",
+            wgpu::TextureFormat::R8Unorm,
             biomes,
-            wgpu::TexelCopyBufferLayout {
-                offset: 0,
-                bytes_per_row: Some(size),
-                rows_per_image: None,
-            },
-            extent,
+            size,
+            1,
         );
-        let view = texture.create_view(&Default::default());
         let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("biome mask"),
             layout: &self.mask_layout,
@@ -479,6 +387,92 @@ impl MapRenderer {
             pass.draw(0..4, i..i + 1);
         }
     }
+}
+
+/// A pipeline drawing instanced quads with the fragment shader `entry_point`.
+fn quad_pipeline(
+    device: &wgpu::Device,
+    shader: &wgpu::ShaderModule,
+    label: &str,
+    layout: &wgpu::PipelineLayout,
+    entry_point: &str,
+    format: wgpu::TextureFormat,
+) -> wgpu::RenderPipeline {
+    device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        label: Some(label),
+        layout: Some(layout),
+        vertex: wgpu::VertexState {
+            module: shader,
+            entry_point: Some("vs_tile"),
+            compilation_options: Default::default(),
+            buffers: &[Some(wgpu::VertexBufferLayout {
+                array_stride: (QUAD_FLOATS * 4) as u64,
+                step_mode: wgpu::VertexStepMode::Instance,
+                attributes: &wgpu::vertex_attr_array![0 => Float32x4, 1 => Float32x4, 2 => Float32],
+            })],
+        },
+        primitive: wgpu::PrimitiveState {
+            topology: wgpu::PrimitiveTopology::TriangleStrip,
+            ..Default::default()
+        },
+        depth_stencil: None,
+        multisample: Default::default(),
+        fragment: Some(wgpu::FragmentState {
+            module: shader,
+            entry_point: Some(entry_point),
+            compilation_options: Default::default(),
+            targets: &[Some(wgpu::ColorTargetState {
+                format,
+                blend: Some(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING),
+                write_mask: wgpu::ColorWrites::ALL,
+            })],
+        }),
+        multiview_mask: None,
+        cache: None,
+    })
+}
+
+/// A new square texture with these pixels.
+fn upload_texture(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    label: &str,
+    format: wgpu::TextureFormat,
+    pixels: &[u8],
+    size: u32,
+    bytes_per_pixel: u32,
+) -> wgpu::TextureView {
+    let extent = wgpu::Extent3d {
+        width: size,
+        height: size,
+        depth_or_array_layers: 1,
+    };
+    let texture = device.create_texture(&wgpu::TextureDescriptor {
+        label: Some(label),
+        size: extent,
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format,
+        usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+        view_formats: &[],
+    });
+    queue.write_texture(
+        wgpu::TexelCopyTextureInfo {
+            texture: &texture,
+            mip_level: 0,
+            origin: wgpu::Origin3d::ZERO,
+            aspect: wgpu::TextureAspect::All,
+        },
+        pixels,
+        wgpu::TexelCopyBufferLayout {
+            offset: 0,
+            bytes_per_row: Some(size * bytes_per_pixel),
+            rows_per_image: None,
+        },
+        extent,
+    );
+    texture.create_view(&Default::default())
 }
 
 fn srgb_to_linear(c: f64) -> f64 {

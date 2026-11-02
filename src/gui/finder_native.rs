@@ -9,9 +9,12 @@ use std::{
     time::Duration,
 };
 
-use crate::gui::{
-    finder::{FinderWorld, Job, Reply, WorldQueries},
-    resources,
+use crate::{
+    gui::{
+        finder::{FinderWorld, Job, WorldQueries},
+        resources,
+    },
+    structures::Found,
 };
 
 /// Placing structures recurses deeply, SteelMC's own tests need this much stack for it too.
@@ -23,7 +26,7 @@ type Request = (FinderWorld, u64, Job);
 
 pub struct Pool {
     tx: mpsc::Sender<Request>,
-    rx: mpsc::Receiver<(u64, Job, Reply)>,
+    rx: mpsc::Receiver<(u64, Job, Vec<Found>)>,
     limit: Arc<Limit>,
     running: usize,
 }
@@ -115,7 +118,7 @@ impl Pool {
         let _ = self.tx.send((world, generation, job));
     }
 
-    pub fn finished(&mut self) -> impl Iterator<Item = (u64, Job, Reply)> + '_ {
+    pub fn finished(&mut self) -> impl Iterator<Item = (u64, Job, Vec<Found>)> + '_ {
         let replies: Vec<_> = self.rx.try_iter().collect();
         self.running -= replies.len();
         replies.into_iter()

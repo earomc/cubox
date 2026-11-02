@@ -1,3 +1,5 @@
+#[cfg(not(target_arch = "wasm32"))]
+mod capture;
 // tile tasks run on threads on the desktop and in web workers in browsers
 #[cfg(not(target_arch = "wasm32"))]
 #[path = "executor_native.rs"]
@@ -38,22 +40,25 @@ use winit::{
 };
 
 #[cfg(not(target_arch = "wasm32"))]
-use crate::gui::script::{Command, Script};
+use crate::gui::{
+    capture::Readback,
+    script::{Command, Script},
+};
 use crate::{
     dimension::Dimension,
     gui::{
         finder::{FinderWorld, Job, Queries},
         map_renderer::{MapRenderer, Quad},
         map_view::{MapSettings, MapView},
-        menus::{Advanced, ReliefQuality},
+        menus::{Extras, ReliefQuality},
         overlays::{Grid, Icons, MarkerView, Placed},
         tiles::TileCache,
         world::WorldParams,
     },
     noise::NoiseField,
+    noise::NoiseParameter,
     seed::{parse_seed, random_seed},
-    seedfind::spec::NoiseParameter,
-    structures::{Found, STRUCTURE_KINDS},
+    structures::{Found, MARKER_KINDS},
     terrain::Terrain,
 };
 
@@ -259,7 +264,7 @@ struct Ui {
     quads: Vec<Quad>,
     /// markers
     queries: Queries,
-    /// which of `STRUCTURE_KINDS` are shown
+    /// which of `MARKER_KINDS` are shown
     shown_kinds: Vec<bool>,
     /// structures on the screen, cached for the markers
     markers: Vec<Found>,
@@ -279,7 +284,7 @@ struct Ui {
     marker_filter: String,
     /// where markers compete for space, the rarest kinds get it
     prioritize_rare: bool,
-    advanced: Advanced,
+    extras: Extras,
     /// how many markers at most while they may overlap
     max_markers: usize,
     /// what the markers were last placed for, up to which answer and when
@@ -436,7 +441,7 @@ impl State {
             hovered_biome: None,
             quads: Vec::new(),
             queries: Queries::new(FinderWorld { seed, dimension }),
-            shown_kinds: vec![false; STRUCTURE_KINDS.len()],
+            shown_kinds: vec![false; MARKER_KINDS.len()],
             markers: Vec::new(),
             placed: Placed::default(),
             marker_gap: overlays::DEFAULT_MARKER_GAP,
@@ -448,13 +453,13 @@ impl State {
             biome_filter: String::new(),
             marker_filter: String::new(),
             prioritize_rare: true,
-            advanced: Advanced::default(),
+            extras: Extras::default(),
             max_markers: resources::default_max_markers(),
             marker_view: None,
             placed_revision: 0,
             placed_at: 0.0,
             marker_jobs: Vec::new(),
-            sampled: vec![false; STRUCTURE_KINDS.len()],
+            sampled: vec![false; MARKER_KINDS.len()],
             icons: None,
             relief: false,
             noise: Default::default(),
@@ -512,11 +517,10 @@ impl State {
                         resized = Some(size);
                     }
                 }
-                Command::Dimension(dimension) => ui.set_dimension(dimension),
+                Command::Dimension(dimension) => ui.set_world(ui.seed, dimension),
                 Command::Seed(seed) => {
                     ui.seed_text = seed.to_string();
-                    ui.set_seed(seed);
-                    ui.reset_tiles();
+                    ui.set_world(seed, ui.dimension);
                 }
                 Command::Samples(samples) => {
                     ui.samples = samples;
@@ -751,99 +755,20 @@ impl State {
     }
 }
 
-/// A frame copied into a buffer the cpu can read.
-#[cfg(not(target_arch = "wasm32"))]
-struct Readback {
-    buffer: wgpu::Buffer,
-    size: [u32; 2],
-    bytes_per_row: u32,
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-impl Readback {
-    fn copy(device: &wgpu::Device, encoder: &mut wgpu::CommandEncoder, texture: &wgpu::Texture) -> Self {
-        let size = [texture.width(), texture.height()];
-        // rows of a texture copy have to be aligned to 256 bytes
-        let bytes_per_row = (size[0] * 4).next_multiple_of(wgpu::COPY_BYTES_PER_ROW_ALIGNMENT);
-        let buffer = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("capture"),
-            size: (bytes_per_row * size[1]) as u64,
-            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
-            mapped_at_creation: false,
-        });
-        encoder.copy_texture_to_buffer(
-            texture.as_image_copy(),
-            wgpu::TexelCopyBufferInfo {
-                buffer: &buffer,
-                layout: wgpu::TexelCopyBufferLayout {
-                    offset: 0,
-                    bytes_per_row: Some(bytes_per_row),
-                    rows_per_image: None,
-                },
-            },
-            texture.size(),
-        );
-        Self {
-            buffer,
-            size,
-            bytes_per_row,
-        }
-    }
-
-    /// Waits for the copy and writes a png in the background.
-    fn save(self, device: &wgpu::Device, format: wgpu::TextureFormat, path: std::path::PathBuf) -> anyhow::Result<()> {
-        self.buffer.slice(..).map_async(wgpu::MapMode::Read, |_| {});
-        device.poll(wgpu::PollType::wait_indefinitely())?;
-        let bgra = matches!(
-            format,
-            wgpu::TextureFormat::Bgra8Unorm | wgpu::TextureFormat::Bgra8UnormSrgb
-        );
-        let [w, h] = self.size;
-        let mut rgb = Vec::with_capacity((w * h * 3) as usize);
-        {
-            let data = self
-                .buffer
-                .slice(..)
-                .get_mapped_range()
-                .map_err(|e| anyhow::anyhow!("{e:?}"))?;
-            for row in data.chunks_exact(self.bytes_per_row as usize) {
-                for px in row[..(w * 4) as usize].as_chunks::<4>().0 {
-                    rgb.extend_from_slice(&if bgra {
-                        [px[2], px[1], px[0]]
-                    } else {
-                        [px[0], px[1], px[2]]
-                    });
-                }
-            }
-        }
-        std::thread::spawn(move || {
-            if let Some(dir) = path.parent() {
-                let _ = std::fs::create_dir_all(dir);
-            }
-            if let Err(e) = image::RgbImage::from_raw(w, h, rgb).unwrap().save(&path) {
-                log::error!("saving {}: {e}", path.display());
-            }
-        });
-        Ok(())
-    }
-}
-
 impl Ui {
     /// Whether anything is being generated, then frames keep coming to show it.
     fn busy(&self) -> bool {
         self.tiles.pending() > 0 || self.queries.busy()
     }
 
-    /// Tiles still need `reset_tiles`.
-    fn set_seed(&mut self, seed: i64) {
+    /// Switches to another world, at the default height of a new dimension.
+    fn set_world(&mut self, seed: i64, dimension: Dimension) {
+        if dimension != self.dimension {
+            self.sample_height = dimension.default_height();
+        }
         self.seed = seed;
-        self.biome_source = Arc::new(self.dimension.biome_source(seed));
-    }
-
-    fn set_dimension(&mut self, dimension: Dimension) {
         self.dimension = dimension;
-        self.sample_height = dimension.default_height();
-        self.biome_source = Arc::new(dimension.biome_source(self.seed));
+        self.biome_source = Arc::new(dimension.biome_source(seed));
         self.reset_tiles();
     }
 
@@ -876,8 +801,8 @@ impl Ui {
             relief: (self.relief && self.dimension == Dimension::Overworld).then_some(self.relief_quality),
             relief_exact: self.relief_exact,
             highlight: !self.highlighted[self.dimension as usize].is_empty(),
-            max_relief_level: self.advanced.max_relief_level,
-            relief_strength: self.advanced.relief_strength,
+            max_relief_level: self.extras.max_relief_level,
+            relief_strength: self.extras.relief_strength,
             sea_floor: self.sea_floor,
             overlays: self.overlays(),
         };
@@ -886,7 +811,7 @@ impl Ui {
         self.tiles.set_thread_limit(tile_threads);
         self.queries.set_thread_limit(finder_threads);
         self.tiles.set_max_tiles(resources::tiles_in_mib(self.cache_mib));
-        self.tiles.set_fade_seconds(self.advanced.fade_seconds as f64);
+        self.tiles.set_fade_seconds(self.extras.fade_seconds as f64);
         self.zoom_shortcuts(root.ctx());
         self.quads.clear();
         if self.icons.is_none() {
@@ -935,8 +860,7 @@ impl Ui {
                         if let Some(seed) = new_seed
                             && seed != self.seed
                         {
-                            self.set_seed(seed);
-                            changed = true;
+                            self.set_world(seed, self.dimension);
                         }
                         ui.end_row();
                         // text seeds become a number, show which
@@ -1018,7 +942,7 @@ impl Ui {
                     let plural = if self.markers.len() == 1 { "" } else { "s" };
                     ui.label(format!("{} marker{plural}", self.markers.len()));
                     ui.separator();
-                    self.structures_menu(ui);
+                    self.markers_menu(ui);
                     self.biomes_menu(ui);
                     #[cfg(not(target_arch = "wasm32"))]
                     self.seed_search_menu(ui);
@@ -1035,7 +959,7 @@ impl Ui {
             self.map.camera.center = [self.goto[0] as f64 / 4.0, self.goto[1] as f64 / 4.0];
         }
         if let Some(dimension) = new_dimension {
-            self.set_dimension(dimension);
+            self.set_world(self.seed, dimension);
         } else if changed {
             self.reset_tiles();
         }
@@ -1058,7 +982,6 @@ fn with_app_name(attributes: winit::window::WindowAttributes) -> winit::window::
 
 #[cfg(not(target_arch = "wasm32"))]
 pub fn run(seed: i64, dimension: Dimension, script: Option<std::path::PathBuf>) -> anyhow::Result<()> {
-    env_logger::init();
     // unwinding the main thread drops the wayland connection before egui's clipboard thread is done
     // with it, which segfaults and hides how it ended
     let print_panic = std::panic::take_hook();

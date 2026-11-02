@@ -11,7 +11,7 @@ use crate::{
         Ui,
         finder::{Job, MarkerSearch, Occupied},
     },
-    structures::{Found, STRUCTURE_KINDS, rarity},
+    structures::{Found, MARKER_KINDS, ore_of, rarity},
     tile_renderer::WORLD_BORDER_QUARTS,
 };
 
@@ -172,7 +172,7 @@ pub struct Icons(Vec<TextureHandle>);
 impl Icons {
     pub fn load(ctx: &egui::Context) -> Self {
         Self(
-            STRUCTURE_KINDS
+            MARKER_KINDS
                 .iter()
                 .map(|kind| {
                     let image = image::load_from_memory(icon_file(kind.id))
@@ -312,12 +312,12 @@ impl Ui {
     fn update_structures(&mut self, ctx: &egui::Context, rect: Rect) {
         let (min, max) = self.map.visible_blocks(rect);
         let blocks_per_point = self.map.blocks_per_point();
-        let distance_points = (self.advanced.marker_size + self.marker_gap) as f64;
+        let distance_points = (self.extras.marker_size + self.marker_gap) as f64;
         let marker_scale = marker_blocks_per_point(blocks_per_point, rect.size().into());
         // what is just off the screen can still be in the way of what is on it
         let margin = distance_points * blocks_per_point;
         let (min, max) = (min.map(|v| v - margin), max.map(|v| v + margin));
-        let kinds = STRUCTURE_KINDS
+        let kinds = MARKER_KINDS
             .iter()
             .enumerate()
             .filter(|(kind, def)| self.shown_kinds[*kind] && def.dimension == self.dimension)
@@ -328,7 +328,7 @@ impl Ui {
         } else {
             // what fits on the part of the screen with world on it, and some more to choose from
             let fit = markers_that_fit(min, max, distance_points * marker_scale);
-            let choice = (self.advanced.marker_fineness * self.advanced.marker_fineness) as f64;
+            let choice = (self.extras.marker_fineness * self.extras.marker_fineness) as f64;
             // with more kinds the others fill the gaps: half the work for 2% fewer markers
             fit * if kinds >= 3 { choice / 2.0 } else { choice }
         };
@@ -342,7 +342,7 @@ impl Ui {
             overlap: self.marker_overlap,
             rare_first: self.prioritize_rare,
             distance: distance_points * marker_scale,
-            max_tries: self.advanced.marker_tries,
+            max_tries: self.extras.marker_tries,
             max_markers: self.max_markers,
         };
         // only when something changed, there can be a lot of them. Answers keep coming in while they
@@ -367,7 +367,7 @@ impl Ui {
         };
         let mut rounds: Vec<Vec<std::vec::IntoIter<Job>>> = Vec::new();
         let mut known = Vec::new();
-        for (kind, def) in STRUCTURE_KINDS.iter().enumerate() {
+        for (kind, def) in MARKER_KINDS.iter().enumerate() {
             self.sampled[kind] = false;
             if !self.shown_kinds[kind] || def.dimension != self.dimension {
                 continue;
@@ -402,7 +402,7 @@ impl Ui {
 
     fn paint_markers(&self, ui: &egui::Ui, rect: Rect) {
         let Some(icons) = &self.icons else { return };
-        let size = self.advanced.marker_size;
+        let size = self.extras.marker_size;
         let painter = ui.painter_at(rect);
         // a mouse or the last touch shows what is under it
         let pointer = ui.input(|i| i.pointer.latest_pos());
@@ -416,12 +416,14 @@ impl Ui {
             let marker = Rect::from_center_size(at, vec2(size, size));
             icons.image(found.kind, size).paint_at(ui, marker);
             if pointer.is_some_and(|p| marker.contains(p)) {
-                let name = STRUCTURE_KINDS[found.kind].name;
+                let name = MARKER_KINDS[found.kind].name;
                 // the game then looks for a suitable block nearby, in chunks that aren't built here
-                let about = match STRUCTURE_KINDS[found.kind].id {
+                let about = match MARKER_KINDS[found.kind].id {
                     "spawn" => " (within about 80 blocks)".to_owned(),
-                    "copper_vein" => "\nore at y 0 to 50".to_owned(),
-                    "iron_vein" => "\nore at y -60 to -8".to_owned(),
+                    "copper_vein" | "iron_vein" => match ore_of(MARKER_KINDS[found.kind].id) {
+                        Some(ore) => format!("\nore at y {} to {}", ore.heights().start, ore.heights().end),
+                        None => String::new(),
+                    },
                     "end_gateway" => ring_gateways(self.seed)
                         .iter()
                         .position(|spot| *spot == [found.x, found.z])
@@ -447,7 +449,7 @@ impl Ui {
         let painter = ui.painter_at(rect);
         let blocks_per_point = self.map.blocks_per_point();
         let spacing = self.grid.spacing_at(blocks_per_point);
-        let border = (WORLD_BORDER_QUARTS as f64 * 4.0).min(i32::MAX as f64);
+        let border = WORLD_BORDER_QUARTS as f64 * 4.0;
         let (min, max) = self.map.visible_blocks(rect);
         let points = spacing as f64 / blocks_per_point;
         let visibility = line_visibility(points);
@@ -478,34 +480,24 @@ impl Ui {
             painter.galley(background.min, shape, Color32::WHITE);
         };
         // past where lines are drawn there is only the scale bar, however many they would be
-        let lines = |lo: f64, hi: f64| {
-            let all = range(lo, hi);
-            if visibility > 0.0 {
-                all
-            } else {
-                *all.end() + 1..=*all.end()
-            }
-        };
-        for i in lines(min[0], max[0]) {
-            let block = i * spacing;
-            let x = self.map.block_to_screen(rect, [block as f64, 0.0]).x;
-            let stroke = if block == 0 { axis } else { thin };
-            if visibility > 0.0 {
+        if visibility > 0.0 {
+            for i in range(min[0], max[0]) {
+                let block = i * spacing;
+                let x = self.map.block_to_screen(rect, [block as f64, 0.0]).x;
+                let stroke = if block == 0 { axis } else { thin };
                 painter.line_segment([pos2(x, lo_y), pos2(x, hi_y)], stroke);
+                if self.grid.labels && i.rem_euclid(label_every) == 0 {
+                    label(pos2(x + 2.0, lo_y + 2.0), Align2::LEFT_TOP, format_blocks(block));
+                }
             }
-            if self.grid.labels && visibility > 0.0 && i.rem_euclid(label_every) == 0 {
-                label(pos2(x + 2.0, lo_y + 2.0), Align2::LEFT_TOP, format_blocks(block));
-            }
-        }
-        for i in lines(min[1], max[1]) {
-            let block = i * spacing;
-            let y = self.map.block_to_screen(rect, [0.0, block as f64]).y;
-            let stroke = if block == 0 { axis } else { thin };
-            if visibility > 0.0 {
+            for i in range(min[1], max[1]) {
+                let block = i * spacing;
+                let y = self.map.block_to_screen(rect, [0.0, block as f64]).y;
+                let stroke = if block == 0 { axis } else { thin };
                 painter.line_segment([pos2(lo_x, y), pos2(hi_x, y)], stroke);
-            }
-            if self.grid.labels && visibility > 0.0 && i.rem_euclid(label_every) == 0 {
-                label(pos2(lo_x + 2.0, y + 2.0), Align2::LEFT_TOP, format_blocks(block));
+                if self.grid.labels && i.rem_euclid(label_every) == 0 {
+                    label(pos2(lo_x + 2.0, y + 2.0), Align2::LEFT_TOP, format_blocks(block));
+                }
             }
         }
         // a scale bar for the distance between lines
@@ -548,7 +540,7 @@ mod tests {
 
     fn found(id: &str, x: i32, z: i32) -> Found {
         Found {
-            kind: STRUCTURE_KINDS.iter().position(|kind| kind.id == id).unwrap(),
+            kind: crate::structures::kind_index(id),
             x,
             z,
         }
@@ -696,7 +688,7 @@ mod tests {
 
     #[test]
     fn every_kind_has_an_icon() {
-        for kind in STRUCTURE_KINDS {
+        for kind in MARKER_KINDS {
             assert!(image::load_from_memory(icon_file(kind.id)).is_ok(), "{}", kind.id);
         }
     }

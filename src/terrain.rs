@@ -63,7 +63,7 @@ impl Terrain {
     pub fn new(seed: i64) -> Self {
         init_registry();
         Self {
-            seed: generator_seed(seed) as i64,
+            seed,
             source: Dimension::Overworld.biome_source(seed),
             noises: Noises::new(seed),
         }
@@ -109,7 +109,7 @@ impl Terrain {
                 self.seed,
                 chunk_x,
                 chunk_z,
-                <OverworldNoises as DimensionNoises>::Settings::SEA_LEVEL,
+                SEA_LEVEL,
                 &noises.noises,
                 &noises.splitter,
                 &template_pools,
@@ -135,7 +135,7 @@ const SHADE_STRENGTH: f32 = 0.9;
 const MAX_ALPHA: f32 = 0.55;
 /// Samples further apart than this see lower slopes of the same terrain, which is made up for.
 const FULL_SLOPE_DISTANCE: f32 = 4.0;
-const SEA_LEVEL: i32 = 63;
+const SEA_LEVEL: i32 = <OverworldNoises as DimensionNoises>::Settings::SEA_LEVEL;
 
 impl Terrain {
     /// A hillshade tile of `size * size` pixels, `stride` blocks apart. Each height is drawn as one

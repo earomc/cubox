@@ -43,11 +43,6 @@ pub enum Job {
     },
 }
 
-#[derive(Clone, PartialEq, Eq, Debug)]
-pub enum Reply {
-    Found(Vec<Found>),
-}
-
 #[cfg(any(target_arch = "wasm32", test))]
 fn numbers(words: &[&str]) -> Option<Vec<i32>> {
     words.iter().map(|word| word.parse().ok()).collect()
@@ -92,39 +87,22 @@ impl Job {
     }
 }
 
+/// The answer to a job as one line of text, for sending from web workers.
 #[cfg(any(target_arch = "wasm32", test))]
-impl Reply {
-    pub fn encode(&self) -> String {
-        let mut line = String::new();
-        match self {
-            Reply::Found(found) => {
-                line.push('f');
-                for f in found {
-                    line += &format!(" {} {} {}", f.kind, f.x, f.z);
-                }
-            }
-        }
-        line
-    }
+pub fn encode_found(found: &[Found]) -> String {
+    found.iter().map(|f| format!("{} {} {} ", f.kind, f.x, f.z)).collect()
+}
 
-    pub fn decode(line: &str) -> Option<Self> {
-        let words: Vec<&str> = line.split(' ').collect();
-        let n = numbers(&words[1..])?;
-        match words[0] {
-            "f" => Some(Reply::Found(
-                n.as_chunks::<3>()
-                    .0
-                    .iter()
-                    .map(|c| Found {
-                        kind: c[0] as usize,
-                        x: c[1],
-                        z: c[2],
-                    })
-                    .collect(),
-            )),
-            _ => None,
-        }
-    }
+#[cfg(any(target_arch = "wasm32", test))]
+pub fn decode_found(line: &str) -> Option<Vec<Found>> {
+    let words: Vec<&str> = line.split_whitespace().collect();
+    let n = numbers(&words)?;
+    let found = n.as_chunks::<3>().0.iter().map(|c| Found {
+        kind: c[0] as usize,
+        x: c[1],
+        z: c[2],
+    });
+    Some(found.collect())
 }
 
 /// Answers jobs for one world, shared by the workers that have shared memory.
@@ -153,7 +131,7 @@ impl WorldQueries {
             .as_ref()
     }
 
-    pub fn run(&self, job: &Job) -> Reply {
+    pub fn run(&self, job: &Job) -> Vec<Found> {
         match job {
             Job::Bins {
                 kind,
@@ -162,22 +140,19 @@ impl WorldQueries {
                 z,
                 side,
                 tries,
-            } => {
-                let found = self.finder().map_or(Vec::new(), |finder| {
-                    (*z..z + side)
-                        .flat_map(|z| (*x..x + side).map(move |x| (x, z)))
-                        .flat_map(|(x, z)| {
-                            if tries.is_empty() {
-                                finder.all_in_bin(*kind, *level, x, z)
-                            } else {
-                                finder.in_bin(*kind, *level, x, z, tries.clone()).into_iter().collect()
-                            }
-                        })
-                        .collect()
-                });
-                Reply::Found(found)
-            }
-            Job::Rings { kind } => Reply::Found(self.finder().map_or(Vec::new(), |finder| finder.rings(*kind))),
+            } => self.finder().map_or(Vec::new(), |finder| {
+                (*z..z + side)
+                    .flat_map(|z| (*x..x + side).map(move |x| (x, z)))
+                    .flat_map(|(x, z)| {
+                        if tries.is_empty() {
+                            finder.all_in_bin(*kind, *level, x, z)
+                        } else {
+                            finder.in_bin(*kind, *level, x, z, tries.clone()).into_iter().collect()
+                        }
+                    })
+                    .collect()
+            }),
+            Job::Rings { kind } => self.finder().map_or(Vec::new(), |finder| finder.rings(*kind)),
         }
     }
 }
@@ -532,19 +507,16 @@ impl Queries {
         }
     }
 
-    fn store(&mut self, job: Job, reply: Reply) {
-        match (job, reply) {
-            (
-                Job::Bins {
-                    kind,
-                    level,
-                    x,
-                    z,
-                    tries,
-                    ..
-                },
-                Reply::Found(found),
-            ) => {
+    fn store(&mut self, job: Job, found: Vec<Found>) {
+        match job {
+            Job::Bins {
+                kind,
+                level,
+                x,
+                z,
+                tries,
+                ..
+            } => {
                 if self.bins.len() >= MAX_BINS {
                     self.bins.clear();
                 }
@@ -552,7 +524,7 @@ impl Queries {
                 state.found.extend(found);
                 state.tried = state.tried.max(tries.end);
             }
-            (Job::Rings { kind }, Reply::Found(found)) => {
+            Job::Rings { kind } => {
                 self.rings.insert(kind, found);
             }
         }
@@ -562,7 +534,6 @@ impl Queries {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::structures::STRUCTURE_KINDS;
 
     fn near(blocks_per_point: f64) -> MarkerSearch {
         // about as many as there are squares of 24 points in the views of these tests
@@ -645,7 +616,7 @@ mod tests {
             seed: 12345,
             dimension: Dimension::Overworld,
         };
-        let kind = STRUCTURE_KINDS.iter().position(|kind| kind.id == "swamp_hut").unwrap();
+        let kind = crate::structures::kind_index("swamp_hut");
         let bins = |round: usize, queries: &mut Queries, occupied: &dyn Occupied| {
             let (min, max) = ([-300_000.0, -300_000.0], [300_000.0, 300_000.0]);
             queries
@@ -693,8 +664,8 @@ mod tests {
         ] {
             assert_eq!(Job::decode(&job.encode()), Some(job));
         }
-        for reply in [Reply::Found(vec![]), Reply::Found(vec![Found { kind: 1, x: -5, z: 6 }])] {
-            assert_eq!(Reply::decode(&reply.encode()), Some(reply));
+        for found in [vec![], vec![Found { kind: 1, x: -5, z: 6 }]] {
+            assert_eq!(decode_found(&encode_found(&found)), Some(found));
         }
     }
 
@@ -704,8 +675,8 @@ mod tests {
             seed: 12345,
             dimension: Dimension::Overworld,
         });
-        let stronghold = STRUCTURE_KINDS.iter().position(|kind| kind.id == "stronghold").unwrap();
-        let village = STRUCTURE_KINDS.iter().position(|kind| kind.id == "village").unwrap();
+        let stronghold = crate::structures::kind_index("stronghold");
+        let village = crate::structures::kind_index("village");
         let (min, max) = ([-1000.0, -1000.0], [1000.0, 1000.0]);
         for _ in 0..30_000 {
             let mut jobs = queries.visible(stronghold, min, max, near(16.0), &Empty).jobs;

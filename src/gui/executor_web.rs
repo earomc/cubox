@@ -19,7 +19,7 @@ use crate::{
         resources,
         world::{Finished, Queue, Task, World, WorldParams},
     },
-    seedfind::spec::NoiseParameter,
+    noise::NoiseParameter,
     tile_renderer::{Detail, Estimate, Layer, Tile, TileKey},
 };
 
@@ -157,7 +157,7 @@ fn spawn_worker(inner: &Rc<RefCell<Inner>>, index: usize) -> Result<Worker, JsVa
 fn encode_request(params: &WorldParams, key: TileKey, task: &Task) -> (Array, Array) {
     let transfer = Array::new();
     let children = match task {
-        Task::Render | Task::Numbers | Task::Relief => JsValue::NULL,
+        Task::Render | Task::Numbers | Task::Overlay => JsValue::NULL,
         Task::Downsample(children, biomes) => {
             let array = Array::new();
             for child in children {
@@ -243,7 +243,7 @@ pub fn worker_run(request: &Array) -> Result<Array, JsValue> {
         .checked_sub(FIRST_NOISE_NUMBER)
         .and_then(|index| NoiseParameter::ALL.get(index as usize).copied());
     let detail = Detail::decode(layer_number).filter(|_| noise.is_none());
-    let relief = detail.is_some() || noise.is_some();
+    let overlay = detail.is_some() || noise.is_some();
     let key = TileKey {
         layer: match (noise, detail) {
             (Some(parameter), _) => Layer::Noise(parameter),
@@ -261,8 +261,8 @@ pub fn worker_run(request: &Array) -> Result<Array, JsValue> {
         sample_height: params.sample_height,
     };
     let children = request.get(9);
-    let task = if relief {
-        Task::Relief
+    let task = if overlay {
+        Task::Overlay
     } else if request.get(12).is_truthy() {
         Task::Numbers
     } else if children.is_null() {

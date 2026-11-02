@@ -7,6 +7,7 @@ pub mod features;
 pub mod gui;
 pub mod noise;
 pub mod seed;
+#[cfg(not(target_arch = "wasm32"))]
 pub mod seedfind;
 pub mod structures;
 pub mod terrain;

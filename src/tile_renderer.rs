@@ -9,6 +9,9 @@ use crate::biome_colors::{UNKNOWN_BIOME, biome_color, biome_number};
 /// The world border is at ±29,999,984 blocks.
 pub const WORLD_BORDER_QUARTS: i32 = 29_999_984 / 4;
 
+/// The coarsest level of the map: a pixel covers `2^MAX_SCALE` quarts per side.
+pub const MAX_SCALE: u8 = 16;
+
 /// A color in Oklab. Colors are averaged in Oklab because it is perceptual: mixed areas keep their
 /// perceived lightness and color. Averaging linear light makes mixes pale, averaging sRGB bytes dark.
 pub type Lab = [f32; 3];
@@ -24,7 +27,7 @@ pub enum Layer {
         sea_floor: bool,
     },
     /// a climate noise as colors, drawn over the biomes
-    Noise(crate::seedfind::spec::NoiseParameter),
+    Noise(crate::noise::NoiseParameter),
 }
 
 /// Where a relief tile's heights come from.
@@ -81,8 +84,33 @@ impl TileKey {
 
     /// World origin of the tile in quarts.
     pub fn origin(&self) -> (i32, i32) {
-        let size = self.tile_size_px as i32 * self.stride();
-        (self.x * size, self.z * size)
+        let size = self.tile_size_px as i32;
+        ((self.x * size) << self.scale, (self.z * size) << self.scale)
+    }
+
+    /// The tile `up` levels coarser that covers this one.
+    pub fn ancestor(self, up: i32) -> Self {
+        Self {
+            scale: self.scale + up as u8,
+            x: self.x >> up,
+            z: self.z >> up,
+            ..self
+        }
+    }
+
+    /// One of the 4 tiles one level finer inside this one, `dx` and `dz` are 0 or 1.
+    pub fn child(self, dx: i32, dz: i32) -> Self {
+        Self {
+            scale: self.scale - 1,
+            x: self.x * 2 + dx,
+            z: self.z * 2 + dz,
+            ..self
+        }
+    }
+
+    /// The quick one sample per pixel version of this tile.
+    pub fn cover(self) -> Self {
+        Self { samples: 1, ..self }
     }
 }
 

@@ -5,6 +5,7 @@ use std::{
 };
 
 use crate::{
+    biome_colors::UNKNOWN_BIOME,
     gui::{
         executor::Executor,
         map_renderer::{MapRenderer, TileTexture},
@@ -32,9 +33,6 @@ struct Entry {
     mask_arrived: f64,
     last_used_frame: u64,
 }
-
-/// Not the number of a biome, so the table of `MapRenderer::set_darkening` darkens it.
-const UNKNOWN_BIOME: u8 = 255;
 
 /// Caches tile textures and generates missing tiles with the platform's `Executor`.
 pub struct TileCache {
@@ -154,7 +152,7 @@ impl TileCache {
         }
         if matches!(key.layer, Layer::Relief { .. } | Layer::Noise(_)) {
             if allow_sampling {
-                self.queue(key, Task::Relief);
+                self.queue(key, Task::Overlay);
             }
         } else if let Some((children, biomes)) = self.finished_children(&key) {
             self.queue(key, Task::Downsample(children, biomes));
@@ -299,10 +297,5 @@ impl TileCache {
 
 /// The 4 tiles one scale finer covering `key`: top left, top right, bottom left, bottom right.
 fn children(key: &TileKey) -> [TileKey; 4] {
-    [(0, 0), (1, 0), (0, 1), (1, 1)].map(|(dx, dz)| TileKey {
-        scale: key.scale - 1,
-        x: key.x * 2 + dx,
-        z: key.z * 2 + dz,
-        ..*key
-    })
+    [(0, 0), (1, 0), (0, 1), (1, 1)].map(|(dx, dz)| key.child(dx, dz))
 }

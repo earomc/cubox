@@ -39,8 +39,8 @@ pub enum Task {
     /// only the biome numbers of a tile that was made without them
     Numbers,
 
-    /// sample the terrain for a relief tile, the most expensive work
-    Relief,
+    /// make a tile drawn over the biomes, which needs the terrain or noises: the most expensive work
+    Overlay,
 }
 
 impl Task {
@@ -49,7 +49,7 @@ impl Task {
             Task::Downsample(..) => 0,
             Task::Render => 1,
             Task::Numbers => 2,
-            Task::Relief => 3,
+            Task::Overlay => 3,
         }
     }
 }
@@ -146,7 +146,7 @@ impl World {
     /// Runs a task. `keep_going` is asked while sampling, a tile it says no to is abandoned.
     pub fn run(&self, key: TileKey, task: Task, keep_going: &dyn Fn() -> bool) -> Option<Tile> {
         match task {
-            Task::Relief => return self.relief(key, keep_going),
+            Task::Overlay => return self.overlay(key, keep_going),
             Task::Numbers => {
                 return render_numbers(&self.source, key, keep_going).map(|biomes| Tile {
                     rgb: Vec::new(),
@@ -165,36 +165,31 @@ impl World {
                 &shading,
             )),
             Task::Render => render_tile(&self.source, key, &shading, keep_going),
-            Task::Numbers | Task::Relief => unreachable!(),
+            Task::Numbers | Task::Overlay => unreachable!(),
         }
     }
 
-    /// A relief tile: its `rgb` are RGBA pixels and it has no estimates.
-    fn relief(&self, key: TileKey, keep_going: &dyn Fn() -> bool) -> Option<Tile> {
-        if let Layer::Noise(parameter) = key.layer {
-            let field = self
+    /// A tile of a layer over the biomes: its `rgb` are RGBA pixels and it has no estimates.
+    fn overlay(&self, key: TileKey, keep_going: &dyn Fn() -> bool) -> Option<Tile> {
+        let rgb = match key.layer {
+            Layer::Noise(parameter) => self
                 .noise
                 .get_or_init(|| NoiseField::new(self.params.dimension, self.params.seed))
-                .as_ref()?;
-            return field.tile(parameter, key, keep_going).map(|rgb| Tile {
-                rgb,
-                estimates: Vec::new(),
-                biomes: Vec::new(),
-            });
-        }
-        let terrain = self.terrain.get_or_init(|| Terrain::new(self.params.seed));
-        let Layer::Relief { detail, sea_floor } = key.layer else {
-            return None;
+                .as_ref()?
+                .tile(parameter, key, keep_going)?,
+            Layer::Relief { detail, sea_floor } => {
+                let (x, z) = key.origin();
+                self.terrain.get_or_init(|| Terrain::new(self.params.seed)).relief(
+                    [x * 4, z * 4],
+                    key.stride() * 4,
+                    key.tile_size_px,
+                    detail,
+                    sea_floor,
+                    keep_going,
+                )?
+            }
+            Layer::Biome => return None,
         };
-        let (x, z) = key.origin();
-        let rgb = terrain.relief(
-            [x * 4, z * 4],
-            key.stride() * 4,
-            key.tile_size_px,
-            detail,
-            sea_floor,
-            keep_going,
-        )?;
         Some(Tile {
             rgb,
             estimates: Vec::new(),

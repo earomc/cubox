@@ -33,7 +33,7 @@ use std::{collections::VecDeque, path::PathBuf, time::Instant};
 
 use anyhow::{Context, bail};
 
-use crate::seedfind::spec::NoiseParameter;
+use crate::noise::NoiseParameter;
 use crate::{dimension::Dimension, gui::menus::ReliefQuality};
 
 pub enum Command {

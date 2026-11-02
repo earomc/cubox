@@ -14,7 +14,7 @@ use crate::{
 const WORLD_BORDER_QUARTS: f64 = tile_renderer::WORLD_BORDER_QUARTS as f64;
 const MIN_ZOOM: f64 = -4.0; // 16 screen points per quart
 const MAX_ZOOM: f64 = 15.0;
-const MAX_LEVEL: i32 = 16;
+const MAX_LEVEL: i32 = tile_renderer::MAX_SCALE as i32;
 /// Seconds the zoom level has to stay unchanged before tiles get sampled.
 const LEVEL_SETTLE_SECONDS: f64 = 0.12;
 /// Cached tiles of other levels stand in for visible tiles that aren't there yet: coarser ones
@@ -72,7 +72,7 @@ pub struct MapSettings {
     pub relief_strength: f32,
     /// the relief is that of the sea floor instead of the water
     pub sea_floor: bool,
-    /// shown over the biomes with their opacity: climate noises and the ore veins
+    /// shown over the biomes with their opacity: climate noises
     pub overlays: Vec<(Layer, f32)>,
 }
 
@@ -208,13 +208,7 @@ impl MapView {
             .filter(|key| !tiles.is_finished(key) && !has_stand_in(tiles, key))
         {
             let up = cover_level - level;
-            let coarse = TileKey {
-                scale: cover_level as u8,
-                x: key.x >> up,
-                z: key.z >> up,
-                ..*key
-            }
-            .cover();
+            let coarse = key.ancestor(up).cover();
             if coarse != *key && !cover.contains(&coarse) {
                 cover.push(coarse);
             }
@@ -444,17 +438,6 @@ impl Quads<'_> {
     }
 }
 
-trait Cover {
-    /// The quick one sample per pixel version of a tile, see `COVER_LEVELS`.
-    fn cover(self) -> Self;
-}
-
-impl Cover for TileKey {
-    fn cover(self) -> Self {
-        TileKey { samples: 1, ..self }
-    }
-}
-
 /// The tile, or its cover version if only that is cached.
 fn cached(tiles: &TileCache, key: TileKey) -> Option<TileKey> {
     [key, key.cover()].into_iter().find(|k| tiles.is_finished(k))
@@ -462,15 +445,8 @@ fn cached(tiles: &TileCache, key: TileKey) -> Option<TileKey> {
 
 /// The closest cached coarser tile covering `key`, and how many levels up it is.
 fn ancestor(tiles: &TileCache, key: &TileKey) -> Option<(TileKey, i32)> {
-    (1..=MAX_STAND_IN_UP.min(MAX_LEVEL - key.scale as i32)).find_map(|up| {
-        let parent = TileKey {
-            scale: key.scale + up as u8,
-            x: key.x >> up,
-            z: key.z >> up,
-            ..*key
-        };
-        cached(tiles, parent).map(|parent| (parent, up))
-    })
+    (1..=MAX_STAND_IN_UP.min(MAX_LEVEL - key.scale as i32))
+        .find_map(|up| cached(tiles, key.ancestor(up)).map(|parent| (parent, up)))
 }
 
 /// Whether any cached tile of another level, or the cover of this one, covers (part of) `key`.
@@ -519,20 +495,11 @@ fn cached_mask(tiles: &mut TileCache, key: TileKey) -> Option<Rc<TileTexture>> {
     tiles.mask(&key).or_else(|| tiles.mask(&key.cover()))
 }
 
-fn child_of(key: TileKey, dx: i32, dz: i32) -> TileKey {
-    TileKey {
-        scale: key.scale - 1,
-        x: key.x * 2 + dx,
-        z: key.z * 2 + dz,
-        ..key
-    }
-}
-
 fn has_finer_mask(tiles: &mut TileCache, key: TileKey, depth: i32) -> bool {
     key.scale > 0
         && depth > 0
         && [(0, 0), (1, 0), (0, 1), (1, 1)].into_iter().any(|(dx, dz)| {
-            let child = child_of(key, dx, dz);
+            let child = key.child(dx, dz);
             cached_mask(tiles, child).is_some() || has_finer_mask(tiles, child, depth - 1)
         })
 }
@@ -548,7 +515,7 @@ fn draw_mask_stand_ins(out: &mut Quads, tiles: &mut TileCache, key: TileKey, scr
     } else if has_finer_mask(tiles, key, depth) {
         let half = screen.size() / 2.0;
         for (dx, dz) in [(0, 0), (1, 0), (0, 1), (1, 1)] {
-            let child = child_of(key, dx, dz);
+            let child = key.child(dx, dz);
             let child_screen = Rect::from_min_size(screen.min + vec2(dx as f32 * half.x, dz as f32 * half.y), half);
             match cached_mask(tiles, child) {
                 Some(tex) => out.push(tex, child_screen, FULL_UV, alpha),
@@ -556,15 +523,8 @@ fn draw_mask_stand_ins(out: &mut Quads, tiles: &mut TileCache, key: TileKey, scr
             }
         }
     } else {
-        let parent = (1..=MAX_STAND_IN_UP.min(MAX_LEVEL - key.scale as i32)).find_map(|up| {
-            let parent = TileKey {
-                scale: key.scale + up as u8,
-                x: key.x >> up,
-                z: key.z >> up,
-                ..key
-            };
-            cached_mask(tiles, parent).map(|tex| (tex, up))
-        });
+        let parent = (1..=MAX_STAND_IN_UP.min(MAX_LEVEL - key.scale as i32))
+            .find_map(|up| cached_mask(tiles, key.ancestor(up)).map(|tex| (tex, up)));
         if let Some((tex, up)) = parent {
             out.push(tex, screen, part_of_ancestor(&key, up), alpha);
         } else if let Some(tex) = tiles.unknown_mask() {
@@ -580,7 +540,7 @@ fn draw_descendants(out: &mut Quads, tiles: &mut TileCache, now: f64, key: TileK
     }
     let half = screen.size() / 2.0;
     for (dx, dz) in [(0, 0), (1, 0), (0, 1), (1, 1)] {
-        let child = child_of(key, dx, dz);
+        let child = key.child(dx, dz);
         let child_screen = Rect::from_min_size(screen.min + vec2(dx as f32 * half.x, dz as f32 * half.y), half);
         match cached(tiles, child).and_then(|child| tiles.get(&child, now)) {
             Some((tex, _)) => out.push(tex, child_screen, FULL_UV, 1.0),
