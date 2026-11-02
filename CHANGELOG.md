@@ -8,6 +8,8 @@ The release workflow publishes the section of a version as its release notes.
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-11-02
+
 ### Changed
 
 - Finding seeds and finding locations are two searches, with two tabs and `cubox seeds` and `cubox locations <seed>`
@@ -198,7 +200,8 @@ First release.
 - `cubox img` renders a map to a PNG. `cubox gui --script` drives the view and takes screenshots.
 - Builds for Linux, macOS and Windows on x86_64 and ARM.
 
-[Unreleased]: https://github.com/earomc/cubox/compare/v0.6.0...HEAD
+[Unreleased]: https://github.com/earomc/cubox/compare/v0.7.0...HEAD
+[0.7.0]: https://github.com/earomc/cubox/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/earomc/cubox/compare/v0.5.1...v0.6.0
 [0.5.1]: https://github.com/earomc/cubox/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/earomc/cubox/compare/v0.4.2...v0.5.0
