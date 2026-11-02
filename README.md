@@ -93,6 +93,7 @@ Unpack it and run `cubox`. Each release also lists SHA-256 checksums.
 |---|---|
 | Arrow keys, or drag | Pan |
 | + and −, or scroll, or pinch | Zoom the map |
+| Right click, or long press | Menu of the map: copy a location or teleport command, go through a nether portal |
 | Ctrl + and Ctrl −, Ctrl 0 | Scale the interface, reset its scale |
 | Esc | Quit (desktop) |
 
