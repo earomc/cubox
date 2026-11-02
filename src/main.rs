@@ -32,7 +32,8 @@ fn main() {
             run_gui(seed, dimension, script);
         }
         Some(("img", matches)) => img(matches),
-        Some(("find", matches)) => find(matches),
+        Some(("seeds", matches)) => seeds(matches),
+        Some(("locations", matches)) => locations(matches),
         // started without arguments, e.g. by double clicking it
         _ => run_gui(0, Dimension::Overworld, None),
     }
@@ -115,34 +116,42 @@ fn img(matches: &clap::ArgMatches) {
     }
 }
 
-/// `cubox find`: matches on stdout as they come, one per line, how it is going on stderr.
 #[cfg(not(target_arch = "wasm32"))]
-fn find(matches: &clap::ArgMatches) {
+fn fail(message: String) -> ! {
+    eprintln!("error: {message}");
+    std::process::exit(2);
+}
+
+/// What to look for, from the command line or a file.
+#[cfg(not(target_arch = "wasm32"))]
+fn search_text(matches: &clap::ArgMatches) -> String {
+    match matches.get_one::<std::path::PathBuf>("file") {
+        Some(path) => {
+            std::fs::read_to_string(path).unwrap_or_else(|err| fail(format!("reading {}: {err}", path.display())))
+        }
+        None => matches.get_one::<String>("conditions").cloned().unwrap_or_default(),
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn search_threads(matches: &clap::ArgMatches) -> usize {
+    matches
+        .get_one::<usize>("threads")
+        .copied()
+        .unwrap_or_else(|| std::thread::available_parallelism().map_or(4, |n| n.get()))
+}
+
+/// `cubox seeds`: matches on stdout as they come, one per line, how it is going on stderr.
+#[cfg(not(target_arch = "wasm32"))]
+fn seeds(matches: &clap::ArgMatches) {
     use cubox::seedfind::{
         engine::Match,
         run::{Search, Seeds},
         spec,
     };
-    use std::time::Duration;
 
-    let fail = |message: String| -> ! {
-        eprintln!("error: {message}");
-        std::process::exit(2);
-    };
-    let text = match matches.get_one::<std::path::PathBuf>("file") {
-        Some(path) => {
-            std::fs::read_to_string(path).unwrap_or_else(|err| fail(format!("reading {}: {err}", path.display())))
-        }
-        None => matches.get_one::<String>("conditions").cloned().unwrap_or_default(),
-    };
-    let conditions = spec::parse(&text).unwrap_or_else(|err| fail(err));
-    let seeds = if let Some(seed) = matches.get_one::<i64>("in-seed") {
-        Seeds::Locations {
-            seed: *seed,
-            radius: *matches.get_one::<i32>("within").unwrap(),
-            center: *matches.get_one::<[i32; 2]>("of").unwrap(),
-        }
-    } else if let Some(from) = matches.get_one::<i64>("from") {
+    let conditions = spec::parse_seeds(&search_text(matches)).unwrap_or_else(|err| fail(err));
+    let seeds = if let Some(from) = matches.get_one::<i64>("from") {
         Seeds::From(*from)
     } else if let Some(path) = matches.get_one::<std::path::PathBuf>("seeds") {
         let text =
@@ -152,17 +161,11 @@ fn find(matches: &clap::ArgMatches) {
     } else {
         Seeds::Random(cubox::seed::random_seed() as u64)
     };
-    let threads = matches
-        .get_one::<usize>("threads")
-        .copied()
-        .unwrap_or_else(|| std::thread::available_parallelism().map_or(4, |n| n.get()));
-    // an area has an end, so all of it unless asked otherwise
-    let limit = matches
-        .get_one::<u64>("limit")
-        .copied()
-        .unwrap_or(if matches.contains_id("in-seed") { u64::MAX } else { 10 });
+    let step = *matches.get_one::<i32>("step").unwrap();
+    let limit = *matches.get_one::<u64>("limit").unwrap();
     let tested = matches.get_one::<u64>("tested").copied();
     let top = *matches.get_one::<usize>("top").unwrap();
+    let search = Search::seeds(&conditions, seeds, search_threads(matches), step).unwrap_or_else(|err| fail(err));
 
     let sort_best = |kept: &mut Vec<Match>| {
         kept.sort_by(|a, b| b.score.unwrap_or(f64::MIN).total_cmp(&a.score.unwrap_or(f64::MIN)));
@@ -172,45 +175,91 @@ fn find(matches: &clap::ArgMatches) {
         let hits: Vec<String> = found.hits.iter().map(|hit| format!("{},{}", hit.x, hit.z)).collect();
         format!("{} {score} {}", found.seed, hits.join(" "))
     };
-    let search = Search::start(&conditions, seeds, threads).unwrap_or_else(|err| fail(err));
-    let (mut shown, mut last_report, mut kept): (u64, _, Vec<Match>) = (0, Instant::now(), Vec::new());
-    let done = |search: &Search, ended: bool, shown: u64| {
-        ended || tested.map_or(shown >= limit, |tested| search.counters.covered() >= tested)
+    let (mut shown, mut kept): (u64, Vec<Match>) = (0, Vec::new());
+    report(
+        &search,
+        |_, found| {
+            shown += 1;
+            if tested.is_some() {
+                kept.push(found);
+                // only the best are shown, a common match must not fill the memory
+                if kept.len() >= top.max(1) * 2 + 1024 {
+                    sort_best(&mut kept);
+                    kept.truncate(top);
+                }
+            } else {
+                println!("{}", line(&found));
+            }
+            shown
+        },
+        |search, shown| tested.map_or(shown >= limit, |tested| search.counters.covered() >= tested),
+    );
+    sort_best(&mut kept);
+    for found in kept.iter().take(top) {
+        println!("{}", line(found));
+    }
+}
+
+/// `cubox locations`: what was found on stdout as it comes, how it is going on stderr.
+#[cfg(not(target_arch = "wasm32"))]
+fn locations(matches: &clap::ArgMatches) {
+    use cubox::seedfind::{
+        run::{Area, Search},
+        spec,
     };
+
+    let locations = spec::parse_locations(&search_text(matches)).unwrap_or_else(|err| fail(err));
+    let area = Area {
+        seed: *matches.get_one::<i64>("seed").unwrap(),
+        radius: *matches.get_one::<i32>("within").unwrap(),
+        center: *matches.get_one::<[i32; 2]>("of").unwrap(),
+    };
+    let step = *matches.get_one::<i32>("step").unwrap();
+    let limit = matches.get_one::<u64>("limit").copied().unwrap_or(u64::MAX);
+    let search = Search::locations(&locations, area, search_threads(matches), step).unwrap_or_else(|err| fail(err));
+    let mut shown = 0;
+    report(
+        &search,
+        |_, found| {
+            shown += 1;
+            let score = found.score.map_or("-".to_owned(), |score| format!("{score:.0}"));
+            let hits: Vec<String> = found.hits.iter().map(|hit| format!("{},{}", hit.x, hit.z)).collect();
+            println!("{} {score}", hits.join(" "));
+            shown
+        },
+        |_, shown| shown >= limit,
+    );
+}
+
+/// Takes the matches of a search until `enough` says so or it ends, saying how it goes on stderr.
+/// `take` returns how many there have been.
+#[cfg(not(target_arch = "wasm32"))]
+fn report(
+    search: &cubox::seedfind::run::Search,
+    mut take: impl FnMut(&cubox::seedfind::run::Search, cubox::seedfind::engine::Match) -> u64,
+    enough: impl Fn(&cubox::seedfind::run::Search, u64) -> bool,
+) {
+    use std::{sync::mpsc::RecvTimeoutError, time::Duration};
+
+    let (mut shown, mut last_report) = (0, Instant::now());
     loop {
         let mut ended = false;
         match search.results.recv_timeout(Duration::from_millis(100)) {
-            Ok(found) => {
-                shown += 1;
-                if tested.is_some() {
-                    kept.push(found);
-                    // only the best are shown, a common match must not fill the memory
-                    if kept.len() >= top.max(1) * 2 + 1024 {
-                        sort_best(&mut kept);
-                        kept.truncate(top);
-                    }
-                } else {
-                    println!("{}", line(&found));
-                }
-            }
+            Ok(found) => shown = take(search, found),
             // what is left of a finished search has come by now, workers send before saying so
-            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => ended = search.is_done(),
-            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => ended = true,
+            Err(RecvTimeoutError::Timeout) => ended = search.is_done(),
+            Err(RecvTimeoutError::Disconnected) => ended = true,
         }
         if last_report.elapsed() >= Duration::from_secs(2) {
             last_report = Instant::now();
             eprintln!("{}", search.status().replace('\n', ", "));
         }
-        if done(&search, ended, shown) {
+        if ended || enough(search, shown) {
             break;
         }
     }
     eprintln!("{}", search.status().replace('\n', ", "));
     search.stop();
-    sort_best(&mut kept);
-    for found in kept.iter().take(top) {
-        println!("{}", line(found));
-    }
 }
 
 #[cfg(not(target_arch = "wasm32"))]

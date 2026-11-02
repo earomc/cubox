@@ -8,6 +8,21 @@ The release workflow publishes the section of a version as its release notes.
 
 ## [Unreleased]
 
+### Changed
+
+- Finding seeds and finding locations are two searches, with two tabs and `cubox seeds` and `cubox locations <seed>`
+  instead of `cubox find`. **`cubox find` is gone.**
+- A location search's first line is what you are looking for, and each result is one of those: every village, every
+  group of witch huts, each connected patch of a biome with its size. The other lines are conditions around it, and
+  `within` only means how far from it. Before, results were spots near something, and the number decided how many spots
+  were tried.
+- Biomes and noises are looked at every 4 blocks everywhere, which is exact and misses nothing, instead of on a grid that
+  gets coarser with the area. **Searches with large biome areas take much longer**, `--step` or "Biomes every" in the
+  panel trades that back. See `docs/seed-search.md`.
+- `area>=` counts the part of a patch inside the area.
+- `present` and `absent` are gone: `biome desert within 300`, `not biome desert within 300`. `count>=1` can be left out.
+- Stop and Pause work in the middle of a seed.
+
 ## [0.6.0] - 2026-11-02
 
 ### Added

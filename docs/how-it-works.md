@@ -25,7 +25,7 @@ The library has no window of its own in these parts:
 | `noise` | climate noises, ore veins and what is solid underground |
 | `structures` | the kinds of markers, and where they really generate, using the game's code |
 | `features` | geodes and end gateways, from the game's random numbers |
-| `seedfind` | seed search: `spec` reads conditions, `engine` checks them, `run` goes through seeds on threads |
+| `seedfind` | searches: `spec` reads them, `engine` checks conditions and connects patches, `run` goes through seeds or an area on threads |
 
 `gui` is the viewer. Its work is the same on every platform, only where it runs differs:
 

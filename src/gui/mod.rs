@@ -557,10 +557,11 @@ impl State {
                 }
                 Command::Noise(None) => ui.noise.iter_mut().for_each(|noise| noise.shown = false),
                 Command::OpenFirstMatch => ui.script_open_first_match(),
-                Command::SearchSeeds(text) => ui.seed_search.script_start(&text, ui.seed, None),
+                Command::SearchSeeds(text) => ui.seed_search.script_seeds(&text),
                 Command::SearchLocations(radius, center, text) => {
-                    ui.seed_search.script_start(&text, ui.seed, Some((radius, center)));
+                    ui.seed_search.script_locations(&text, ui.seed, radius, center);
                 }
+                Command::SearchStep(step) => ui.seed_search.script_step(step),
                 Command::EditSearch(text) => ui.seed_search.script_edit(&text),
                 Command::PrintSearchStatus => println!("search status: {}", ui.seed_search.script_status()),
                 _ => {}

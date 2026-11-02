@@ -34,11 +34,10 @@ fn images_too_big_together_are_refused() {
     assert!(stderr.contains("too big"), "{stderr}");
 }
 
-/// Ends right away by what clap says, or at the condition that can't be parsed.
-fn find_stderr(args: &[&str]) -> (Option<i32>, String) {
+/// Ends right away by what clap says, or at the search that can't be parsed.
+fn search_stderr(args: &[&str]) -> (Option<i32>, String) {
     let output = Command::new(env!("CARGO_BIN_EXE_cubox"))
         .current_dir(std::env::temp_dir())
-        .arg("find")
         .args(args)
         .output()
         .unwrap();
@@ -46,28 +45,44 @@ fn find_stderr(args: &[&str]) -> (Option<i32>, String) {
 }
 
 #[test]
-fn find_refuses_what_excludes_each_other() {
-    let condition = "biome desert present within 100 of 0,0";
+fn searches_refuse_what_excludes_each_other() {
+    let condition = "biome desert within 100 of 0,0";
     for args in [
-        vec!["--threads", "0", condition],
-        vec!["--from", "1", "--in-seed", "1", condition],
-        vec!["--limit", "1", "--tested", "1", condition],
-        vec!["--within", "100", condition],
-        vec!["--of", "1,1", condition],
-        vec!["--of", "nowhere", "--in-seed", "1", condition],
+        vec!["seeds", "--threads", "0", condition],
+        vec!["seeds", "--step", "5", condition],
+        vec!["seeds", "--from", "1", "--seeds", "file", condition],
+        vec!["seeds", "--limit", "1", "--tested", "1", condition],
+        vec!["seeds", "--within", "100", condition],
+        vec!["locations", "1", "--of", "nowhere", "poi village"],
+        vec!["locations", "1", "--tested", "5", "poi village"],
+        vec!["find", condition],
     ] {
-        assert_eq!(find_stderr(&args).0, Some(2), "{args:?}");
+        assert_eq!(search_stderr(&args).0, Some(2), "{args:?}");
     }
 }
 
 #[test]
-fn find_says_which_conditions_fit_the_mode() {
-    let (code, stderr) = find_stderr(&["--in-seed", "hello", "biome desert present within 100 of 0,0"]);
-    assert_eq!(code, Some(2), "{stderr}");
-    assert!(stderr.contains("leave out `of`"), "{stderr}");
-    let (code, stderr) = find_stderr(&["biome desert present within 100"]);
+fn each_search_says_what_it_needs() {
+    let (code, stderr) = search_stderr(&["seeds", "biome desert within 100"]);
     assert_eq!(code, Some(2), "{stderr}");
     assert!(stderr.contains("needs `of"), "{stderr}");
+    let (code, stderr) = search_stderr(&["locations", "hello", "biome desert within 100"]);
+    assert_eq!(code, Some(2), "{stderr}");
+    assert!(stderr.contains("first line"), "{stderr}");
+    let (code, stderr) = search_stderr(&["locations", "hello", "poi village\nbiome desert within 100 of 0,0"]);
+    assert_eq!(code, Some(2), "{stderr}");
+    assert!(stderr.contains("leave out `of`"), "{stderr}");
+}
+
+#[test]
+fn a_location_search_ends_by_itself() {
+    let output = Command::new(env!("CARGO_BIN_EXE_cubox"))
+        .current_dir(std::env::temp_dir())
+        .args(["locations", "12345", "--within", "2000", "poi village"])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    assert!(!output.stdout.is_empty());
 }
 
 #[test]

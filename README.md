@@ -52,7 +52,7 @@ cubes/boxes ... so it works in multiple ways I guess ...
   overlap, set how many to show, or keep a space between them. Rare kinds come first if you like.
 - **End gateways, geodes and large ore veins.** Gateways after the dragon are exact. Ore vein markers are at real ore the game's rules place in solid stone. Geodes and scattered gateways are checked against the terrain's noise and marked as maybe there, because caves carved later aren't known.
 - **Noise** overlays show temperature, humidity, continentalness, erosion, weirdness or depth, the values biomes are chosen with.
-- **Seed search** finds seeds or locations with what you ask for: huge mushroom islands, witch huts close together, a village by spawn. On the desktop and with [`cubox find`](docs/seed-search.md).
+- **Search** finds seeds with what you ask for, a village by spawn or a huge mushroom island, and lists everything of it in one seed: every mushroom island, every pair of witch huts, every village by a desert. Exact by default, on the desktop and with [`cubox seeds` and `cubox locations`](docs/seed-search.md).
 - **Seeds like in Minecraft:** numbers, negative ones too, or any text, turned into the same seed the game uses.
 - **Go to coordinates**, and the biome and height under the cursor.
 - **Right click the map** to copy a location or a teleport command, or to go where a nether portal there leads.

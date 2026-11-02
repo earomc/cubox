@@ -24,9 +24,10 @@
 //! grid_spacing 512       # fixed grid lines, this many blocks apart
 //! threads 4              # how many threads may work at once
 //! zoom_buttons on        # the buttons over the map (off to hide them)
-//! search_seeds biome desert present within 500 of spawn   # finds seeds, `;` separates conditions, prints them
-//! search_locations 5000 0 0 biome desert present within 500   # locations within 5000 of 0,0 in this seed
-//! edit_search biome desert present within 500 of spawn   # changes the conditions like the panel does
+//! search_seeds biome desert within 500 of spawn   # finds seeds, `;` separates lines, prints them
+//! search_locations 5000 0 0 biome desert   # what to find within 5000 of 0,0 in this seed, `;` separates lines
+//! search_step 16         # how far apart searches look at biomes and noises
+//! edit_search biome desert within 500 of spawn   # changes the search that is shown, like the panel does
 //! print_search_status    # prints how the search is going
 //! open_first_match       # goes to the best seed found, with its markers
 //! goto 1000 -500         # center the view on these block coordinates
@@ -72,8 +73,9 @@ pub enum Command {
     GridOverMarkers(bool),
     SearchSeeds(String),
     OpenFirstMatch,
-    /// how far, around where and the conditions
+    /// how far, around where and what
     SearchLocations(i32, [i32; 2], String),
+    SearchStep(i32),
     PrintSearchStatus,
     EditSearch(String),
     Noise(Option<(NoiseParameter, f32)>),
@@ -153,6 +155,7 @@ impl Command {
                 args.get(3..).unwrap_or_default().join(" ").replace(';', "\n"),
             ),
             "edit_search" => Command::EditSearch(args.join(" ").replace(';', "\n")),
+            "search_step" => Command::SearchStep(num(0)? as i32),
             "print_search_status" => Command::PrintSearchStatus,
             "open_first_match" => Command::OpenFirstMatch,
             "search_seeds" => Command::SearchSeeds(args.join(" ").replace(';', "\n")),

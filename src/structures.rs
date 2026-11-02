@@ -723,7 +723,7 @@ impl Finder {
     }
 
     /// `in_cell` without what is past the edge of the world, which bins at the edge reach into.
-    fn in_world(&self, kind: usize, cell_x: i32, cell_z: i32) -> Option<Found> {
+    pub fn in_world(&self, kind: usize, cell_x: i32, cell_z: i32) -> Option<Found> {
         self.in_cell(kind, cell_x, cell_z)
             .filter(|found| found.x.abs().max(found.z.abs()) as i64 <= WORLD_BORDER_QUARTS as i64 * 4)
     }

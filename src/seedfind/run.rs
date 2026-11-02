@@ -1,7 +1,7 @@
-//! Goes through seeds, or the spots of an area of one seed, on threads.
+//! Goes through seeds, or what is to be found in an area of one seed, on threads.
 
 use std::{
-    collections::HashSet,
+    collections::{BTreeMap, HashSet},
     sync::{
         Arc, Mutex,
         atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering},
@@ -10,9 +10,13 @@ use std::{
     time::{Duration, Instant},
 };
 
-use crate::seedfind::{
-    engine::{Cells, Hit, Match, Plan, SeedWorld, spots},
-    spec::{self, Condition},
+use crate::{
+    noise::NoiseCache,
+    seedfind::{
+        engine::{Cells, Hit, Match, Patch, PatchScan, Plan, SeedWorld, best_circle_with, row_runs},
+        spec::{self, Condition, LocationSearch, Target},
+    },
+    structures::{Found, Spread, marker_margin, spread},
 };
 
 /// Placing structures recurses deeply, see `gui::finder_pool`.
@@ -23,10 +27,6 @@ const UPPER_BITS_TRIED: u64 = 1024;
 /// Matches waiting to be looked at. Beyond that threads wait, a hidden window doesn't look at them
 /// and they must not fill the memory.
 const MAX_WAITING_MATCHES: usize = 4096;
-/// Spots of an area tried at most.
-const MAX_SPOTS: i64 = 4_000_000;
-/// Places closer than this are the same one, if they aren't structures, in blocks.
-const SAME_PLACE: i32 = 256;
 /// Matches before there is an estimate of how rare they are.
 const MATCHES_FOR_ODDS: u64 = 5;
 
@@ -38,12 +38,14 @@ pub enum Seeds {
     /// counting up
     From(i64),
     List(Vec<i64>),
-    /// not seeds but the spots within `radius` blocks of `center` in one seed
-    Locations {
-        seed: i64,
-        radius: i32,
-        center: [i32; 2],
-    },
+}
+
+/// The part of one seed that a search for locations goes through.
+#[derive(Clone, Copy, Debug)]
+pub struct Area {
+    pub seed: i64,
+    pub radius: i32,
+    pub center: [i32; 2],
 }
 
 /// How a search is going.
@@ -55,7 +57,7 @@ pub struct Counters {
     /// seeds checked with a world
     pub seeds: AtomicU64,
     pub matches: AtomicU64,
-    /// items of a list or spots of an area that are finished
+    /// items of a list or parts of an area that are finished
     finished: AtomicU64,
 }
 
@@ -102,89 +104,151 @@ fn duration_text(seconds: f64) -> String {
     }
 }
 
+/// What all threads of a search are told, and what they report to.
+struct Control {
+    stop: Arc<AtomicBool>,
+    pause: AtomicBool,
+    threads: AtomicUsize,
+    counters: Arc<Counters>,
+    tx: mpsc::SyncSender<Match>,
+}
+
+impl Control {
+    /// Waits while this thread isn't to work. False if the search is over.
+    fn may_work(&self, number: usize) -> bool {
+        loop {
+            if self.stop.load(Ordering::Relaxed) {
+                return false;
+            }
+            if !self.pause.load(Ordering::Relaxed) && number < self.threads.load(Ordering::Relaxed) {
+                return true;
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        }
+    }
+
+    fn send(&self, mut found: Match) {
+        self.counters.matches.fetch_add(1, Ordering::Relaxed);
+        loop {
+            match self.tx.try_send(found) {
+                Err(mpsc::TrySendError::Full(again)) if !self.stop.load(Ordering::Relaxed) => {
+                    found = again;
+                    std::thread::sleep(Duration::from_millis(20));
+                }
+                // the rest only happens when the search is being dropped
+                _ => return,
+            }
+        }
+    }
+}
+
 pub struct Search {
     pub counters: Arc<Counters>,
     pub results: mpsc::Receiver<Match>,
-    stop: Arc<AtomicBool>,
-    pause: Arc<AtomicBool>,
-    threads: Arc<AtomicUsize>,
-    /// how many spots or items there are, if it isn't endless
+    control: Arc<Control>,
+    /// how many parts or items there are, if it isn't endless
     total: Option<u64>,
-    /// where the spots are around, in one seed
+    /// where a search for locations is around
     center: Option<[i32; 2]>,
     started: Instant,
     paused_since: Option<Instant>,
     paused_for: Duration,
 }
 
+/// How many threads to start. Only as many as allowed work, but that can change later.
+fn thread_count(threads: usize) -> usize {
+    std::thread::available_parallelism()
+        .map_or(threads, |n| n.get())
+        .max(threads)
+}
+
+fn spawn_thread(number: usize, work: impl FnOnce() + Send + 'static) {
+    std::thread::Builder::new()
+        .name(format!("cubox-search-{number}"))
+        .stack_size(STACK_SIZE)
+        .spawn(work)
+        .expect("creating a search thread");
+}
+
 impl Search {
-    /// Starts it, or says what is wrong with the conditions for these seeds.
-    pub fn start(conditions: &[Condition], seeds: Seeds, threads: usize) -> Result<Self, String> {
-        let in_seed = matches!(seeds, Seeds::Locations { .. });
-        spec::validate(conditions, in_seed)?;
-        let (location_world, center, spots) = match seeds {
-            Seeds::Locations { seed, radius, center } => {
-                let spots = area_spots(conditions, center, radius)?;
-                (Some(Arc::new(SeedWorld::new(seed))), Some(center), spots)
-            }
-            _ => (None, None, Vec::new()),
-        };
-        let total = match &seeds {
-            Seeds::Locations { .. } => Some(spots.len() as u64),
-            Seeds::List(list) => Some(list.len() as u64),
-            _ => None,
-        };
-        let plan = Arc::new(Plan::new(conditions));
+    fn new(threads: usize, total: Option<u64>, center: Option<[i32; 2]>) -> Self {
         let (tx, results) = mpsc::sync_channel(MAX_WAITING_MATCHES);
-        let search = Self {
-            counters: Default::default(),
+        let counters: Arc<Counters> = Default::default();
+        Self {
+            counters: counters.clone(),
             results,
-            stop: Default::default(),
-            pause: Default::default(),
-            threads: Arc::new(AtomicUsize::new(threads)),
+            control: Arc::new(Control {
+                stop: Default::default(),
+                pause: AtomicBool::new(false),
+                threads: AtomicUsize::new(threads),
+                counters,
+                tx,
+            }),
             total,
             center,
             started: Instant::now(),
             paused_since: None,
             paused_for: Duration::ZERO,
+        }
+    }
+
+    /// Starts looking for seeds, or says what is wrong with the conditions. Biomes and noises are
+    /// looked at every `step` blocks.
+    pub fn seeds(conditions: &[Condition], seeds: Seeds, threads: usize, step: i32) -> Result<Self, String> {
+        spec::validate_seeds(conditions)?;
+        let total = match &seeds {
+            Seeds::List(list) => Some(list.len() as u64),
+            _ => None,
         };
+        let search = Self::new(threads, total, None);
+        let plan = Arc::new(Plan::new(conditions));
         let next = Arc::new(AtomicU64::new(0));
-        let spots = Arc::new(spots);
-        let seen = Arc::new(Mutex::new(HashSet::new()));
         let seeds = Arc::new(seeds);
-        let workers = std::thread::available_parallelism()
-            .map_or(threads, |n| n.get())
-            .max(threads);
-        for number in 0..workers {
-            let worker = Worker {
+        for number in 0..thread_count(threads) {
+            let worker = SeedWorker {
                 number,
+                step,
                 plan: plan.clone(),
                 seeds: seeds.clone(),
                 next: next.clone(),
-                counters: search.counters.clone(),
-                tx: tx.clone(),
-                stop: search.stop.clone(),
-                pause: search.pause.clone(),
-                threads: search.threads.clone(),
-                location_world: location_world.clone(),
-                spots: spots.clone(),
-                seen: seen.clone(),
+                control: search.control.clone(),
             };
-            std::thread::Builder::new()
-                .name(format!("cubox-search-{number}"))
-                .stack_size(STACK_SIZE)
-                .spawn(move || worker.run())
-                .expect("creating a search thread");
+            spawn_thread(number, move || worker.run());
         }
         Ok(search)
     }
 
+    /// Starts looking for locations, or says what is wrong with the search. Biomes and noises are
+    /// looked at every `step` blocks.
+    pub fn locations(search: &LocationSearch, area: Area, threads: usize, step: i32) -> Result<Self, String> {
+        spec::validate_locations(search)?;
+        let parts = Parts::of(&search.target, area, step);
+        let this = Self::new(threads, Some(parts.total()), Some(area.center));
+        let shared = Arc::new(LocationShared {
+            plan: Plan::new(&search.conditions),
+            target: search.target.clone(),
+            world: SeedWorld::new(area.seed, step).stopped_by(this.control.stop.clone()),
+            area,
+            step,
+            parts,
+            total: this.total.unwrap_or(0),
+            next: AtomicU64::new(0),
+            control: this.control.clone(),
+            clusters: Default::default(),
+        });
+        for number in 0..thread_count(threads) {
+            let shared = shared.clone();
+            spawn_thread(number, move || shared.work(number));
+        }
+        Ok(this)
+    }
+
     pub fn stop(&self) {
-        self.stop.store(true, Ordering::Relaxed);
+        self.control.stop.store(true, Ordering::Relaxed);
     }
 
     pub fn set_paused(&mut self, paused: bool) {
-        self.pause.store(paused, Ordering::Relaxed);
+        self.control.pause.store(paused, Ordering::Relaxed);
         match (paused, self.paused_since) {
             (true, None) => self.paused_since = Some(Instant::now()),
             (false, Some(since)) => {
@@ -200,7 +264,7 @@ impl Search {
     }
 
     pub fn set_threads(&self, threads: usize) {
-        self.threads.store(threads, Ordering::Relaxed);
+        self.control.threads.store(threads, Ordering::Relaxed);
     }
 
     /// Whether all there is to do is done. An endless search never is.
@@ -209,7 +273,7 @@ impl Search {
             .is_some_and(|total| self.counters.finished.load(Ordering::Relaxed) >= total)
     }
 
-    /// Where the spots of one seed are around.
+    /// Where a search for locations is around.
     pub fn center(&self) -> Option<[i32; 2]> {
         self.center
     }
@@ -225,14 +289,12 @@ impl Search {
         let matches = self.counters.matches.load(Ordering::Relaxed);
         if self.center.is_some() {
             let plural = if matches == 1 { "" } else { "s" };
-            let finished = self.counters.finished.load(Ordering::Relaxed);
-            let total = self.total.unwrap_or(0);
-            return if self.is_done() {
-                let spots = if total == 1 { "spot" } else { "spots" };
-                format!("Done: {matches} location{plural} in {total} {spots}")
-            } else {
-                format!("{finished} of {total} spots, {matches} location{plural}")
-            };
+            if self.is_done() {
+                return format!("Done: {matches} location{plural}");
+            }
+            let finished = self.counters.finished.load(Ordering::Relaxed) as f64;
+            let percent = finished * 100.0 / self.total.unwrap_or(1).max(1) as f64;
+            return format!("{percent:.1}% of the area, {matches} location{plural}");
         }
         let covered = self.counters.covered();
         let active = self.active_seconds().max(0.001);
@@ -260,24 +322,6 @@ impl Drop for Search {
     }
 }
 
-/// The spots of an area to try, nearest first, as far apart as the conditions allow.
-fn area_spots(conditions: &[Condition], center: [i32; 2], radius: i32) -> Result<Vec<[i32; 2]>, String> {
-    let step = conditions
-        .iter()
-        .filter_map(spec::spot_spacing)
-        .min()
-        .unwrap_or(radius)
-        .max(16);
-    let across = 2 * (radius / step) as i64 + 1;
-    if across * across > MAX_SPOTS {
-        return Err(format!(
-            "that would be {} spots to try: make the area smaller or the distances larger",
-            rounded((across * across) as f64)
-        ));
-    }
-    Ok(spots(center, radius, step))
-}
-
 /// A number that looks random, the same for the same input.
 fn mix(mut z: u64) -> u64 {
     z = z.wrapping_add(0x9E37_79B9_7F4A_7C15);
@@ -286,120 +330,44 @@ fn mix(mut z: u64) -> u64 {
     z ^ (z >> 31)
 }
 
-/// What makes a hit the same place as another.
-type Place = (Option<usize>, i32, i32);
-
-fn place_of(hit: &Hit) -> Place {
-    match hit.kind {
-        Some(_) => (hit.kind, hit.x, hit.z),
-        None => (None, hit.x.div_euclid(SAME_PLACE), hit.z.div_euclid(SAME_PLACE)),
-    }
-}
-
-/// Keeps a location if it is at a place that wasn't reported yet, which then comes first. Its
-/// structures are what makes it that place if it has any: the same village with another part of a
-/// biome next to it is the same location.
-fn new_location(found: &mut Match, seen: &Mutex<HashSet<Place>>) -> bool {
-    let has_structures = found.hits.iter().any(|hit| hit.kind.is_some());
-    let counts = |hit: &Hit| hit.kind.is_some() || !has_structures;
-    let mut seen = seen.lock().unwrap();
-    let new = found
-        .hits
-        .iter()
-        .position(|hit| counts(hit) && !seen.contains(&place_of(hit)));
-    seen.extend(found.hits.iter().filter(|hit| counts(hit)).map(place_of));
-    match new {
-        Some(index) => {
-            found.hits.swap(0, index);
-            true
-        }
-        None => false,
-    }
-}
-
-struct Worker {
+struct SeedWorker {
     number: usize,
+    step: i32,
     plan: Arc<Plan>,
     seeds: Arc<Seeds>,
     next: Arc<AtomicU64>,
-    counters: Arc<Counters>,
-    tx: mpsc::SyncSender<Match>,
-    stop: Arc<AtomicBool>,
-    pause: Arc<AtomicBool>,
-    threads: Arc<AtomicUsize>,
-    location_world: Option<Arc<SeedWorld>>,
-    spots: Arc<Vec<[i32; 2]>>,
-    seen: Arc<Mutex<HashSet<Place>>>,
+    control: Arc<Control>,
 }
 
-impl Worker {
+impl SeedWorker {
     fn run(self) {
         let mut cells = Vec::new();
-        loop {
-            if self.stop.load(Ordering::Relaxed) {
-                return;
-            }
-            if self.pause.load(Ordering::Relaxed) || self.number >= self.threads.load(Ordering::Relaxed) {
-                std::thread::sleep(Duration::from_millis(50));
-                continue;
-            }
+        while self.control.may_work(self.number) {
             let index = self.next.fetch_add(1, Ordering::Relaxed);
-            let more = match &*self.seeds {
-                Seeds::Random(start) => {
-                    self.random_base(mix(start ^ index), &mut cells);
-                    true
+            match &*self.seeds {
+                Seeds::Random(start) => self.random_base(mix(start ^ index), &mut cells),
+                Seeds::From(start) => self.one_seed(start.wrapping_add(index as i64), &mut cells),
+                Seeds::List(list) => {
+                    let Some(seed) = list.get(index as usize) else { return };
+                    self.one_seed(*seed, &mut cells);
+                    self.control.counters.finished.fetch_add(1, Ordering::Relaxed);
                 }
-                Seeds::From(start) => {
-                    self.one_seed(start.wrapping_add(index as i64), &mut cells);
-                    true
-                }
-                Seeds::List(list) => match list.get(index as usize) {
-                    Some(seed) => {
-                        self.one_seed(*seed, &mut cells);
-                        self.counters.finished.fetch_add(1, Ordering::Relaxed);
-                        true
-                    }
-                    None => false,
-                },
-                Seeds::Locations { .. } => match self.spots.get(index as usize) {
-                    Some(spot) => {
-                        self.spot(*spot, &mut cells);
-                        self.counters.finished.fetch_add(1, Ordering::Relaxed);
-                        true
-                    }
-                    None => false,
-                },
-            };
-            if !more {
-                return;
-            }
-        }
-    }
-
-    fn found(&self, found: Option<Match>) {
-        let Some(mut found) = found else { return };
-        self.counters.matches.fetch_add(1, Ordering::Relaxed);
-        loop {
-            match self.tx.try_send(found) {
-                Err(mpsc::TrySendError::Full(again)) if !self.stop.load(Ordering::Relaxed) => {
-                    found = again;
-                    std::thread::sleep(Duration::from_millis(20));
-                }
-                // the rest only happens when the search is being dropped
-                _ => return,
             }
         }
     }
 
     fn check_seed(&self, seed: i64, cells: &mut Cells) {
-        self.counters.seeds.fetch_add(1, Ordering::Relaxed);
-        self.found(self.plan.check(&SeedWorld::new(seed), [0, 0], cells));
+        self.control.counters.seeds.fetch_add(1, Ordering::Relaxed);
+        let world = SeedWorld::new(seed, self.step).stopped_by(self.control.stop.clone());
+        if let Some(found) = self.plan.check(&world, [0, 0], cells) {
+            self.control.send(found);
+        }
     }
 
     fn one_seed(&self, seed: i64, cells: &mut Cells) {
-        self.counters.bases.fetch_add(1, Ordering::Relaxed);
+        self.control.counters.bases.fetch_add(1, Ordering::Relaxed);
         if self.plan.lower_bits_pass(seed, cells) {
-            self.counters.bases_passed.fetch_add(1, Ordering::Relaxed);
+            self.control.counters.bases_passed.fetch_add(1, Ordering::Relaxed);
             self.check_seed(seed, cells);
         }
     }
@@ -409,36 +377,261 @@ impl Worker {
             return self.one_seed(random as i64, cells);
         }
         let base = random & ((1 << 48) - 1);
-        self.counters.bases.fetch_add(1, Ordering::Relaxed);
+        self.control.counters.bases.fetch_add(1, Ordering::Relaxed);
         if !self.plan.lower_bits_pass(base as i64, cells) {
             return;
         }
-        self.counters.bases_passed.fetch_add(1, Ordering::Relaxed);
+        self.control.counters.bases_passed.fetch_add(1, Ordering::Relaxed);
         for try_number in 0..UPPER_BITS_TRIED {
-            if self.stop.load(Ordering::Relaxed) {
+            if !self.control.may_work(self.number) {
                 return;
             }
             let upper = mix(random ^ try_number) << 48;
             self.check_seed((base | upper) as i64, cells);
         }
     }
+}
 
-    fn spot(&self, spot: [i32; 2], cells: &mut Cells) {
-        let Some(world) = &self.location_world else { return };
-        let Some(mut found) = self.plan.check(world, spot, cells) else {
+/// How the work of a search for locations is divided, so that threads can each take the next part.
+enum Parts {
+    /// the cells of a kind's grid, in rows
+    Cells {
+        kind: usize,
+        first: [i32; 2],
+        columns: u64,
+        rows: u64,
+    },
+    /// all of a kind that isn't on a grid at once
+    Rings { kind: usize },
+    /// the rows of a grid of the area, which then are connected in order
+    Rows { rows: u64, connect: Mutex<Connect> },
+}
+
+/// Rows that are done, waiting for those before them.
+struct Connect {
+    scan: PatchScan,
+    next_row: u64,
+    waiting: BTreeMap<u64, Vec<(i32, i32)>>,
+}
+
+impl Parts {
+    fn of(target: &Target, area: Area, step: i32) -> Self {
+        let kind = match target {
+            Target::Poi { kind } | Target::Cluster { kind, .. } => *kind,
+            Target::Biome { .. } | Target::Noise { .. } => {
+                return Self::Rows {
+                    rows: 2 * (area.radius / step) as u64 + 1,
+                    connect: Mutex::new(Connect {
+                        scan: PatchScan::new(area.center, step),
+                        next_row: 0,
+                        waiting: BTreeMap::new(),
+                    }),
+                };
+            }
+        };
+        let Some(Spread::Grid(chunks)) = spread(kind) else {
+            return Self::Rings { kind };
+        };
+        let size = chunks as i64 * 16;
+        let reach = area.radius as i64 + marker_margin(kind) as i64;
+        let cells = |middle: i32| {
+            let (low, high) = (middle as i64 - reach, middle as i64 + reach);
+            (
+                low.div_euclid(size) as i32,
+                (high.div_euclid(size) - low.div_euclid(size) + 1) as u64,
+            )
+        };
+        let ((first_x, columns), (first_z, rows)) = (cells(area.center[0]), cells(area.center[1]));
+        Self::Cells {
+            kind,
+            first: [first_x, first_z],
+            columns,
+            rows,
+        }
+    }
+
+    fn total(&self) -> u64 {
+        match self {
+            Self::Cells { columns, rows, .. } => columns * rows,
+            Self::Rings { .. } => 1,
+            Self::Rows { rows, .. } => *rows,
+        }
+    }
+}
+
+/// What the threads of a search for locations share.
+struct LocationShared {
+    plan: Plan,
+    target: Target,
+    world: SeedWorld,
+    area: Area,
+    step: i32,
+    parts: Parts,
+    total: u64,
+    next: AtomicU64,
+    control: Arc<Control>,
+    /// the groups that were reported, a group is found from each of its members
+    clusters: Mutex<HashSet<Vec<[i32; 2]>>>,
+}
+
+impl LocationShared {
+    fn work(&self, number: usize) {
+        let mut cells = Vec::new();
+        while self.control.may_work(number) {
+            let index = self.next.fetch_add(1, Ordering::Relaxed);
+            if index >= self.total {
+                return;
+            }
+            match &self.parts {
+                Parts::Cells {
+                    kind, first, columns, ..
+                } => {
+                    let column = first[0] + (index % columns) as i32;
+                    let row = first[1] + (index / columns) as i32;
+                    let finder = self.world.finder(crate::structures::MARKER_KINDS[*kind].dimension);
+                    if let Some(found) = finder.and_then(|finder| finder.in_world(*kind, column, row)) {
+                        self.found(found, &mut cells);
+                    }
+                }
+                Parts::Rings { kind } => {
+                    let finder = self.world.finder(crate::structures::MARKER_KINDS[*kind].dimension);
+                    for found in finder.map_or(Vec::new(), |finder| finder.rings(*kind)) {
+                        self.found(found, &mut cells);
+                    }
+                }
+                Parts::Rows { connect, .. } => {
+                    let runs = self.row(index);
+                    for patch in self.connect_row(connect, index, runs) {
+                        self.found_patch(patch, &mut cells);
+                    }
+                }
+            }
+            self.control.counters.finished.fetch_add(1, Ordering::Relaxed);
+        }
+    }
+
+    /// The runs of a row where the target is.
+    fn row(&self, index: u64) -> Vec<(i32, i32)> {
+        let dz = index as i32 - self.area.radius / self.step;
+        let (center, radius, step) = (self.area.center, self.area.radius, self.step);
+        let stop = &self.control.stop;
+        match &self.target {
+            Target::Biome { biome, .. } => {
+                let dimension = self.target.dimension();
+                let mut sampler = self.world.source(dimension).chunk_sampler();
+                let qy = dimension.default_height() >> 2;
+                row_runs(center, radius, step, dz, &mut |x, z| {
+                    !stop.load(Ordering::Relaxed) && &*sampler.sample(x >> 2, qy, z >> 2).key.path == biome
+                })
+            }
+            Target::Noise {
+                parameter, min, max, ..
+            } => {
+                let Some(climate) = self.world.climate() else {
+                    return Vec::new();
+                };
+                let mut cache = NoiseCache::default();
+                let qy = self.target.dimension().default_height() >> 2;
+                row_runs(center, radius, step, dz, &mut |x, z| {
+                    let value = climate.value(&mut cache, *parameter, [x >> 2, qy, z >> 2]);
+                    !stop.load(Ordering::Relaxed) && (*min..=*max).contains(&value)
+                })
+            }
+            Target::Poi { .. } | Target::Cluster { .. } => Vec::new(),
+        }
+    }
+
+    /// Hands in a row and connects all rows that are ready. Returns the patches this finishes.
+    fn connect_row(&self, connect: &Mutex<Connect>, index: u64, runs: Vec<(i32, i32)>) -> Vec<Patch> {
+        let mut connect = connect.lock().unwrap();
+        connect.waiting.insert(index, runs);
+        let mut finished = Vec::new();
+        loop {
+            let next_row = connect.next_row;
+            let Some(runs) = connect.waiting.remove(&next_row) else {
+                return finished;
+            };
+            let dz = next_row as i32 - self.area.radius / self.step;
+            finished.extend(connect.scan.push_row(dz, &runs));
+            connect.next_row += 1;
+            if connect.next_row == self.total {
+                finished.extend(connect.scan.finish());
+            }
+        }
+    }
+
+    fn in_area(&self, x: i32, z: i32) -> bool {
+        let (dx, dz) = ((x - self.area.center[0]) as i64, (z - self.area.center[1]) as i64);
+        dx * dx + dz * dz <= self.area.radius as i64 * self.area.radius as i64
+    }
+
+    fn found(&self, found: Found, cells: &mut Cells) {
+        if !self.in_area(found.x, found.z) {
+            return;
+        }
+        let hit = |found: &Found| Hit {
+            kind: Some(found.kind),
+            dimension: self.target.dimension(),
+            x: found.x,
+            z: found.z,
+        };
+        let Target::Cluster { count, radius, .. } = self.target else {
+            return self.report([found.x, found.z], vec![hit(&found)], None, cells);
+        };
+        let Some(finder) = self.world.finder(self.target.dimension()) else {
             return;
         };
-        // nothing found by the conditions means the spot itself
-        if found.hits.is_empty() {
-            found.hits.push(Hit {
-                kind: None,
-                dimension: crate::dimension::Dimension::Overworld,
-                x: spot[0],
-                z: spot[1],
-            });
+        // all that can share a circle with this one are at most twice the radius away
+        let near = finder.around(found.kind, [found.x, found.z], radius * 2);
+        let points: Vec<[i32; 2]> = near.iter().map(|near| [near.x, near.z]).collect();
+        let (held, middle) = best_circle_with(&points, radius, Some([found.x, found.z]));
+        if held < count as usize {
+            return;
         }
-        if new_location(&mut found, &self.seen) {
-            self.found(Some(found));
+        let in_circle = |near: &&Found| {
+            let (dx, dz) = ((near.x - middle[0]) as i64, (near.z - middle[1]) as i64);
+            dx * dx + dz * dz <= (radius as i64 + 1) * (radius as i64 + 1)
+        };
+        let members: Vec<&Found> = near.iter().filter(in_circle).collect();
+        let mut group: Vec<[i32; 2]> = members.iter().map(|near| [near.x, near.z]).collect();
+        group.sort_unstable();
+        if self.clusters.lock().unwrap().insert(group) {
+            let mut hits = vec![Hit {
+                kind: None,
+                dimension: self.target.dimension(),
+                x: middle[0],
+                z: middle[1],
+            }];
+            hits.extend(members.iter().map(|near| hit(near)));
+            self.report(middle, hits, Some(held as f64), cells);
+        }
+    }
+
+    fn found_patch(&self, patch: Patch, cells: &mut Cells) {
+        let (Target::Biome { min_area, .. } | Target::Noise { min_area, .. }) = &self.target else {
+            return;
+        };
+        let area = patch.area(self.step);
+        if min_area.is_some_and(|min_area| area < min_area) {
+            return;
+        }
+        let [x, z] = patch.middle();
+        let hit = Hit {
+            kind: None,
+            dimension: self.target.dimension(),
+            x,
+            z,
+        };
+        self.report([x, z], vec![hit], Some(area as f64), cells);
+    }
+
+    /// Reports what was found if the conditions around it pass. It comes first in the hits.
+    fn report(&self, at: [i32; 2], mut hits: Vec<Hit>, score: Option<f64>, cells: &mut Cells) {
+        if let Some(mut found) = self.plan.check(&self.world, at, cells) {
+            hits.append(&mut found.hits);
+            found.hits = hits;
+            found.score = score.or(found.score);
+            self.control.send(found);
         }
     }
 }
@@ -446,20 +639,24 @@ impl Worker {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{dimension::Dimension, structures::kind_index};
 
-    fn run_to_end(text: &str, seed: i64, radius: i32) -> (Vec<Match>, String) {
-        let conditions = spec::parse(text).unwrap();
-        let seeds = Seeds::Locations {
+    /// A coarser grid than the default keeps these tests quick.
+    const STEP: i32 = 16;
+
+    fn run_to_end(text: &str, seed: i64, radius: i32, step: i32) -> (Vec<Match>, String) {
+        let locations = spec::parse_locations(text).unwrap();
+        let area = Area {
             seed,
             radius,
             center: [0, 0],
         };
-        let search = Search::start(&conditions, seeds, 4).unwrap();
+        let search = Search::locations(&locations, area, 4, step).unwrap();
         let start = Instant::now();
         let mut found = Vec::new();
         while !search.is_done() {
             found.extend(search.results.try_iter());
-            assert!(start.elapsed().as_secs() < 120, "{}", search.status());
+            assert!(start.elapsed().as_secs() < 200, "{}", search.status());
             std::thread::sleep(Duration::from_millis(10));
         }
         // what a worker has yet to send comes right after it says it is done
@@ -468,75 +665,211 @@ mod tests {
         (found, search.status())
     }
 
-    fn kind(id: &str) -> usize {
-        crate::structures::kind_index(id)
+    fn finder() -> crate::structures::Finder {
+        crate::structures::Finder::new(12345, Dimension::Overworld).unwrap()
     }
 
-    fn finder() -> crate::structures::Finder {
-        crate::structures::Finder::new(12345, crate::dimension::Dimension::Overworld).unwrap()
+    fn firsts(found: &[Match]) -> Vec<(i32, i32)> {
+        let mut firsts: Vec<_> = found.iter().map(|f| (f.hits[0].x, f.hits[0].z)).collect();
+        firsts.sort_unstable();
+        firsts
     }
 
     #[test]
-    fn an_area_is_gone_through_once_without_repeats() {
-        let (found, status) = run_to_end("poi village count>=1 within 400", 12345, 4000);
-        assert!(status.starts_with("Done"), "{status}");
-        assert!(found.len() > 1, "{found:?}");
-        let firsts: Vec<_> = found.iter().map(|f| (f.hits[0].x, f.hits[0].z)).collect();
-        let unique: HashSet<_> = firsts.iter().collect();
-        assert_eq!(unique.len(), firsts.len(), "{firsts:?}");
-        // and it found them all
-        let reported: HashSet<_> = found.iter().flat_map(|f| f.hits.iter().map(|h| (h.x, h.z))).collect();
-        for real in finder().around(kind("village"), [0, 0], 4000) {
-            assert!(reported.contains(&(real.x, real.z)), "{real:?}");
+    fn each_poi_is_one_result_and_none_are_missing() {
+        for (id, radius) in [
+            ("village", 6000),
+            ("swamp_hut", 12_000),
+            ("geode", 400),
+            ("copper_vein", 3000),
+        ] {
+            let (found, status) = run_to_end(&format!("poi {id}"), 12345, radius, STEP);
+            assert!(status.starts_with("Done"), "{status}");
+            let mut real: Vec<_> = finder()
+                .around(kind_index(id), [0, 0], radius)
+                .iter()
+                .map(|f| (f.x, f.z))
+                .collect();
+            real.sort_unstable();
+            assert!(!real.is_empty(), "{id}");
+            assert_eq!(firsts(&found), real, "{id}");
         }
     }
 
     #[test]
-    fn a_structure_next_to_a_biome_is_one_location() {
+    fn rings_are_results_too() {
+        let (found, _) = run_to_end("poi stronghold", 12345, 10_000, STEP);
+        let mut real: Vec<_> = finder()
+            .around(kind_index("stronghold"), [0, 0], 10_000)
+            .iter()
+            .map(|f| (f.x, f.z))
+            .collect();
+        real.sort_unstable();
+        assert!(!real.is_empty());
+        assert_eq!(firsts(&found), real);
+    }
+
+    #[test]
+    fn conditions_are_about_what_was_found() {
+        let (all, _) = run_to_end("poi village", 12345, 5000, STEP);
+        let (near, _) = run_to_end("poi village\nbiome plains within 200", 12345, 5000, STEP);
+        let (not_near, _) = run_to_end("poi village\nnot biome plains within 200", 12345, 5000, STEP);
+        assert!(!near.is_empty() && !not_near.is_empty());
+        assert_eq!(near.len() + not_near.len(), all.len());
+        let mut together = firsts(&near);
+        together.extend(firsts(&not_near));
+        together.sort_unstable();
+        assert_eq!(together, firsts(&all));
+    }
+
+    /// Every structure with another close enough to share a circle is in a reported group.
+    #[test]
+    fn clusters_are_all_reported_once() {
+        let radius = 150;
         let (found, _) = run_to_end(
-            "poi village count>=1 within 300\nbiome plains present within 600",
+            &format!("cluster village count>=2 radius {radius}"),
             12345,
-            3000,
+            12_000,
+            STEP,
         );
-        let real = finder().around(kind("village"), [0, 0], 3300).len();
-        assert!(!found.is_empty() && found.len() <= real, "{} of {real}", found.len());
-        assert!(found.iter().all(|f| f.hits[0].kind == Some(kind("village"))));
-    }
-
-    /// Whatever two structures share a circle of the radius, one spot has them both in reach, which
-    /// a reach of twice the radius wouldn't do.
-    #[test]
-    fn spots_reach_every_cluster() {
-        let radius = 128;
-        let conditions = spec::parse(&format!("cluster village count>=2 radius {radius}")).unwrap();
-        let grid = area_spots(&conditions, [0, 0], 2000).unwrap();
-        let missed_with = |reach: i32| {
-            let reach = (reach as f64).powi(2);
-            let in_reach =
-                |spot: &[i32; 2], x: f64, z: f64| (spot[0] as f64 - x).powi(2) + (spot[1] as f64 - z).powi(2) <= reach;
-            let mut missed = 0;
-            for (x, z, turn) in (0..600).map(|i| ((i % 25) as f64 * 11.0, (i / 25) as f64 * 11.0, i as f64 * 0.37)) {
-                let (dx, dz) = (turn.cos() * radius as f64, turn.sin() * radius as f64);
-                let seen = grid
-                    .iter()
-                    .any(|spot| in_reach(spot, x + dx, z + dz) && in_reach(spot, x - dx, z - dz));
-                missed += !seen as i32;
+        let reported: HashSet<(i32, i32)> = found
+            .iter()
+            .flat_map(|f| f.hits.iter().filter(|hit| hit.kind.is_some()).map(|hit| (hit.x, hit.z)))
+            .collect();
+        let real = finder().around(kind_index("village"), [0, 0], 12_000);
+        let mut paired = 0;
+        for a in &real {
+            let close = real.iter().any(|b| {
+                let (dx, dz) = ((a.x - b.x) as i64, (a.z - b.z) as i64);
+                a != b && dx * dx + dz * dz <= (2 * radius as i64).pow(2)
+            });
+            if close {
+                paired += 1;
+                assert!(reported.contains(&(a.x, a.z)), "{a:?}");
             }
-            missed
-        };
-        assert_eq!(missed_with(spec::cluster_reach(radius)), 0);
-        assert!(missed_with(radius * 2) > 0);
+        }
+        assert!(paired > 0);
+        let groups: HashSet<Vec<(i32, i32)>> = found
+            .iter()
+            .map(|f| {
+                let mut group: Vec<_> = f.hits.iter().filter(|h| h.kind.is_some()).map(|h| (h.x, h.z)).collect();
+                group.sort_unstable();
+                group
+            })
+            .collect();
+        assert_eq!(groups.len(), found.len());
+    }
+
+    /// A slow flood fill of the same grid, in one go.
+    fn flood_fill(biome: &str, seed: i64, radius: i32, step: i32) -> Vec<(i64, [i32; 2])> {
+        let source = Dimension::Overworld.biome_source(seed);
+        let mut sampler = source.chunk_sampler();
+        let n = radius / step;
+        let mut inside = HashSet::new();
+        for dz in -n..=n {
+            for dx in crate::seedfind::engine::disc_row(radius, step, dz) {
+                if &*sampler.sample((dx * step) >> 2, 64, (dz * step) >> 2).key.path == biome {
+                    inside.insert([dx, dz]);
+                }
+            }
+        }
+        let mut seen = HashSet::new();
+        let mut patches = Vec::new();
+        for start in &inside {
+            if !seen.insert(*start) {
+                continue;
+            }
+            let (mut stack, mut points, mut sum) = (vec![*start], 0i64, [0i64; 2]);
+            while let Some([x, z]) = stack.pop() {
+                points += 1;
+                sum[0] += (x * step) as i64;
+                sum[1] += (z * step) as i64;
+                for next in [[x + 1, z], [x - 1, z], [x, z + 1], [x, z - 1]] {
+                    if inside.contains(&next) && seen.insert(next) {
+                        stack.push(next);
+                    }
+                }
+            }
+            let middle = sum.map(|sum| (sum / points) as i32);
+            patches.push((points * (step * step) as i64, middle));
+        }
+        patches.sort_unstable();
+        patches
     }
 
     #[test]
-    fn too_big_areas_are_refused() {
-        let conditions = spec::parse("biome desert present within 16").unwrap();
-        let seeds = Seeds::Locations {
-            seed: 1,
-            radius: 30_000_000,
-            center: [0, 0],
-        };
-        assert!(Search::start(&conditions, seeds, 1).err().unwrap().contains("spots"));
+    fn each_patch_of_a_biome_is_one_result() {
+        let (found, status) = run_to_end("biome plains", 12345, 3000, STEP);
+        assert!(status.starts_with("Done"), "{status}");
+        let mut patches: Vec<(i64, [i32; 2])> = found
+            .iter()
+            .map(|f| (f.score.unwrap() as i64, [f.hits[0].x, f.hits[0].z]))
+            .collect();
+        patches.sort_unstable();
+        let wanted = flood_fill("plains", 12345, 3000, STEP);
+        assert!(wanted.len() > 1, "{wanted:?}");
+        assert_eq!(patches, wanted);
+    }
+
+    #[test]
+    fn a_minimum_area_leaves_out_small_patches() {
+        let (all, _) = run_to_end("biome plains", 12345, 3000, STEP);
+        let sizes: Vec<i64> = all.iter().map(|f| f.score.unwrap() as i64).collect();
+        let limit = sizes.iter().sum::<i64>() / sizes.len() as i64;
+        let (big, _) = run_to_end(&format!("biome plains area>={limit}"), 12345, 3000, STEP);
+        assert_eq!(big.len(), sizes.iter().filter(|size| **size >= limit).count());
+    }
+
+    /// The grids agree on how much there is, and only the exact one sees what is smaller than the
+    /// other's step.
+    #[test]
+    fn the_exact_grid_sees_patches_a_coarse_one_cannot() {
+        let (exact, _) = run_to_end("biome river", 12345, 1500, spec::EXACT_STEP);
+        let (coarse, _) = run_to_end("biome river", 12345, 1500, STEP);
+        let total = |found: &[Match]| found.iter().map(|f| f.score.unwrap() as i64).sum::<i64>();
+        let difference = (total(&exact) - total(&coarse)).abs() as f64 / total(&exact) as f64;
+        assert!(difference < 0.1, "{} {}", total(&exact), total(&coarse));
+        let smallest = |found: &[Match]| found.iter().map(|f| f.score.unwrap() as i64).min().unwrap();
+        assert!(smallest(&coarse) >= (STEP * STEP) as i64);
+        assert!(smallest(&exact) < (STEP * STEP) as i64, "{}", smallest(&exact));
+    }
+
+    #[test]
+    fn noise_regions_are_results() {
+        let (found, status) = run_to_end("noise erosion 0.2..0.4\nbiome plains within 2000", 12345, 3000, STEP);
+        assert!(status.starts_with("Done"), "{status}");
+        assert!(!found.is_empty());
+        assert!(found.iter().all(|f| f.score.is_some()));
+    }
+
+    #[test]
+    fn seeds_of_a_list_are_each_checked() {
+        let conditions = spec::parse_seeds("poi village within 3000 of spawn").unwrap();
+        let search = Search::seeds(&conditions, Seeds::List(vec![1, 2, 3]), 2, STEP).unwrap();
+        let start = Instant::now();
+        while !search.is_done() {
+            assert!(start.elapsed().as_secs() < 60);
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert_eq!(
+            search.results.try_iter().map(|f| f.seed).collect::<HashSet<_>>().len(),
+            3
+        );
+    }
+
+    #[test]
+    fn stopping_ends_a_long_check() {
+        let conditions = spec::parse_seeds("biome mushroom_fields within 2000000 of 0,0").unwrap();
+        let search = Search::seeds(&conditions, Seeds::From(1), 2, spec::EXACT_STEP).unwrap();
+        std::thread::sleep(Duration::from_millis(100));
+        let control = search.control.clone();
+        search.stop();
+        let start = Instant::now();
+        // the threads hold the other references, and let go when they end
+        while Arc::strong_count(&control) > 2 {
+            assert!(start.elapsed().as_secs() < 20, "{}", Arc::strong_count(&control));
+            std::thread::sleep(Duration::from_millis(10));
+        }
     }
 
     #[test]
