@@ -1,4 +1,4 @@
-//! Checks cards against one seed. What it needs of the world is only made when a card gets that far.
+//! Checks conditions against one seed. What it needs of the world is only made when a condition gets that far.
 
 use std::{collections::HashMap, sync::OnceLock};
 
@@ -7,13 +7,13 @@ use steel_worldgen::biomes::BiomeSourceKind;
 use crate::{
     dimension::Dimension,
     noise::{NoiseCache, NoiseField},
-    seedfind::spec::{Anchor, BiomeTest, Card, cluster_reach},
+    seedfind::spec::{Anchor, BiomeTest, Condition, cluster_reach},
     structures::{
         Finder, Found, STRUCTURE_KINDS, Spread, allowed_by_biomes, candidates, depends_on_lower_bits, spread,
     },
 };
 
-/// Samples of a card's area, whatever its size.
+/// Samples of a condition's area, whatever its size.
 const AREA_SAMPLES_PER_AXIS: i32 = 64;
 const MIN_STEP: i32 = 16;
 const MAX_STEP: i32 = 256;
@@ -28,7 +28,7 @@ const END_SPAWN: [i32; 2] = [100, 0];
 /// Room for the grid cells and chunk middles of candidates, see `candidates`.
 pub type Cells = Vec<([i32; 2], [i32; 2])>;
 
-/// Something a card found.
+/// Something a condition found.
 #[derive(Clone, PartialEq, Debug)]
 pub struct Hit {
     /// the kind of a structure, nothing for a biome or noise value
@@ -38,7 +38,7 @@ pub struct Hit {
     pub z: i32,
 }
 
-/// What passing a card came to.
+/// What passing a condition came to.
 #[derive(Default)]
 struct Passed {
     /// how well it did, more is better
@@ -46,7 +46,7 @@ struct Passed {
     hits: Vec<Hit>,
 }
 
-/// What a seed needs for checking cards, made when first needed.
+/// What a seed needs for checking conditions, made when first needed.
 pub struct SeedWorld {
     pub seed: i64,
     sources: [OnceLock<BiomeSourceKind>; 3],
@@ -89,7 +89,7 @@ impl SeedWorld {
         })
     }
 
-    /// Where a card about `dimension` is around. `validate` keeps spawn out of the nether.
+    /// Where a condition about `dimension` is around. `validate` keeps spawn out of the nether.
     fn center(&self, anchor: Anchor, dimension: Dimension, spot: [i32; 2]) -> [i32; 2] {
         match (anchor, dimension) {
             (Anchor::At(x, z), _) => [x, z],
@@ -344,9 +344,9 @@ fn check_biome(
 }
 
 impl SeedWorld {
-    fn check(&self, card: &Card, here: [i32; 2], cells: &mut Cells) -> Option<Passed> {
-        match card {
-            Card::Structure {
+    fn check(&self, condition: &Condition, here: [i32; 2], cells: &mut Cells) -> Option<Passed> {
+        match condition {
+            Condition::Structure {
                 kind,
                 count,
                 radius,
@@ -377,7 +377,7 @@ impl SeedWorld {
                     hits: found.iter().map(found_hit).collect(),
                 })
             }
-            Card::Cluster {
+            Condition::Cluster {
                 kind,
                 count,
                 radius,
@@ -419,13 +419,13 @@ impl SeedWorld {
                     hits: found.iter().filter(held).map(found_hit).collect(),
                 })
             }
-            Card::Biome {
+            Condition::Biome {
                 biome,
                 test,
                 radius,
                 anchor,
             } => check_biome(self, biome, *test, *radius, *anchor, here),
-            Card::Noise {
+            Condition::Noise {
                 parameter,
                 min,
                 max,
@@ -470,11 +470,13 @@ impl SeedWorld {
                         .collect(),
                 })
             }
-            Card::Not(card) => match self.check(card, here, cells) {
+            Condition::Not(condition) => match self.check(condition, here, cells) {
                 Some(_) => None,
                 None => Some(Passed::default()),
             },
-            Card::Any(cards) => cards.iter().find_map(|card| self.check(card, here, cells)),
+            Condition::Any(conditions) => conditions
+                .iter()
+                .find_map(|condition| self.check(condition, here, cells)),
         }
     }
 }
@@ -493,49 +495,49 @@ fn found_hit(found: &Found) -> Hit {
     }
 }
 
-/// A seed or location that passed all cards.
+/// A seed or location that passed all conditions.
 #[derive(Clone, PartialEq, Debug)]
 pub struct Match {
     pub seed: i64,
-    /// the score of the first card that has one, more is better
+    /// the score of the first condition that has one, more is better
     pub score: Option<f64>,
     pub hits: Vec<Hit>,
 }
 
-/// A search with its cards in the order they are checked.
+/// A search with its conditions in the order they are checked.
 pub struct Plan {
-    /// card index in the search and card, the cheapest first
-    cards: Vec<(usize, Card)>,
-    /// cards that can turn a seed down from its lower 48 bits alone
+    /// condition index in the search and condition, the cheapest first
+    conditions: Vec<(usize, Condition)>,
+    /// conditions that can turn a seed down from its lower 48 bits alone
     positional: Vec<usize>,
 }
 
-/// About how long a card takes, to check the cheap ones first.
-fn cost(card: &Card) -> u32 {
+/// About how long a condition takes, to check the cheap ones first.
+fn cost(condition: &Condition) -> u32 {
     let anchored = |anchor: &Anchor| if *anchor == Anchor::Spawn { 3 } else { 0 };
-    match card {
-        Card::Structure { kind, anchor, .. } | Card::Cluster { kind, anchor, .. } => {
+    match condition {
+        Condition::Structure { kind, anchor, .. } | Condition::Cluster { kind, anchor, .. } => {
             if spread(*kind) == Some(Spread::Rings) {
                 100
             } else {
                 1 + anchored(anchor)
             }
         }
-        Card::Biome { anchor, .. } | Card::Noise { anchor, .. } => 2 + anchored(anchor),
-        Card::Not(card) => cost(card),
-        Card::Any(cards) => cards.iter().map(cost).sum(),
+        Condition::Biome { anchor, .. } | Condition::Noise { anchor, .. } => 2 + anchored(anchor),
+        Condition::Not(condition) => cost(condition),
+        Condition::Any(conditions) => conditions.iter().map(cost).sum(),
     }
 }
 
 impl Plan {
-    pub fn new(cards: &[Card]) -> Self {
-        let mut ordered: Vec<(usize, Card)> = cards.iter().cloned().enumerate().collect();
-        ordered.sort_by_key(|(_, card)| cost(card));
+    pub fn new(conditions: &[Condition]) -> Self {
+        let mut ordered: Vec<(usize, Condition)> = conditions.iter().cloned().enumerate().collect();
+        ordered.sort_by_key(|(_, condition)| cost(condition));
         let positional = ordered
             .iter()
             .enumerate()
-            .filter(|(_, (_, card))| match card {
-                Card::Structure { kind, anchor, .. } | Card::Cluster { kind, anchor, .. } => {
+            .filter(|(_, (_, condition))| match condition {
+                Condition::Structure { kind, anchor, .. } | Condition::Cluster { kind, anchor, .. } => {
                     matches!(anchor, Anchor::At(..))
                         && spread(*kind) != Some(Spread::Rings)
                         && depends_on_lower_bits(*kind)
@@ -545,7 +547,7 @@ impl Plan {
             .map(|(i, _)| i)
             .collect();
         Self {
-            cards: ordered,
+            conditions: ordered,
             positional,
         }
     }
@@ -557,8 +559,8 @@ impl Plan {
 
     /// False if no seed with the same lower 48 bits can pass. Needs no world, takes nanoseconds.
     pub fn lower_bits_pass(&self, seed: i64, cells: &mut Cells) -> bool {
-        self.positional.iter().all(|&i| match &self.cards[i].1 {
-            Card::Structure {
+        self.positional.iter().all(|&i| match &self.conditions[i].1 {
+            Condition::Structure {
                 kind,
                 count,
                 radius,
@@ -568,7 +570,7 @@ impl Plan {
                 candidates(seed, *kind, [*x, *z], *radius, cells);
                 cells.len() >= *count as usize
             }
-            Card::Cluster {
+            Condition::Cluster {
                 kind,
                 count,
                 radius,
@@ -584,11 +586,11 @@ impl Plan {
         })
     }
 
-    /// Checks all cards, `here` is what `Anchor::Spot` means.
+    /// Checks all conditions, `here` is what `Anchor::Spot` means.
     pub fn check(&self, world: &SeedWorld, here: [i32; 2], cells: &mut Cells) -> Option<Match> {
-        let mut passed = Vec::with_capacity(self.cards.len());
-        for (index, card) in &self.cards {
-            passed.push((*index, world.check(card, here, cells)?));
+        let mut passed = Vec::with_capacity(self.conditions.len());
+        for (index, condition) in &self.conditions {
+            passed.push((*index, world.check(condition, here, cells)?));
         }
         passed.sort_by_key(|(index, _)| *index);
         Some(Match {
@@ -673,15 +675,15 @@ mod tests {
             ];
             let mut matches = 0;
             for text in cases {
-                let cards = parse(text).unwrap();
-                let plan = Plan::new(&cards);
+                let conditions = parse(text).unwrap();
+                let plan = Plan::new(&conditions);
                 let mut cells = Vec::new();
                 for seed in 0..60i64 {
                     let seed = seed.wrapping_mul(0x0123_4567_89AB_CDEF);
                     let world = SeedWorld::new(seed);
-                    // every card, no shortcut: `around` asks the finder about all candidates
-                    let plain = cards.iter().all(|card| match card {
-                        Card::Structure {
+                    // every condition, no shortcut: `around` asks the finder about all candidates
+                    let plain = conditions.iter().all(|condition| match condition {
+                        Condition::Structure {
                             kind,
                             count,
                             radius,
@@ -689,7 +691,7 @@ mod tests {
                         } => world
                             .finder(STRUCTURE_KINDS[*kind].dimension)
                             .is_some_and(|f| f.around(*kind, [*x, *z], *radius).len() >= *count as usize),
-                        card => world.check(card, [0, 0], &mut cells).is_some(),
+                        condition => world.check(condition, [0, 0], &mut cells).is_some(),
                     });
                     let planned = plan.lower_bits_pass(seed, &mut cells)
                         && plan.check(&SeedWorld::new(seed), [0, 0], &mut cells).is_some();

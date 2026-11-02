@@ -222,7 +222,6 @@ struct State {
     ui: Ui,
 }
 
-/// Everything that is shown in the window.
 /// Something that can be shown over the biomes.
 #[derive(Clone, Copy)]
 struct Overlay {
@@ -239,6 +238,7 @@ impl Default for Overlay {
     }
 }
 
+/// Everything that is shown in the window.
 struct Ui {
     seed: i64,
     /// the seed as typed, a number or any text like in Minecraft
@@ -435,11 +435,7 @@ impl State {
             goto: [0, 0],
             hovered_biome: None,
             quads: Vec::new(),
-            queries: Queries::new(FinderWorld {
-                seed,
-                dimension,
-                sample_height: params.sample_height,
-            }),
+            queries: Queries::new(FinderWorld { seed, dimension }),
             shown_kinds: vec![false; STRUCTURE_KINDS.len()],
             markers: Vec::new(),
             placed: Placed::default(),
@@ -603,24 +599,29 @@ impl State {
             self.repaint_at = Instant::now().checked_add(repaint_delay);
         }
 
+        // egui only sends what changed, so this can't wait for a frame that may get skipped
+        for (id, deltas) in &full_output.textures_delta.set {
+            for delta in deltas {
+                self.egui_renderer.update_texture(&self.device, &self.queue, *id, delta);
+            }
+        }
         let output = match self.surface.get_current_texture() {
-            wgpu::CurrentSurfaceTexture::Success(surface_texture) => surface_texture,
-            wgpu::CurrentSurfaceTexture::Suboptimal(surface_texture) => surface_texture,
+            wgpu::CurrentSurfaceTexture::Success(surface_texture)
+            | wgpu::CurrentSurfaceTexture::Suboptimal(surface_texture) => Some(surface_texture),
             wgpu::CurrentSurfaceTexture::Timeout
             | wgpu::CurrentSurfaceTexture::Occluded
-            | wgpu::CurrentSurfaceTexture::Validation => {
-                // Skip this frame
-                return Ok(());
-            }
+            | wgpu::CurrentSurfaceTexture::Validation => None,
             wgpu::CurrentSurfaceTexture::Outdated => {
                 self.surface.configure(&self.device, &self.surface_config);
-                return Ok(());
+                None
             }
-            wgpu::CurrentSurfaceTexture::Lost => {
-                // You could recreate the devices and all resources
-                // created with it here, but we'll just bail
-                anyhow::bail!("Lost device");
+            wgpu::CurrentSurfaceTexture::Lost => anyhow::bail!("Lost device"),
+        };
+        let Some(output) = output else {
+            for id in &full_output.textures_delta.free {
+                self.egui_renderer.free_texture(id);
             }
+            return Ok(());
         };
         let view = output.texture.create_view(&Default::default());
         let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
@@ -634,11 +635,6 @@ impl State {
         let paint_jobs = self
             .egui_ctx
             .tessellate(full_output.shapes, full_output.pixels_per_point);
-        for (id, deltas) in &full_output.textures_delta.set {
-            for delta in deltas {
-                self.egui_renderer.update_texture(&self.device, &self.queue, *id, delta);
-            }
-        }
         let egui_cmds =
             self.egui_renderer
                 .update_buffers(&self.device, &self.queue, &mut encoder, &paint_jobs, &screen);
@@ -860,7 +856,6 @@ impl Ui {
         self.queries.set_world(FinderWorld {
             seed: self.seed,
             dimension: self.dimension,
-            sample_height: self.sample_height,
         });
         self.tiles.clear(WorldParams {
             seed: self.seed,

@@ -12,7 +12,7 @@ use std::{
 
 use crate::seedfind::{
     engine::{Cells, Hit, Match, Plan, SeedWorld, spots},
-    spec::{self, Card},
+    spec::{self, Condition},
 };
 
 /// Placing structures recurses deeply, see `gui::finder_pool`.
@@ -118,13 +118,13 @@ pub struct Search {
 }
 
 impl Search {
-    /// Starts it, or says what is wrong with the cards for these seeds.
-    pub fn start(cards: &[Card], seeds: Seeds, threads: usize) -> Result<Self, String> {
+    /// Starts it, or says what is wrong with the conditions for these seeds.
+    pub fn start(conditions: &[Condition], seeds: Seeds, threads: usize) -> Result<Self, String> {
         let in_seed = matches!(seeds, Seeds::Locations { .. });
-        spec::validate(cards, in_seed)?;
+        spec::validate(conditions, in_seed)?;
         let (location_world, center, spots) = match seeds {
             Seeds::Locations { seed, radius, center } => {
-                let spots = area_spots(cards, center, radius)?;
+                let spots = area_spots(conditions, center, radius)?;
                 (Some(Arc::new(SeedWorld::new(seed))), Some(center), spots)
             }
             _ => (None, None, Vec::new()),
@@ -134,7 +134,7 @@ impl Search {
             Seeds::List(list) => Some(list.len() as u64),
             _ => None,
         };
-        let plan = Arc::new(Plan::new(cards));
+        let plan = Arc::new(Plan::new(conditions));
         let (tx, results) = mpsc::sync_channel(MAX_WAITING_MATCHES);
         let search = Self {
             counters: Default::default(),
@@ -260,9 +260,9 @@ impl Drop for Search {
     }
 }
 
-/// The spots of an area to try, nearest first, as far apart as the cards allow.
-fn area_spots(cards: &[Card], center: [i32; 2], radius: i32) -> Result<Vec<[i32; 2]>, String> {
-    let step = cards
+/// The spots of an area to try, nearest first, as far apart as the conditions allow.
+fn area_spots(conditions: &[Condition], center: [i32; 2], radius: i32) -> Result<Vec<[i32; 2]>, String> {
+    let step = conditions
         .iter()
         .filter_map(spec::spot_spacing)
         .min()
@@ -428,7 +428,7 @@ impl Worker {
         let Some(mut found) = self.plan.check(world, spot, cells) else {
             return;
         };
-        // nothing found by the cards means the spot itself
+        // nothing found by the conditions means the spot itself
         if found.hits.is_empty() {
             found.hits.push(Hit {
                 kind: None,
@@ -448,13 +448,13 @@ mod tests {
     use super::*;
 
     fn run_to_end(text: &str, seed: i64, radius: i32) -> (Vec<Match>, String) {
-        let cards = spec::parse(text).unwrap();
+        let conditions = spec::parse(text).unwrap();
         let seeds = Seeds::Locations {
             seed,
             radius,
             center: [0, 0],
         };
-        let search = Search::start(&cards, seeds, 4).unwrap();
+        let search = Search::start(&conditions, seeds, 4).unwrap();
         let start = Instant::now();
         let mut found = Vec::new();
         while !search.is_done() {
@@ -511,8 +511,8 @@ mod tests {
     #[test]
     fn spots_reach_every_cluster() {
         let radius = 128;
-        let cards = spec::parse(&format!("cluster village count>=2 radius {radius}")).unwrap();
-        let grid = area_spots(&cards, [0, 0], 2000).unwrap();
+        let conditions = spec::parse(&format!("cluster village count>=2 radius {radius}")).unwrap();
+        let grid = area_spots(&conditions, [0, 0], 2000).unwrap();
         let missed_with = |reach: i32| {
             let reach = (reach as f64).powi(2);
             let in_reach =
@@ -533,13 +533,13 @@ mod tests {
 
     #[test]
     fn too_big_areas_are_refused() {
-        let cards = spec::parse("biome desert present within 16").unwrap();
+        let conditions = spec::parse("biome desert present within 16").unwrap();
         let seeds = Seeds::Locations {
             seed: 1,
             radius: 30_000_000,
             center: [0, 0],
         };
-        assert!(Search::start(&cards, seeds, 1).err().unwrap().contains("spots"));
+        assert!(Search::start(&conditions, seeds, 1).err().unwrap().contains("spots"));
     }
 
     #[test]

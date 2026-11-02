@@ -122,9 +122,7 @@ impl Command {
             "threads" => Command::Threads(num(0)? as usize),
             "sea_floor" => Command::SeaFloor(args.first() != Some(&"off")),
             "zoom_buttons" => Command::ZoomButtons(args.first() != Some(&"off")),
-            "seed" => Command::Seed(
-                crate::seed::parse_seed(args.first().context("seed: a number or text")?).context("seed: blank")?,
-            ),
+            "seed" => Command::Seed(crate::seed::parse_seed(&args.join(" ")).context("seed: a number or text")?),
             "grid_over_markers" => Command::GridOverMarkers(args.first() != Some(&"off")),
             "grid" => Command::Grid(args.first() != Some(&"off")),
             "noise" => Command::Noise(match args.first().copied() {

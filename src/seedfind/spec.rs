@@ -1,4 +1,4 @@
-//! What a search looks for, as cards and as the text they are saved as, one card per line:
+//! What a search looks for, as conditions and as the text they are saved as, one condition per line:
 //!
 //! ```text
 //! structure village count>=2 within 500 of spawn
@@ -27,7 +27,7 @@ use crate::{
     biome_colors::BIOMES, dimension::Dimension, seedfind::engine::biome_dimension, structures::STRUCTURE_KINDS,
 };
 
-/// Where the area of a card is around.
+/// Where the area of a condition is around.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Anchor {
     Spawn,
@@ -97,7 +97,7 @@ impl Ore {
 }
 
 #[derive(Clone, PartialEq, Debug)]
-pub enum Card {
+pub enum Condition {
     Structure {
         kind: usize,
         count: u32,
@@ -128,8 +128,8 @@ pub enum Card {
         radius: i32,
         anchor: Anchor,
     },
-    Not(Box<Card>),
-    Any(Vec<Card>),
+    Not(Box<Condition>),
+    Any(Vec<Condition>),
 }
 
 /// How far around a spot a cluster of `radius` is looked for. With spots `2 * radius` apart the
@@ -138,62 +138,70 @@ pub fn cluster_reach(radius: i32) -> i32 {
     radius * 5 / 2
 }
 
-/// How far apart spots can be for this card not to miss anything: everything within its radius of
+/// How far apart spots can be for this condition not to miss anything: everything within its radius of
 /// some place is then within its radius of a spot.
-pub fn spot_spacing(card: &Card) -> Option<i32> {
-    match card {
-        Card::Structure { radius, .. } | Card::Biome { radius, .. } | Card::Noise { radius, .. } => Some(*radius),
-        Card::Cluster { radius, .. } => Some(radius * 2),
-        Card::Not(card) => spot_spacing(card),
-        Card::Any(cards) => cards.iter().filter_map(spot_spacing).min(),
+pub fn spot_spacing(condition: &Condition) -> Option<i32> {
+    match condition {
+        Condition::Structure { radius, .. } | Condition::Biome { radius, .. } | Condition::Noise { radius, .. } => {
+            Some(*radius)
+        }
+        Condition::Cluster { radius, .. } => Some(radius * 2),
+        Condition::Not(condition) => spot_spacing(condition),
+        Condition::Any(conditions) => conditions.iter().filter_map(spot_spacing).min(),
     }
 }
 
-/// The dimension a card's place is in, for those about one.
-fn dimension_of(card: &Card) -> Option<Dimension> {
-    match card {
-        Card::Structure { kind, .. } | Card::Cluster { kind, .. } => Some(STRUCTURE_KINDS[*kind].dimension),
-        Card::Biome { biome, .. } => Some(biome_dimension(biome)),
-        Card::Noise { .. } => Some(Dimension::Overworld),
-        Card::Not(_) | Card::Any(_) => None,
+/// The dimension a condition's place is in, for those about one.
+fn dimension_of(condition: &Condition) -> Option<Dimension> {
+    match condition {
+        Condition::Structure { kind, .. } | Condition::Cluster { kind, .. } => Some(STRUCTURE_KINDS[*kind].dimension),
+        Condition::Biome { biome, .. } => Some(biome_dimension(biome)),
+        Condition::Noise { .. } => Some(Dimension::Overworld),
+        Condition::Not(_) | Condition::Any(_) => None,
     }
 }
 
-fn anchor_of(card: &Card) -> Option<Anchor> {
-    match card {
-        Card::Structure { anchor, .. }
-        | Card::Cluster { anchor, .. }
-        | Card::Biome { anchor, .. }
-        | Card::Noise { anchor, .. } => Some(*anchor),
-        Card::Not(_) | Card::Any(_) => None,
+fn anchor_of(condition: &Condition) -> Option<Anchor> {
+    match condition {
+        Condition::Structure { anchor, .. }
+        | Condition::Cluster { anchor, .. }
+        | Condition::Biome { anchor, .. }
+        | Condition::Noise { anchor, .. } => Some(*anchor),
+        Condition::Not(_) | Condition::Any(_) => None,
     }
 }
 
-/// Says what is wrong with a card for finding seeds, or locations `in_seed`.
-fn validate_card(card: &Card, in_seed: bool) -> Result<(), String> {
-    match card {
-        Card::Not(card) => return validate_card(card, in_seed),
-        Card::Any(cards) => return cards.iter().try_for_each(|card| validate_card(card, in_seed)),
+/// Says what is wrong with a condition for finding seeds, or locations `in_seed`.
+fn validate_condition(condition: &Condition, in_seed: bool) -> Result<(), String> {
+    match condition {
+        Condition::Not(condition) => return validate_condition(condition, in_seed),
+        Condition::Any(conditions) => {
+            return conditions
+                .iter()
+                .try_for_each(|condition| validate_condition(condition, in_seed));
+        }
         _ => {}
     }
-    match anchor_of(card) {
-        Some(Anchor::Spot) if !in_seed => Err(format!("`{card}` needs `of spawn` or `of x,z`")),
+    match anchor_of(condition) {
+        Some(Anchor::Spot) if !in_seed => Err(format!("`{condition}` needs `of spawn` or `of x,z`")),
         Some(Anchor::Spawn | Anchor::At(..)) if in_seed => {
-            Err(format!("`{card}`: locations are around each spot, leave out `of`"))
+            Err(format!("`{condition}`: locations are around each spot, leave out `of`"))
         }
-        Some(Anchor::Spawn) if dimension_of(card) == Some(Dimension::Nether) => {
-            Err(format!("`{card}`: the nether has no spawn, use `of x,z`"))
+        Some(Anchor::Spawn) if dimension_of(condition) == Some(Dimension::Nether) => {
+            Err(format!("`{condition}`: the nether has no spawn, use `of x,z`"))
         }
         _ => Ok(()),
     }
 }
 
-/// Says what is wrong with cards for finding seeds, or locations `in_seed`.
-pub fn validate(cards: &[Card], in_seed: bool) -> Result<(), String> {
-    if cards.is_empty() {
+/// Says what is wrong with conditions for finding seeds, or locations `in_seed`.
+pub fn validate(conditions: &[Condition], in_seed: bool) -> Result<(), String> {
+    if conditions.is_empty() {
         return Err("nothing to look for".to_owned());
     }
-    cards.iter().try_for_each(|card| validate_card(card, in_seed))
+    conditions
+        .iter()
+        .try_for_each(|condition| validate_condition(condition, in_seed))
 }
 
 /// The biomes a search can look for. It samples at each dimension's default height, above all caves
@@ -277,20 +285,20 @@ fn coverage(word: &str) -> Result<f32, String> {
         .ok_or_else(|| format!("expected `coverage>=<0 to 100>%`, got `{word}`"))
 }
 
-impl Card {
+impl Condition {
     fn parse_line(words: &[&str]) -> Result<Self, String> {
         match words {
-            ["not", rest @ ..] => Ok(Card::Not(Box::new(Self::parse_line(rest)?))),
+            ["not", rest @ ..] => Ok(Condition::Not(Box::new(Self::parse_line(rest)?))),
             ["structure", kind, count, rest @ ..] => {
                 let (radius, anchor) = area(rest)?;
-                Ok(Card::Structure {
+                Ok(Condition::Structure {
                     kind: kind_named(kind)?,
                     count: self::count(count)?,
                     radius,
                     anchor,
                 })
             }
-            ["cluster", kind, count, "radius", radius] => Ok(Card::Cluster {
+            ["cluster", kind, count, "radius", radius] => Ok(Condition::Cluster {
                 kind: kind_named(kind)?,
                 count: self::count(count)?,
                 radius: distance(radius)?,
@@ -302,7 +310,7 @@ impl Card {
                 if anchor == Anchor::Spot {
                     return Err("a cluster around each spot only has its radius".to_owned());
                 }
-                Ok(Card::Cluster {
+                Ok(Condition::Cluster {
                     kind: kind_named(kind)?,
                     count: self::count(count)?,
                     radius: distance(radius)?,
@@ -329,7 +337,7 @@ impl Card {
                 if !searchable_biomes().any(|name| name == *biome) {
                     return Err(format!("{biome} can't be searched for, see docs/seed-search.md"));
                 }
-                Ok(Card::Biome {
+                Ok(Condition::Biome {
                     biome: biome.to_string(),
                     test,
                     radius,
@@ -351,7 +359,7 @@ impl Card {
                     rest => (0.0, rest),
                 };
                 let (radius, anchor) = area(rest)?;
-                Ok(Card::Noise {
+                Ok(Condition::Noise {
                     parameter,
                     min,
                     max,
@@ -366,9 +374,9 @@ impl Card {
 }
 
 /// Reads a search. Errors say the line and what is wrong with it.
-pub fn parse(text: &str) -> Result<Vec<Card>, String> {
-    let mut cards = Vec::new();
-    let mut any: Option<Vec<Card>> = None;
+pub fn parse(text: &str) -> Result<Vec<Condition>, String> {
+    let mut conditions = Vec::new();
+    let mut any: Option<Vec<Condition>> = None;
     for (number, line) in text.lines().enumerate() {
         let line = line.split('#').next().unwrap_or("");
         let words: Vec<&str> = line.split_whitespace().collect();
@@ -380,19 +388,19 @@ pub fn parse(text: &str) -> Result<Vec<Card>, String> {
             (["end"], Some(_)) => {
                 let group = any.take().unwrap_or_default();
                 if group.is_empty() {
-                    return Err(error("`any` needs cards".to_owned()));
+                    return Err(error("`any` needs conditions".to_owned()));
                 }
-                cards.push(Card::Any(group));
+                conditions.push(Condition::Any(group));
             }
             (["end"], None) => return Err(error("`end` without `any`".to_owned())),
-            (words, Some(group)) => group.push(Card::parse_line(words).map_err(error)?),
-            (words, None) => cards.push(Card::parse_line(words).map_err(error)?),
+            (words, Some(group)) => group.push(Condition::parse_line(words).map_err(error)?),
+            (words, None) => conditions.push(Condition::parse_line(words).map_err(error)?),
         }
     }
     if any.is_some() {
         return Err("`any` without `end`".to_owned());
     }
-    Ok(cards)
+    Ok(conditions)
 }
 
 impl fmt::Display for Anchor {
@@ -418,10 +426,10 @@ impl fmt::Display for Within {
     }
 }
 
-impl fmt::Display for Card {
+impl fmt::Display for Condition {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            Card::Structure {
+            Condition::Structure {
                 kind,
                 count,
                 radius,
@@ -432,7 +440,7 @@ impl fmt::Display for Card {
                 STRUCTURE_KINDS[*kind].id,
                 Within(*radius, *anchor)
             ),
-            Card::Cluster {
+            Condition::Cluster {
                 kind,
                 count,
                 radius,
@@ -449,7 +457,7 @@ impl fmt::Display for Card {
                 }
                 Ok(())
             }
-            Card::Biome {
+            Condition::Biome {
                 biome,
                 test,
                 radius,
@@ -464,7 +472,7 @@ impl fmt::Display for Card {
                 }
                 write!(f, " {}", Within(*radius, *anchor))
             }
-            Card::Noise {
+            Condition::Noise {
                 parameter,
                 min,
                 max,
@@ -478,11 +486,11 @@ impl fmt::Display for Card {
                 }
                 write!(f, " {}", Within(*radius, *anchor))
             }
-            Card::Not(card) => write!(f, "not {card}"),
-            Card::Any(cards) => {
+            Condition::Not(condition) => write!(f, "not {condition}"),
+            Condition::Any(conditions) => {
                 writeln!(f, "any")?;
-                for card in cards {
-                    writeln!(f, "  {card}")?;
+                for condition in conditions {
+                    writeln!(f, "  {condition}")?;
                 }
                 write!(f, "end")
             }
@@ -491,8 +499,8 @@ impl fmt::Display for Card {
 }
 
 /// The text of a search.
-pub fn print(cards: &[Card]) -> String {
-    cards.iter().map(|card| format!("{card}\n")).collect()
+pub fn print(conditions: &[Condition]) -> String {
+    conditions.iter().map(|condition| format!("{condition}\n")).collect()
 }
 
 /// Ready made searches: name and text.
@@ -540,9 +548,9 @@ cluster swamp_hut count>=2 radius 128
 not biome desert present within 300
 ",
         ] {
-            let cards = parse(text).unwrap();
-            assert_eq!(print(&cards), text);
-            assert_eq!(parse(&print(&cards)).unwrap(), cards);
+            let conditions = parse(text).unwrap();
+            assert_eq!(print(&conditions), text);
+            assert_eq!(parse(&print(&conditions)).unwrap(), conditions);
         }
     }
 

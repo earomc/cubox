@@ -8,7 +8,7 @@ use crate::{
     seedfind::{
         engine::{Match, biome_dimension},
         run::{Search, Seeds},
-        spec::{self, Anchor, BiomeTest, Card, MAX_BLOCKS, NoiseParameter, PRESETS},
+        spec::{self, Anchor, BiomeTest, Condition, MAX_BLOCKS, NoiseParameter, PRESETS},
     },
     structures::{STRUCTURE_KINDS, is_structure},
 };
@@ -20,10 +20,10 @@ const MAX_RESULTS: usize = 200;
 const RESTART_AFTER: Duration = Duration::from_millis(500);
 
 pub struct SeedSearch {
-    cards: Vec<Card>,
-    /// the cards as text, which is what can be saved and shared
+    conditions: Vec<Condition>,
+    /// the conditions as text, which is what can be saved and shared
     text: String,
-    /// what is wrong with the text or the cards
+    /// what is wrong with the text or the conditions
     error: Option<String>,
     in_this_seed: bool,
     /// how far locations are looked for, and around where
@@ -40,7 +40,7 @@ impl Default for SeedSearch {
     fn default() -> Self {
         let text = PRESETS[0].1.to_owned();
         Self {
-            cards: spec::parse(&text).unwrap_or_default(),
+            conditions: spec::parse(&text).unwrap_or_default(),
             text,
             error: None,
             in_this_seed: false,
@@ -108,7 +108,7 @@ impl SeedSearch {
         };
         self.results.clear();
         self.search = None;
-        match Search::start(&self.cards, seeds, threads) {
+        match Search::start(&self.conditions, seeds, threads) {
             Ok(search) => self.search = Some(search),
             Err(err) => self.error = Some(err),
         }
@@ -117,8 +117,8 @@ impl SeedSearch {
     /// `search_seeds` and `search_locations` of a script.
     pub fn script_start(&mut self, text: &str, seed: i64, area: Option<(i32, [i32; 2])>) {
         match spec::parse(text) {
-            Ok(cards) => {
-                self.cards = cards;
+            Ok(conditions) => {
+                self.conditions = conditions;
                 self.in_this_seed = area.is_some();
                 if let Some((radius, center)) = area {
                     (self.area_radius, self.area_center) = (radius, center);
@@ -133,8 +133,8 @@ impl SeedSearch {
     /// `edit_search` of a script.
     pub fn script_edit(&mut self, text: &str) {
         match spec::parse(text) {
-            Ok(cards) => {
-                self.cards = cards;
+            Ok(conditions) => {
+                self.conditions = conditions;
                 self.changed();
             }
             Err(err) => log::error!("edit_search: {err}"),
@@ -145,14 +145,14 @@ impl SeedSearch {
         self.search.as_ref().map_or(String::new(), Search::status)
     }
 
-    /// After a change of the cards.
+    /// After a change of the conditions.
     fn changed(&mut self) {
-        self.text = spec::print(&self.cards);
+        self.text = spec::print(&self.conditions);
         self.validate();
     }
 
     fn validate(&mut self) {
-        self.error = spec::validate(&self.cards, self.in_this_seed).err();
+        self.error = spec::validate(&self.conditions, self.in_this_seed).err();
         self.changed_at = Some(Instant::now());
         if self.error.is_some() {
             self.search = None;
@@ -162,13 +162,15 @@ impl SeedSearch {
     /// Conditions of the other mode say where in the other way.
     fn set_in_this_seed(&mut self) {
         let in_seed = self.in_this_seed;
-        self.cards.iter_mut().for_each(|card| convert_card(card, in_seed));
+        self.conditions
+            .iter_mut()
+            .for_each(|condition| convert_condition(condition, in_seed));
         self.changed();
     }
 }
 
-/// Makes a card fit finding locations `in_seed`, or else seeds.
-fn convert_card(card: &mut Card, in_seed: bool) {
+/// Makes a condition fit finding locations `in_seed`, or else seeds.
+fn convert_condition(condition: &mut Condition, in_seed: bool) {
     let new_anchor = |anchor: &mut Anchor, spawn_exists: bool| {
         *anchor = match (in_seed, spawn_exists) {
             (true, _) => Anchor::Spot,
@@ -176,20 +178,22 @@ fn convert_card(card: &mut Card, in_seed: bool) {
             (false, false) => Anchor::At(0, 0),
         };
     };
-    match card {
-        Card::Structure { kind, anchor, .. } => {
+    match condition {
+        Condition::Structure { kind, anchor, .. } => {
             new_anchor(anchor, STRUCTURE_KINDS[*kind].dimension != Dimension::Nether);
         }
-        Card::Cluster { within, anchor, .. } => {
+        Condition::Cluster { within, anchor, .. } => {
             new_anchor(anchor, false);
             if !in_seed {
                 *within = 3000;
             }
         }
-        Card::Biome { biome, anchor, .. } => new_anchor(anchor, biome_dimension(biome) != Dimension::Nether),
-        Card::Noise { anchor, .. } => new_anchor(anchor, true),
-        Card::Not(inner) => convert_card(inner, in_seed),
-        Card::Any(cards) => cards.iter_mut().for_each(|card| convert_card(card, in_seed)),
+        Condition::Biome { biome, anchor, .. } => new_anchor(anchor, biome_dimension(biome) != Dimension::Nether),
+        Condition::Noise { anchor, .. } => new_anchor(anchor, true),
+        Condition::Not(inner) => convert_condition(inner, in_seed),
+        Condition::Any(conditions) => conditions
+            .iter_mut()
+            .for_each(|condition| convert_condition(condition, in_seed)),
     }
 }
 
@@ -270,11 +274,11 @@ fn kind_ui(ui: &mut egui::Ui, salt: usize, kind: &mut usize) -> bool {
     changed
 }
 
-/// One card, word for word its text with the values to change. True if it changed.
-fn card_ui(ui: &mut egui::Ui, salt: usize, card: &mut Card) -> bool {
+/// One condition, word for word its text with the values to change. True if it changed.
+fn condition_ui(ui: &mut egui::Ui, salt: usize, condition: &mut Condition) -> bool {
     let mut changed = false;
-    match card {
-        Card::Structure {
+    match condition {
+        Condition::Structure {
             kind,
             count,
             radius,
@@ -287,7 +291,7 @@ fn card_ui(ui: &mut egui::Ui, salt: usize, card: &mut Card) -> bool {
             let spawn_exists = STRUCTURE_KINDS[*kind].dimension != Dimension::Nether;
             changed |= within_ui(ui, salt, radius, anchor, spawn_exists);
         }
-        Card::Cluster {
+        Condition::Cluster {
             kind,
             count,
             radius,
@@ -305,7 +309,7 @@ fn card_ui(ui: &mut egui::Ui, salt: usize, card: &mut Card) -> bool {
                 changed |= within_ui(ui, salt, within, anchor, spawn_exists);
             }
         }
-        Card::Biome {
+        Condition::Biome {
             biome,
             test,
             radius,
@@ -359,7 +363,7 @@ fn card_ui(ui: &mut egui::Ui, salt: usize, card: &mut Card) -> bool {
             let spawn_exists = biome_dimension(biome) != Dimension::Nether;
             changed |= within_ui(ui, salt, radius, anchor, spawn_exists);
         }
-        Card::Noise {
+        Condition::Noise {
             parameter,
             min,
             max,
@@ -384,9 +388,9 @@ fn card_ui(ui: &mut egui::Ui, salt: usize, card: &mut Card) -> bool {
             ui.label("%");
             changed |= within_ui(ui, salt, radius, anchor, true);
         }
-        Card::Not(inner) => changed |= card_ui(ui, salt, inner),
-        Card::Any(cards) => {
-            ui.label(format!("any of {} conditions, see the text", cards.len()));
+        Condition::Not(inner) => changed |= condition_ui(ui, salt, inner),
+        Condition::Any(conditions) => {
+            ui.label(format!("any of {} conditions, see the text", conditions.len()));
         }
     }
     changed
@@ -428,48 +432,48 @@ impl Ui {
                     .show_ui(ui, |ui| {
                         for (name, text) in PRESETS {
                             if ui.selectable_label(false, *name).clicked()
-                                && let Ok(cards) = spec::parse(text)
+                                && let Ok(conditions) = spec::parse(text)
                             {
-                                search.cards = cards;
+                                search.conditions = conditions;
                                 changed = true;
                             }
                         }
                     });
             }
             let mut remove = None;
-            for (index, card) in search.cards.iter_mut().enumerate() {
+            for (index, condition) in search.conditions.iter_mut().enumerate() {
                 ui.horizontal_wrapped(|ui| {
                     ui.spacing_mut().item_spacing.x = 4.0;
                     if ui.small_button("x").on_hover_text("Remove").clicked() {
                         remove = Some(index);
                     }
                     // `any` is a block of lines, which has no `not`
-                    if !matches!(card, Card::Any(_)) {
-                        let is_not = matches!(card, Card::Not(_));
+                    if !matches!(condition, Condition::Any(_)) {
+                        let is_not = matches!(condition, Condition::Not(_));
                         if ui.selectable_label(is_not, "not").clicked() {
-                            let taken = std::mem::replace(card, Card::Any(Vec::new()));
-                            *card = match taken {
-                                Card::Not(inner) => *inner,
-                                other => Card::Not(Box::new(other)),
+                            let taken = std::mem::replace(condition, Condition::Any(Vec::new()));
+                            *condition = match taken {
+                                Condition::Not(inner) => *inner,
+                                other => Condition::Not(Box::new(other)),
                             };
                             changed = true;
                         }
                     }
-                    changed |= card_ui(ui, index, card);
+                    changed |= condition_ui(ui, index, condition);
                 });
             }
             if let Some(index) = remove {
-                search.cards.remove(index);
+                search.conditions.remove(index);
                 changed = true;
             }
             ui.horizontal_wrapped(|ui| {
                 let anchor = if here { Anchor::Spot } else { Anchor::Spawn };
                 let far = if here { Anchor::Spot } else { Anchor::At(0, 0) };
                 let id_of = |id: &str| STRUCTURE_KINDS.iter().position(|kind| kind.id == id).unwrap_or(0);
-                for (name, card) in [
+                for (name, condition) in [
                     (
                         "+ structure",
-                        Card::Structure {
+                        Condition::Structure {
                             kind: id_of("village"),
                             count: 1,
                             radius: 500,
@@ -478,7 +482,7 @@ impl Ui {
                     ),
                     (
                         "+ cluster",
-                        Card::Cluster {
+                        Condition::Cluster {
                             kind: id_of("swamp_hut"),
                             count: 2,
                             radius: 128,
@@ -488,7 +492,7 @@ impl Ui {
                     ),
                     (
                         "+ biome",
-                        Card::Biome {
+                        Condition::Biome {
                             biome: "plains".to_owned(),
                             test: BiomeTest::Present,
                             radius: 500,
@@ -497,7 +501,7 @@ impl Ui {
                     ),
                     (
                         "+ noise",
-                        Card::Noise {
+                        Condition::Noise {
                             parameter: NoiseParameter::Continentalness,
                             min: -1.0,
                             max: 1.0,
@@ -508,7 +512,7 @@ impl Ui {
                     ),
                 ] {
                     if ui.small_button(name).clicked() {
-                        search.cards.push(card);
+                        search.conditions.push(condition);
                         changed = true;
                     }
                 }
@@ -525,8 +529,8 @@ impl Ui {
                 );
                 if edit.changed() {
                     match spec::parse(&search.text) {
-                        Ok(cards) => {
-                            search.cards = cards;
+                        Ok(conditions) => {
+                            search.conditions = conditions;
                             search.validate();
                         }
                         Err(err) => {

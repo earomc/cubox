@@ -5,8 +5,8 @@ import init, { finder_run, worker_run } from "./pkg/cubox.js";
 const ready = init();
 
 self.onmessage = async (event) => {
-  await ready;
   try {
+    await ready;
     // finder jobs are text, tile requests arrays
     if (typeof event.data === "string") {
       self.postMessage(finder_run(event.data));

@@ -32,6 +32,7 @@ const MAX_PLACING_WAIT: f64 = 0.5;
 /// What the markers on the screen depend on besides the answers about them.
 #[derive(PartialEq)]
 pub struct MarkerView {
+    seed: i64,
     min: [f64; 2],
     max: [f64; 2],
     target: f64,
@@ -332,6 +333,7 @@ impl Ui {
             fit * if kinds >= 3 { choice / 2.0 } else { choice }
         };
         let view = MarkerView {
+            seed: self.seed,
             min,
             max,
             target,

@@ -294,12 +294,12 @@ impl Ui {
         egui::CollapsingHeader::new("Extras").show(ui, |ui| {
             ui.checkbox(&mut self.zoom_buttons_shown, "Zoom buttons");
             ui.horizontal(|ui| {
-                ui.label("Samples / pixel").on_hover_text(
-                    "Biome samples averaged per pixel. Higher shows more of the real detail far out, but is much slower",
+                ui.label("Samples per axis").on_hover_text(
+                    "Biome samples averaged per pixel, this many squared. Higher shows more of the real detail far out, but is much slower",
                 );
                 for n in [1u8, 2, 4, 8] {
                     changed |= ui
-                        .selectable_value(&mut self.samples, n, format!("{}", n as u32 * n as u32))
+                        .selectable_value(&mut self.samples, n, n.to_string())
                         .changed();
                 }
             });

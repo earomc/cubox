@@ -77,13 +77,7 @@ impl Pool {
         let Some(slot) = inner.workers[..limit].iter_mut().min_by_key(|slot| slot.jobs.len()) else {
             return;
         };
-        let message = format!(
-            "{} {} {}\n{}",
-            world.seed,
-            world.dimension.name(),
-            world.sample_height,
-            job.encode()
-        );
+        let message = format!("{} {}\n{}", world.seed, world.dimension.name(), job.encode());
         match slot.worker.post_message(&JsValue::from_str(&message)) {
             Ok(()) => slot.jobs.push_back((generation, job)),
             Err(err) => log::error!("sending a finder job: {err:?}"),
@@ -132,7 +126,6 @@ pub fn worker_run(message: &str) -> Result<String, JsValue> {
         Some(FinderWorld {
             seed: words.next()?.parse().ok()?,
             dimension: Dimension::from_name(words.next()?)?,
-            sample_height: words.next()?.parse().ok()?,
         })
     })()
     .ok_or("bad finder world")?;

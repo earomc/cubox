@@ -137,9 +137,9 @@ fn find(matches: &clap::ArgMatches) {
         Some(path) => {
             std::fs::read_to_string(path).unwrap_or_else(|err| fail(format!("reading {}: {err}", path.display())))
         }
-        None => matches.get_one::<String>("cards").cloned().unwrap_or_default(),
+        None => matches.get_one::<String>("conditions").cloned().unwrap_or_default(),
     };
-    let cards = spec::parse(&text).unwrap_or_else(|err| fail(err));
+    let conditions = spec::parse(&text).unwrap_or_else(|err| fail(err));
     let seeds = if let Some(seed) = matches.get_one::<i64>("in-seed") {
         Seeds::Locations {
             seed: *seed,
@@ -151,11 +151,8 @@ fn find(matches: &clap::ArgMatches) {
     } else if let Some(path) = matches.get_one::<std::path::PathBuf>("seeds") {
         let text =
             std::fs::read_to_string(path).unwrap_or_else(|err| fail(format!("reading {}: {err}", path.display())));
-        Seeds::List(
-            text.split_whitespace()
-                .map(|word| word.parse().unwrap_or_else(|_| fail(format!("`{word}` is not a seed"))))
-                .collect(),
-        )
+        // blank lines are no seeds, like an empty seed field
+        Seeds::List(text.lines().filter_map(cubox::seed::parse_seed).collect())
     } else {
         Seeds::Random(cubox::seed::random_seed() as u64)
     };
@@ -164,11 +161,10 @@ fn find(matches: &clap::ArgMatches) {
         .copied()
         .unwrap_or_else(|| std::thread::available_parallelism().map_or(4, |n| n.get()));
     // an area has an end, so all of it unless asked otherwise
-    let limit = match matches.value_source("limit") {
-        Some(clap::parser::ValueSource::CommandLine) => *matches.get_one::<u64>("limit").unwrap(),
-        _ if matches.contains_id("in-seed") => u64::MAX,
-        _ => *matches.get_one::<u64>("limit").unwrap(),
-    };
+    let limit = matches
+        .get_one::<u64>("limit")
+        .copied()
+        .unwrap_or(if matches.contains_id("in-seed") { u64::MAX } else { 10 });
     let tested = matches.get_one::<u64>("tested").copied();
     let top = *matches.get_one::<usize>("top").unwrap();
 
@@ -180,7 +176,7 @@ fn find(matches: &clap::ArgMatches) {
         let hits: Vec<String> = found.hits.iter().map(|hit| format!("{},{}", hit.x, hit.z)).collect();
         format!("{} {score} {}", found.seed, hits.join(" "))
     };
-    let search = Search::start(&cards, seeds, threads).unwrap_or_else(|err| fail(err));
+    let search = Search::start(&conditions, seeds, threads).unwrap_or_else(|err| fail(err));
     let (mut shown, mut last_report, mut kept): (u64, _, Vec<Match>) = (0, Instant::now(), Vec::new());
     let done = |search: &Search, ended: bool, shown: u64| {
         ended || tested.map_or(shown >= limit, |tested| search.counters.covered() >= tested)

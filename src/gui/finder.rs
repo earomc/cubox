@@ -19,7 +19,6 @@ use crate::{
 pub struct FinderWorld {
     pub seed: i64,
     pub dimension: Dimension,
-    pub sample_height: i32,
 }
 
 /// Bins remembered at most, about 100 bytes each. Beyond that they are looked for again if needed.
@@ -313,9 +312,8 @@ impl Queries {
         self.waiting
     }
 
-    /// Forgets everything if the world changed. The height doesn't change structureses see.
+    /// Forgets everything if the world changed.
     pub fn set_world(&mut self, world: FinderWorld) {
-        let same_structures = self.world.seed == world.seed && self.world.dimension == world.dimension;
         if self.world == world {
             return;
         }
@@ -324,10 +322,8 @@ impl Queries {
         self.in_flight.clear();
         self.waiting = 0;
         self.revision += 1;
-        if !same_structures {
-            self.bins.clear();
-            self.rings.clear();
-        }
+        self.bins.clear();
+        self.rings.clear();
     }
 
     pub fn busy(&self) -> bool {
@@ -648,7 +644,6 @@ mod tests {
         let world = FinderWorld {
             seed: 12345,
             dimension: Dimension::Overworld,
-            sample_height: 256,
         };
         let kind = STRUCTURE_KINDS.iter().position(|kind| kind.id == "swamp_hut").unwrap();
         let bins = |round: usize, queries: &mut Queries, occupied: &dyn Occupied| {
@@ -708,7 +703,6 @@ mod tests {
         let mut queries = Queries::new(FinderWorld {
             seed: 12345,
             dimension: Dimension::Overworld,
-            sample_height: 256,
         });
         let stronghold = STRUCTURE_KINDS.iter().position(|kind| kind.id == "stronghold").unwrap();
         let village = STRUCTURE_KINDS.iter().position(|kind| kind.id == "village").unwrap();
