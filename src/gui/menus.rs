@@ -146,7 +146,27 @@ impl Ui {
                         .on_hover_text("How many are looked for and drawn. More takes longer and can make the map slow.");
                 });
             });
-            for kind in self.kinds_here().collect::<Vec<_>>() {
+            ui.horizontal(|ui| {
+                ui.label("Size");
+                ui.add(
+                    egui::Slider::new(&mut self.advanced.marker_size, 10.0..=64.0)
+                        .fixed_decimals(0)
+                        .suffix(" px"),
+                )
+                .on_hover_text("How big markers are on the screen");
+            });
+            ui.add(
+                egui::TextEdit::singleline(&mut self.marker_filter)
+                    .hint_text("Filter")
+                    .desired_width(f32::INFINITY),
+            );
+            let filter = self.marker_filter.trim().to_lowercase();
+            let mut kinds: Vec<usize> = self
+                .kinds_here()
+                .filter(|&kind| STRUCTURE_KINDS[kind].name.to_lowercase().contains(&filter))
+                .collect();
+            kinds.sort_by_key(|&kind| STRUCTURE_KINDS[kind].name);
+            for kind in kinds {
                 ui.horizontal(|ui| {
                     if let Some(icons) = &self.icons {
                         ui.add(icons.image(kind, ICON_SIZE));
@@ -290,14 +310,6 @@ impl Ui {
                     ui.add(slider).on_hover_text(hint);
                 });
             };
-            row(
-                ui,
-                "Marker size",
-                egui::Slider::new(&mut advanced.marker_size, 10.0..=64.0)
-                    .fixed_decimals(0)
-                    .suffix(" px"),
-                "How big markers are on the screen",
-            );
             row(
                 ui,
                 "Marker tries",

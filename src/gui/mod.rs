@@ -276,6 +276,7 @@ struct Ui {
     /// how dark the others get
     dim_others: f32,
     biome_filter: String,
+    marker_filter: String,
     /// where markers compete for space, the rarest kinds get it
     prioritize_rare: bool,
     advanced: Advanced,
@@ -449,6 +450,7 @@ impl State {
             seed_search: Default::default(),
             dim_others: 0.75,
             biome_filter: String::new(),
+            marker_filter: String::new(),
             prioritize_rare: true,
             advanced: Advanced::default(),
             max_markers: resources::default_max_markers(),
