@@ -50,6 +50,10 @@
           canvas.focus();
         }
       };
+      // only on https or localhost, browsers have no clipboard for pages elsewhere
+      globalThis.cuboxCopy = (text) => {
+        navigator.clipboard?.writeText(text).catch((error) => console.error("copying:", error));
+      };
       keyboard.addEventListener("input", () => typed(keyboard.value));
       typing.addEventListener("submit", (event) => {
         event.preventDefault();

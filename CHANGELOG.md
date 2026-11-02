@@ -8,6 +8,11 @@ The release workflow publishes the section of a version as its release notes.
 
 ## [Unreleased]
 
+### Added
+
+- A menu on the map, with a right click or a long press: copy the location, copy a command that teleports there in the
+  right dimension, and go to the coordinates a nether portal there leads to.
+
 ### Changed
 
 - Finding locations in one seed has one way of saying where: the area is a setting next to the checkbox, `--within`

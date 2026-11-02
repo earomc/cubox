@@ -822,8 +822,9 @@ impl Ui {
             self.icons = Some(Icons::load(root.ctx()));
         }
         egui::CentralPanel::no_frame().show(root, |ui| {
-            self.map.show(ui, &mut self.tiles, settings, &mut self.quads);
+            let map = self.map.show(ui, &mut self.tiles, settings, &mut self.quads);
             self.show_overlays(ui);
+            self.map_menu(&map);
         });
         if !self.panel {
             return;

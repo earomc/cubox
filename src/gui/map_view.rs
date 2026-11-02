@@ -85,6 +85,8 @@ pub struct MapView {
     pub hovered_quart: Option<[i32; 2]>,
     /// quart position last tapped, touch screens have nothing to hover with
     tapped_quart: Option<[i32; 2]>,
+    /// the block the menu of the map was last opened on
+    pub menu_block: Option<[i32; 2]>,
     /// The level of the last frame and the egui time it was switched to. Tiles are only sampled
     /// once the level has settled, so levels flown through while zooming quickly cost nothing.
     level_since: (i32, f64),
@@ -99,6 +101,7 @@ impl MapView {
             },
             hovered_quart: None,
             tapped_quart: None,
+            menu_block: None,
             level_since: (-1, 0.0),
         }
     }
@@ -143,8 +146,15 @@ impl MapView {
         self.camera.world_to_screen(rect, block.map(|b| b / 4.0))
     }
 
-    /// Handles input and fills `quads` with the tiles to draw, back to front.
-    pub fn show(&mut self, ui: &mut egui::Ui, tiles: &mut TileCache, settings: MapSettings, quads: &mut Vec<Quad>) {
+    /// Handles input and fills `quads` with the tiles to draw, back to front. Returns the response of
+    /// the map, for its menu.
+    pub fn show(
+        &mut self,
+        ui: &mut egui::Ui,
+        tiles: &mut TileCache,
+        settings: MapSettings,
+        quads: &mut Vec<Quad>,
+    ) -> egui::Response {
         let rect = ui.max_rect();
         let response = ui.allocate_rect(rect, Sense::click_and_drag());
         self.handle_input(ui, rect, &response);
@@ -361,6 +371,13 @@ impl MapView {
             .hover_pos()
             .map(|p| quart_at(&self.camera, p))
             .or(self.tapped_quart);
+        if response.secondary_clicked()
+            && let Some(p) = response.interact_pointer_pos()
+        {
+            let quart = self.camera.screen_to_world(rect, p);
+            self.menu_block = Some(quart.map(|q| (q * 4.0).floor() as i32));
+        }
+        response
     }
 
     fn handle_input(&mut self, ui: &egui::Ui, rect: Rect, response: &egui::Response) {

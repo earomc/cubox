@@ -55,6 +55,7 @@ cubes/boxes ... so it works in multiple ways I guess ...
 - **Seed search** finds seeds or locations with what you ask for: huge mushroom islands, witch huts close together, a village by spawn. On the desktop and with [`cubox find`](docs/seed-search.md).
 - **Seeds like in Minecraft:** numbers, negative ones too, or any text, turned into the same seed the game uses.
 - **Go to coordinates**, and the biome and height under the cursor.
+- **Right click the map** to copy a location or a teleport command, or to go where a nether portal there leads.
 
 **Everywhere, and fast**
 

@@ -48,6 +48,9 @@ extern "C" {
     /// Opens or closes the on screen keyboard, see `web/index.html`.
     #[wasm_bindgen(js_name = cuboxKeyboard)]
     fn cubox_keyboard(open: bool);
+    /// Puts text on the clipboard, see `web/index.html`.
+    #[wasm_bindgen(js_name = cuboxCopy)]
+    pub(crate) fn copy_text(text: &str);
 }
 
 thread_local! {

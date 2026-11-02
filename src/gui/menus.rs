@@ -561,6 +561,55 @@ impl Ui {
         });
     }
 
+    /// The first free block over the overworld's terrain at a block, with `ocean_floor` under water.
+    fn surface(&mut self, block: [i32; 2], ocean_floor: bool) -> Option<i32> {
+        let terrain = self.terrain.get_or_insert_with(|| Terrain::new(self.seed));
+        Some(terrain.heights(block, 4, 1, ocean_floor, &|| true)?[0])
+    }
+
+    /// The height of a location that is copied: on the surface in the overworld. The other dimensions
+    /// have no estimate of theirs, so there it is the height the biomes are shown for.
+    fn location_height(&mut self, block: [i32; 2]) -> i32 {
+        if self.dimension == Dimension::Overworld {
+            self.surface(block, false).unwrap_or(self.sample_height)
+        } else {
+            self.sample_height
+        }
+    }
+
+    /// What a right click or a long press on the map offers.
+    pub(super) fn map_menu(&mut self, map: &egui::Response) {
+        let Some(block) = self.map.menu_block else { return };
+        map.context_menu(|ui| {
+            ui.weak(format!("x {} z {}", block[0], block[1]));
+            if ui.button("Copy location").clicked() {
+                let y = self.location_height(block);
+                copy(ui.ctx(), format!("{} {y} {}", block[0], block[1]));
+                ui.close();
+            }
+            if ui.button("Copy teleport command").clicked() {
+                let y = self.location_height(block);
+                copy(ui.ctx(), self.dimension.teleport_command(block, y));
+                ui.close();
+            }
+            if let Some((dimension, exit)) = self.dimension.portal_exit(block) {
+                let label = match dimension {
+                    Dimension::Nether => "Go to nether coordinates",
+                    _ => "Go to overworld coordinates",
+                };
+                if ui
+                    .button(label)
+                    .on_hover_text(format!("Where a portal here leads: x {} z {}", exit[0], exit[1]))
+                    .clicked()
+                {
+                    self.set_world(self.seed, dimension);
+                    self.map.camera.center = exit.map(|block| block as f64 / 4.0);
+                    ui.close();
+                }
+            }
+        });
+    }
+
     /// The terrain height at a quart while relief is on.
     pub(super) fn hovered_height(&mut self, quart: [i32; 2]) -> Option<i32> {
         if !self.relief || self.dimension != Dimension::Overworld {
@@ -572,8 +621,7 @@ impl Ui {
         {
             return Some(height);
         }
-        let terrain = self.terrain.get_or_insert_with(|| Terrain::new(self.seed));
-        let height = terrain.heights([quart[0] * 4, quart[1] * 4], 4, 1, self.sea_floor, &|| true)?[0];
+        let height = self.surface([quart[0] * 4, quart[1] * 4], self.sea_floor)?;
         self.hovered_height = Some((quart, self.sea_floor, height));
         Some(height)
     }
@@ -590,4 +638,15 @@ impl Ui {
             },
         }
     }
+}
+
+/// Puts text on the clipboard. egui has none in browsers.
+fn copy(ctx: &egui::Context, text: String) {
+    #[cfg(target_arch = "wasm32")]
+    {
+        let _ = ctx;
+        crate::web::copy_text(&text);
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    ctx.copy_text(text);
 }
