@@ -8,6 +8,8 @@ The release workflow publishes the section of a version as its release notes.
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-11-02
+
 ### Added
 
 - A menu on the map, with a right click or a long press: copy the location, copy a command that teleports there in the
@@ -22,7 +24,6 @@ The release workflow publishes the section of a version as its release notes.
 - The Markers menu has a filter and is sorted by name, and its size slider moved there from Extras.
 - Samples are per axis in the Extras menu too, like everywhere else.
 - Presets are for finding seeds, so they aren't offered while finding locations.
-
 - The search keyword `structure` is now `poi`, as it also finds geodes, ore veins and gateways:
   `poi village count>=1 within 500 of spawn`. **Saved searches need this change.**
 - `cubox img --scale` is now `--level`, what the viewer calls it. In scripts `structure` is now `marker`.
@@ -181,7 +182,8 @@ First release.
 - `cubox img` renders a map to a PNG. `cubox gui --script` drives the view and takes screenshots.
 - Builds for Linux, macOS and Windows on x86_64 and ARM.
 
-[Unreleased]: https://github.com/earomc/cubox/compare/v0.5.1...HEAD
+[Unreleased]: https://github.com/earomc/cubox/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/earomc/cubox/compare/v0.5.1...v0.6.0
 [0.5.1]: https://github.com/earomc/cubox/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/earomc/cubox/compare/v0.4.2...v0.5.0
 [0.4.2]: https://github.com/earomc/cubox/compare/v0.4.1...v0.4.2
