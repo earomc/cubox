@@ -32,7 +32,6 @@ struct Entry {
     biomes: Biomes,
     /// the biome numbers on the GPU, for highlighting
     mask: Option<Rc<TileTexture>>,
-    mask_arrived: f64,
     last_used_frame: u64,
 }
 
@@ -187,7 +186,13 @@ impl TileCache {
     pub fn get(&mut self, key: &TileKey, now: f64) -> Option<(Rc<TileTexture>, f32)> {
         let entry = self.entries.get_mut(key)?;
         entry.last_used_frame = self.frame;
-        let alpha = ((now - entry.arrived) / self.fade_seconds).clamp(0.0, 1.0) as f32;
+        // Darkening multiplies, so a tile fading in over a darkened stand in would be brighter than
+        // both for a moment. That flickers, so nothing fades while biomes are highlighted.
+        let alpha = if self.highlight {
+            1.0
+        } else {
+            ((now - entry.arrived) / self.fade_seconds).clamp(0.0, 1.0) as f32
+        };
         Some((entry.texture.clone(), alpha))
     }
 
@@ -196,14 +201,6 @@ impl TileCache {
         let entry = self.entries.get_mut(key)?;
         entry.last_used_frame = self.frame;
         entry.mask.clone()
-    }
-
-    /// How far the biome numbers of a tile have faded in.
-    pub fn mask_alpha(&self, key: &TileKey, now: f64) -> f32 {
-        self.entries.get(key).map_or(0.0, |entry| {
-            let arrived = entry.arrived.max(entry.mask_arrived);
-            ((now - arrived) / self.fade_seconds).clamp(0.0, 1.0) as f32
-        })
     }
 
     pub fn unknown_mask(&self) -> Option<Rc<TileTexture>> {
@@ -244,7 +241,6 @@ impl TileCache {
                         &tile.biomes,
                         TILE_SIZE as u32,
                     )));
-                    entry.mask_arrived = now;
                     entry.biomes = Arc::new(tile.biomes);
                     changed = true;
                 }
@@ -270,7 +266,6 @@ impl TileCache {
                     estimates,
                     biomes,
                     mask,
-                    mask_arrived: now,
                     last_used_frame: self.frame,
                 },
             );
