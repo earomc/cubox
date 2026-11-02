@@ -39,18 +39,30 @@ struct Limit {
 }
 
 impl Limit {
-    fn enter(&self) {
-        let mut working = self.working.lock().unwrap();
+    /// Waits for a place to work. It is given back when what this returns is dropped, also if the
+    /// work panics: otherwise each panic would take a place for good, until no thread may work.
+    fn enter(&self) -> Slot<'_> {
+        let mut working = self.working.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
         while *working >= self.threads.load(Ordering::Relaxed) {
             // also to notice the limit went up, which doesn't happen often
-            working = self.changed.wait_timeout(working, Duration::from_millis(50)).unwrap().0;
+            working = self
+                .changed
+                .wait_timeout(working, Duration::from_millis(50))
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .0;
         }
         *working += 1;
+        Slot(self)
     }
+}
 
-    fn leave(&self) {
-        *self.working.lock().unwrap() -= 1;
-        self.changed.notify_one();
+/// A place to work, see `Limit::enter`.
+struct Slot<'a>(&'a Limit);
+
+impl Drop for Slot<'_> {
+    fn drop(&mut self) {
+        *self.0.working.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) -= 1;
+        self.0.changed.notify_one();
     }
 }
 
@@ -78,7 +90,8 @@ impl Pool {
                         let Ok((world, generation, job)) = requests.lock().unwrap().recv() else {
                             return;
                         };
-                        limit.enter();
+                        crate::background::keep_priority();
+                        let _slot = limit.enter();
                         let current = {
                             let mut queries = queries.lock().unwrap();
                             match &*queries {
@@ -87,7 +100,7 @@ impl Pool {
                             }
                         };
                         let reply = current.run(&job);
-                        limit.leave();
+                        drop(_slot);
                         if replies.send((generation, job, reply)).is_err() {
                             return;
                         }

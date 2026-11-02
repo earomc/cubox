@@ -145,6 +145,7 @@ impl Shared {
         while self.running.fetch_add(1, Ordering::AcqRel) < self.limit.load(Ordering::Relaxed) {
             let taken = self.queue.lock().unwrap().take_best();
             let Some((key, task, generation)) = taken else { break };
+            crate::background::keep_priority();
             self.run(key, task, generation);
             self.running.fetch_sub(1, Ordering::AcqRel);
         }

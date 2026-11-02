@@ -14,7 +14,9 @@ use steel_worldgen::{
     noise::LazyAquifer,
     structure::{
         GenerationContext, StructureGenerator, StructurePiece, StructurePiecePayload,
-        placement::{PlacementKind, StructurePlacement, StructureSet, load_vanilla_structure_sets},
+        placement::{
+            PlacementKind, StructurePlacement, StructureSet, generate_ring_positions, load_vanilla_structure_sets,
+        },
     },
 };
 
@@ -234,6 +236,17 @@ pub fn ore_of(id: &str) -> Option<Ore> {
     }
 }
 
+/// Whether `candidates` knows where a kind can be: the kinds on a grid, and the stronghold rings.
+pub fn has_candidates(kind: usize) -> bool {
+    matches!(spread(kind), Some(Spread::Grid(_))) || is_ring_structure(kind)
+}
+
+fn is_ring_structure(kind: usize) -> bool {
+    kind_sets()[kind]
+        .as_ref()
+        .is_some_and(|set| matches!(set.placement.kind, PlacementKind::ConcentricRings { .. }))
+}
+
 /// Whether the `candidates` of a kind only depend on the lower 48 bits of the seed. Kinds without
 /// candidates, like the spawn point, trivially do.
 pub fn depends_on_lower_bits(kind: usize) -> bool {
@@ -299,15 +312,39 @@ pub fn candidates(seed: i64, kind: usize, center: [i32; 2], radius: i32, out: &m
     }
     let Some(set) = &kind_sets()[kind] else { return };
     let placement = &set.placement;
-    let PlacementKind::RandomSpread {
-        spacing,
-        separation,
-        spread_type,
-    } = placement.kind
-    else {
-        return;
-    };
     let reach = radius as i64 + marker_margin(kind) as i64;
+    let in_reach = |middle: [i32; 2]| {
+        let (dx, dz) = ((middle[0] - center[0]) as i64, (middle[1] - center[1]) as i64);
+        dx * dx + dz * dz <= reach * reach
+    };
+    let (spacing, separation, spread_type) = match &placement.kind {
+        PlacementKind::RandomSpread {
+            spacing,
+            separation,
+            spread_type,
+        } => (*spacing, *separation, *spread_type),
+        PlacementKind::ConcentricRings {
+            distance,
+            spread,
+            count,
+            ..
+        } => {
+            // where the rings put them before a biome search moves them, see `marker_margin`
+            type NoSnap = fn(i32, i32, &mut steel_utils::random::legacy_random::LegacyRandom) -> Option<(i32, i32)>;
+            let chunks = POOL.with(|pool| match pool {
+                Ok(pool) => generate_ring_positions::<NoSnap>(seed, *distance, *spread, *count, None, pool),
+                // then there is no finder either, which would find nothing
+                Err(_) => Vec::new(),
+            });
+            for (index, chunk) in chunks.into_iter().enumerate() {
+                let middle = [chunk.0.x * 16 + 8, chunk.0.y * 16 + 8];
+                if in_reach(middle) {
+                    out.push(([index as i32, 0], middle));
+                }
+            }
+            return;
+        }
+    };
     let cell_of = |block: i64| block.div_euclid(spacing as i64 * 16) as i32;
     let cells = |middle: i32| cell_of(middle as i64 - reach)..=cell_of(middle as i64 + reach);
     for cell_z in cells(center[1]) {
@@ -322,8 +359,7 @@ pub fn candidates(seed: i64, kind: usize, center: [i32; 2], radius: i32, out: &m
                 spread_type,
             );
             let middle = [chunk.0.x * 16 + 8, chunk.0.y * 16 + 8];
-            let (dx, dz) = ((middle[0] - center[0]) as i64, (middle[1] - center[1]) as i64);
-            if dx * dx + dz * dz <= reach * reach && placement.is_structure_chunk(seed, chunk.0.x, chunk.0.y, None) {
+            if in_reach(middle) && placement.is_structure_chunk(seed, chunk.0.x, chunk.0.y, None) {
                 out.push(([cell_x, cell_z], middle));
             }
         }
@@ -510,7 +546,10 @@ fn biome_allows(source: &BiomeSourceKind, set: &KindSet, chunk: [i32; 2]) -> boo
 
 /// Which of `candidates` of `kind` the biomes allow, from the world's biomes alone.
 pub fn allowed_by_biomes(source: &BiomeSourceKind, kind: usize, cells: &mut Vec<([i32; 2], [i32; 2])>) {
-    if let Some(set) = &kind_sets()[kind] {
+    // rings are moved to a biome after, it isn't checked where their candidates are
+    if let Some(set) = &kind_sets()[kind]
+        && !is_ring_structure(kind)
+    {
         cells.retain(|(_, middle)| biome_allows(source, set, [(middle[0] - 8) / 16, (middle[1] - 8) / 16]));
     }
 }
@@ -938,6 +977,37 @@ mod tests {
                     assert!(real > 0, "{}", def.id);
                 }
             }
+        });
+    }
+
+    /// Every real stronghold is near the position its ring gives it, so that a search can turn down
+    /// a seed from the rings alone. Prints how far they get.
+    #[test]
+    fn strongholds_are_near_where_their_rings_put_them() {
+        with_big_stack(|| {
+            let kind = kind_index("stronghold");
+            let mut farthest = 0i64;
+            for seed in [1, 2, 12345, -987_654_321, 77, 4242] {
+                let finder = Finder::new(seed, Dimension::Overworld).unwrap();
+                let mut rings = Vec::new();
+                candidates(seed, kind, [0, 0], 30_000_000, &mut rings);
+                let real = finder.rings(kind);
+                assert_eq!(real.len(), rings.len());
+                for found in real {
+                    let nearest = rings
+                        .iter()
+                        .map(|(_, middle)| {
+                            let (dx, dz) = ((found.x - middle[0]) as i64, (found.z - middle[1]) as i64);
+                            dx * dx + dz * dz
+                        })
+                        .min()
+                        .unwrap();
+                    farthest = farthest.max(nearest);
+                }
+            }
+            let farthest = (farthest as f64).sqrt();
+            println!("strongholds are at most {farthest:.0} blocks from their ring position");
+            assert!(farthest <= marker_margin(kind) as f64, "{farthest}");
         });
     }
 

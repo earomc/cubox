@@ -80,11 +80,9 @@ impl Counters {
     }
 }
 
-/// Two significant digits and separators: 12,000.
-fn rounded(value: f64) -> String {
-    let magnitude = 10f64.powi((value.max(1.0).log10().floor() as i32 - 1).max(0));
-    let digits = ((value / magnitude).round() * magnitude) as u64;
-    let text = digits.to_string();
+/// A whole number with separators: 12,345.
+fn with_separators(value: u64) -> String {
+    let text = value.to_string();
     let mut out = String::new();
     for (i, digit) in text.chars().enumerate() {
         if i > 0 && (text.len() - i).is_multiple_of(3) {
@@ -95,12 +93,13 @@ fn rounded(value: f64) -> String {
     out
 }
 
+/// A duration to the tenth of a second, in minutes and hours when it is long.
 fn duration_text(seconds: f64) -> String {
+    let whole = seconds as u64;
     match seconds {
-        s if s < 1.0 => "less than a second".to_owned(),
-        s if s < 120.0 => format!("{s:.0} s"),
-        s if s < 7200.0 => format!("{:.0} min", s / 60.0),
-        s => format!("{:.0} h", s / 3600.0),
+        s if s < 60.0 => format!("{s:.1} s"),
+        s if s < 3600.0 => format!("{} min {} s", whole / 60, whole % 60),
+        _ => format!("{} h {} min", whole / 3600, whole / 60 % 60),
     }
 }
 
@@ -116,6 +115,7 @@ struct Control {
 impl Control {
     /// Waits while this thread isn't to work. False if the search is over.
     fn may_work(&self, number: usize) -> bool {
+        crate::background::keep_priority();
         loop {
             if self.stop.load(Ordering::Relaxed) {
                 return false;
@@ -300,14 +300,14 @@ impl Search {
         let active = self.active_seconds().max(0.001);
         let seeds = format!(
             "{} seeds, {}/s",
-            rounded(covered as f64),
-            rounded(covered as f64 / active)
+            with_separators(covered),
+            with_separators((covered as f64 / active) as u64)
         );
         let odds = match (matches, self.counters.one_in()) {
             (0, _) => "no match yet".to_owned(),
             (matches, Some(one_in)) if matches >= MATCHES_FOR_ODDS => format!(
                 "{matches} matches, about 1 in {}, one every {}",
-                rounded(one_in),
+                with_separators(one_in.round() as u64),
                 duration_text(active / matches as f64)
             ),
             (matches, _) => format!("{matches} match{}", if matches == 1 { "" } else { "es" }),
@@ -857,6 +857,26 @@ mod tests {
         );
     }
 
+    /// A running search takes on the priority at once, and goes on both ways.
+    #[test]
+    fn a_search_goes_on_when_its_priority_changes() {
+        let conditions = spec::parse_seeds("poi village within 2000 of 0,0").unwrap();
+        let search = Search::seeds(&conditions, Seeds::From(1), 2, STEP).unwrap();
+        let progress = |search: &Search| {
+            let before = search.counters.covered();
+            let start = Instant::now();
+            while search.counters.covered() < before + 20 {
+                assert!(start.elapsed().as_secs() < 60, "stuck at {}", search.counters.covered());
+                std::thread::sleep(Duration::from_millis(10));
+            }
+        };
+        progress(&search);
+        crate::background::set_low_priority(true);
+        progress(&search);
+        crate::background::set_low_priority(false);
+        progress(&search);
+    }
+
     #[test]
     fn stopping_ends_a_long_check() {
         let conditions = spec::parse_seeds("biome mushroom_fields within 2000000 of 0,0").unwrap();
@@ -873,11 +893,13 @@ mod tests {
     }
 
     #[test]
-    fn numbers_are_rounded_for_reading() {
-        assert_eq!(rounded(1234.0), "1,200");
-        assert_eq!(rounded(7.0), "7");
-        assert_eq!(rounded(1_560_000.0), "1,600,000");
-        assert_eq!(duration_text(90.0), "90 s");
-        assert_eq!(duration_text(600.0), "10 min");
+    fn numbers_are_exact_and_readable() {
+        assert_eq!(with_separators(1234), "1,234");
+        assert_eq!(with_separators(7), "7");
+        assert_eq!(with_separators(1_563_219), "1,563,219");
+        assert_eq!(duration_text(0.26), "0.3 s");
+        assert_eq!(duration_text(42.37), "42.4 s");
+        assert_eq!(duration_text(605.0), "10 min 5 s");
+        assert_eq!(duration_text(7322.0), "2 h 2 min");
     }
 }

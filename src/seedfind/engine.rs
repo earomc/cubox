@@ -14,7 +14,7 @@ use crate::{
     dimension::Dimension,
     noise::{NoiseCache, NoiseField},
     seedfind::spec::{Anchor, BiomeTest, Condition},
-    structures::{Finder, Found, MARKER_KINDS, Spread, allowed_by_biomes, candidates, depends_on_lower_bits, spread},
+    structures::{Finder, Found, MARKER_KINDS, allowed_by_biomes, candidates, depends_on_lower_bits, has_candidates},
 };
 
 /// The obsidian platform everyone arrives on in the end.
@@ -479,7 +479,7 @@ impl SeedWorld {
                 anchor,
             } => {
                 let center = self.center(*anchor, MARKER_KINDS[*kind].dimension, here);
-                if spread(*kind) != Some(Spread::Rings) {
+                if has_candidates(*kind) {
                     cells.clear();
                     candidates(self.seed, *kind, center, *radius, cells);
                     if cells.len() < *count as usize {
@@ -512,7 +512,7 @@ impl SeedWorld {
             } => {
                 let center = self.center(*anchor, MARKER_KINDS[*kind].dimension, here);
                 let within = *within;
-                if spread(*kind) != Some(Spread::Rings) {
+                if has_candidates(*kind) {
                     cells.clear();
                     candidates(self.seed, *kind, center, within, cells);
                     let margin = crate::structures::marker_margin(*kind);
@@ -638,10 +638,10 @@ fn cost(condition: &Condition) -> u32 {
     let anchored = |anchor: &Anchor| if *anchor == Anchor::Spawn { 3 } else { 0 };
     match condition {
         Condition::Poi { kind, anchor, .. } | Condition::Cluster { kind, anchor, .. } => {
-            if spread(*kind) == Some(Spread::Rings) {
-                100
-            } else {
+            if has_candidates(*kind) {
                 1 + anchored(anchor)
+            } else {
+                100
             }
         }
         Condition::Biome { anchor, .. } | Condition::Noise { anchor, .. } => 2 + anchored(anchor),
@@ -659,9 +659,7 @@ impl Plan {
             .enumerate()
             .filter(|(_, (_, condition))| match condition {
                 Condition::Poi { kind, anchor, .. } | Condition::Cluster { kind, anchor, .. } => {
-                    matches!(anchor, Anchor::At(..))
-                        && spread(*kind) != Some(Spread::Rings)
-                        && depends_on_lower_bits(*kind)
+                    matches!(anchor, Anchor::At(..)) && has_candidates(*kind) && depends_on_lower_bits(*kind)
                 }
                 _ => false,
             })
@@ -895,6 +893,47 @@ mod tests {
                 }
             }
             assert!(matches > 3, "{matches}");
+        });
+    }
+
+    /// Strongholds turned down from their rings alone are those a full look doesn't find either.
+    #[test]
+    fn strongholds_are_only_turned_down_when_none_is_there() {
+        with_stack(|| {
+            let mut cells = Vec::new();
+            let mut matches = 0;
+            for (seed, text) in (0..16i64).flat_map(|seed| {
+                [
+                    "poi stronghold within 1800 of 0,0",
+                    "poi stronghold count>=2 within 9000 of -3000,1000",
+                    "poi stronghold within 900 of spawn",
+                ]
+                .map(move |text| (seed, text))
+            }) {
+                let seed = seed.wrapping_mul(0x0123_4567_89AB_CDEF);
+                let conditions = parse(text).unwrap();
+                let planned = Plan::new(&conditions);
+                let world = SeedWorld::new(seed, 16);
+                let Condition::Poi {
+                    kind,
+                    count,
+                    radius,
+                    anchor,
+                } = &conditions[0]
+                else {
+                    unreachable!()
+                };
+                let center = world.center(*anchor, Dimension::Overworld, [0, 0]);
+                let real = world
+                    .finder(Dimension::Overworld)
+                    .unwrap()
+                    .around(*kind, center, *radius);
+                let passes =
+                    planned.lower_bits_pass(seed, &mut cells) && planned.check(&world, [0, 0], &mut cells).is_some();
+                assert_eq!(passes, real.len() >= *count as usize, "{text} seed {seed}");
+                matches += passes as i32;
+            }
+            assert!(matches > 0, "{matches}");
         });
     }
 

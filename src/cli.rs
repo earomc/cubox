@@ -185,6 +185,11 @@ fn search_args(command: Command, conditions_help: &'static str) -> Command {
             .help("Threads to use, all by default")
             .value_parser(clap::builder::RangedU64ValueParser::<usize>::new().range(1..))
         )
+        .arg(Arg::new("low-priority")
+            .long("low-priority")
+            .help("Give way to other programs: run at a low priority, using what they leave")
+            .action(ArgAction::SetTrue)
+        )
 }
 
 fn parse_step(text: &str) -> Result<i32, String> {

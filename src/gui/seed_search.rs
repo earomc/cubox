@@ -51,8 +51,7 @@ impl Running {
             if print {
                 println!("seed search: {} {:?} {:?}", found.seed, found.score, found.hits.first());
             }
-            self.results.push(found);
-            sort = true;
+            sort |= add_result(&mut self.results, found);
         }
         if sort {
             match search.center() {
@@ -91,14 +90,24 @@ impl Running {
         }
     }
 
+    /// A search has started over. What was found stays until it is removed, see `results_ui`.
     fn started(&mut self, search: Result<Search, String>) {
-        self.results.clear();
         self.search = None;
         match search {
             Ok(search) => self.search = Some(search),
             Err(err) => self.error = Some(err),
         }
     }
+}
+
+/// Lists what was found, unless it is listed already, as searching again finds the same. True if it
+/// is new.
+fn add_result(results: &mut Vec<Match>, found: Match) -> bool {
+    if results.contains(&found) {
+        return false;
+    }
+    results.push(found);
+    true
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -873,5 +882,35 @@ impl Ui {
         if let Some(hit) = found.hits.first() {
             self.map.camera.center = [hit.x as f64 / 4.0, hit.z as f64 / 4.0];
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::seedfind::engine::Hit;
+
+    fn found(seed: i64, x: i32) -> Match {
+        Match {
+            seed,
+            score: Some(1.0),
+            hits: vec![Hit {
+                kind: None,
+                dimension: Dimension::Overworld,
+                x,
+                z: 0,
+            }],
+        }
+    }
+
+    #[test]
+    fn results_stay_until_removed_and_are_listed_once() {
+        let mut running = Running::default();
+        assert!(add_result(&mut running.results, found(1, 5)));
+        assert!(add_result(&mut running.results, found(2, 5)));
+        assert!(!add_result(&mut running.results, found(1, 5)));
+        running.changed(None);
+        running.started(Err("a search that can't start".to_owned()));
+        assert_eq!(running.results, vec![found(1, 5), found(2, 5)]);
     }
 }

@@ -133,8 +133,10 @@ fn search_text(matches: &clap::ArgMatches) -> String {
     }
 }
 
+/// The threads of a search, at the priority asked for.
 #[cfg(not(target_arch = "wasm32"))]
 fn search_threads(matches: &clap::ArgMatches) -> usize {
+    cubox::background::set_low_priority(matches.get_flag("low-priority"));
     matches
         .get_one::<usize>("threads")
         .copied()

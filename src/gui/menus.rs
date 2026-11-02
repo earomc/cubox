@@ -413,6 +413,16 @@ impl Ui {
                 ui.add(egui::Slider::new(&mut self.threads, 1..=resources::max_threads()))
                     .on_hover_text("How many cores cubox uses at most. Fewer leave more for other programs.");
             });
+            #[cfg(not(target_arch = "wasm32"))]
+            {
+                let mut low = crate::background::low_priority();
+                let toggle = ui.checkbox(&mut low, "Give way to other programs").on_hover_text(
+                    "Search and generate at a low priority: other programs, a game for example, run as if cubox wasn't there, and cubox uses what they leave. Off, cubox gets its share and is done sooner when they are busy too.",
+                );
+                if toggle.changed() {
+                    crate::background::set_low_priority(low);
+                }
+            }
             ui.horizontal(|ui| {
                 let (min, max) = resources::CACHE_MIB;
                 ui.label("Tile memory");

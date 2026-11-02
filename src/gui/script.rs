@@ -23,6 +23,7 @@
 //! highlight desert       # keep a biome bright and darken the others, `none` to stop
 //! grid_spacing 512       # fixed grid lines, this many blocks apart
 //! threads 4              # how many threads may work at once
+//! low_priority on        # searching and generating give way to other programs (off: normal)
 //! zoom_buttons on        # the buttons over the map (off to hide them)
 //! search_seeds biome desert within 500 of spawn   # finds seeds, `;` separates lines, prints them
 //! search_locations 5000 0 0 biome desert   # what to find within 5000 of 0,0 in this seed, `;` separates lines
@@ -66,6 +67,7 @@ pub enum Command {
     MaxMarkers(usize),
     PrioritizeRare(bool),
     Threads(usize),
+    LowPriority(bool),
     SeaFloor(bool),
     ZoomButtons(bool),
     Seed(i64),
@@ -134,6 +136,7 @@ impl Command {
             "grid_spacing" => Command::GridSpacing(num(0)? as i64),
             "marker_overlap" => Command::MarkerOverlap(args.first() != Some(&"off")),
             "threads" => Command::Threads(num(0)? as usize),
+            "low_priority" => Command::LowPriority(args.first() != Some(&"off")),
             "sea_floor" => Command::SeaFloor(args.first() != Some(&"off")),
             "zoom_buttons" => Command::ZoomButtons(args.first() != Some(&"off")),
             "seed" => Command::Seed(crate::seed::parse_seed(&args.join(" ")).context("seed: a number or text")?),

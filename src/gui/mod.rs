@@ -548,6 +548,7 @@ impl State {
                 Command::Highlight(biome) => ui.script_highlight(&biome),
                 Command::GridSpacing(blocks) => ui.grid.set_fixed_spacing(blocks),
                 Command::Threads(threads) => ui.threads = threads,
+                Command::LowPriority(low) => crate::background::set_low_priority(low),
                 Command::SeaFloor(on) => ui.sea_floor = on,
                 Command::ZoomButtons(on) => ui.zoom_buttons_shown = on,
                 Command::Grid(on) => ui.grid.enabled = on,

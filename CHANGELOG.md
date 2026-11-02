@@ -8,6 +8,19 @@ The release workflow publishes the section of a version as its release notes.
 
 ## [Unreleased]
 
+### Added
+
+- "Give way to other programs" in the Performance menu and `--low-priority`: searching and generating run at a low
+  priority, so that a game in the front runs as if cubox wasn't there. Off by default. A long search could leave other
+  programs waiting for half a minute when memory was short.
+
+### Changed
+
+- Searching for strongholds is much faster: seeds whose rings can't put one close enough are turned down at once.
+- Changing a search or searching again keeps what was found, the same result isn't listed twice. Clear results empties
+  the list.
+- The status of a search shows its numbers exactly, not rounded to two digits.
+
 ## [0.7.0] - 2026-11-02
 
 ### Changed
