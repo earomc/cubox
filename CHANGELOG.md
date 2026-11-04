@@ -8,6 +8,16 @@ The release workflow publishes the section of a version as its release notes.
 
 ## [Unreleased]
 
+### Changed
+
+- Structure markers show Minecraft textures instead of text labels: a compass for spawn, an ender eye for strongholds,
+  a bell for villages and so on. They stay sharp at any size and have a dark and a light outline, so they stand out on
+  any biome. The textures belong to Mojang and aren't under cubox's license, see `assets/icons/NOTICE`.
+
+### Fixed
+
+- Debug builds of the gui, like `cargo run -- gui`, crashed on the first frame. Release builds weren't affected.
+
 ## [0.8.0] - 2026-11-04
 
 ### Added
