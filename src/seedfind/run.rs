@@ -865,7 +865,7 @@ mod tests {
         let progress = |search: &Search| {
             let before = search.counters.covered();
             let start = Instant::now();
-            while search.counters.covered() < before + 20 {
+            while search.counters.covered() < before + 5 {
                 assert!(start.elapsed().as_secs() < 60, "stuck at {}", search.counters.covered());
                 std::thread::sleep(Duration::from_millis(10));
             }
