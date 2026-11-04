@@ -122,7 +122,8 @@ impl Occupied for Placed {
     }
 }
 
-/// The structure icons in `assets/icons`. Replace those files and rebuild to change them.
+/// The structure icons in `assets/icons`. Replace those files and rebuild to change them. They are
+/// Minecraft textures owned by Mojang and not under cubox's license, see `assets/icons/NOTICE`.
 macro_rules! icon_files {
     ($($id:literal),* $(,)?) => {
         fn icon_file(id: &str) -> &'static [u8] {
@@ -167,6 +168,36 @@ icon_files![
     "end_city_ship",
 ];
 
+/// The icon two pixels larger on every side, with two outlines around everything visible: the dark
+/// of egui's windows and around that the gray of its buttons, so it stands out on any biome.
+fn outlined(icon: &image::RgbaImage) -> image::RgbaImage {
+    let visuals = egui::Visuals::dark();
+    let rings =
+        [visuals.window_fill(), visuals.widgets.inactive.fg_stroke.color].map(|color| image::Rgba(color.to_array()));
+    let visible = |x: i64, z: i64| {
+        x >= 0
+            && z >= 0
+            && icon
+                .get_pixel_checked(x as u32, z as u32)
+                .is_some_and(|pixel| pixel[3] > 0)
+    };
+    // how many pixels away the nearest visible one is, diagonals count as one
+    let near = |x: i64, z: i64, distance: i64| {
+        (-distance..=distance).any(|dx| (-distance..=distance).any(|dz| visible(x + dx, z + dz)))
+    };
+    let pad = rings.len() as u32;
+    image::RgbaImage::from_fn(icon.width() + 2 * pad, icon.height() + 2 * pad, |x, z| {
+        let (x, z) = (x as i64 - pad as i64, z as i64 - pad as i64);
+        if visible(x, z) {
+            return *icon.get_pixel(x as u32, z as u32);
+        }
+        (1..)
+            .zip(rings)
+            .find(|&(distance, _)| near(x, z, distance))
+            .map_or(image::Rgba([0, 0, 0, 0]), |(_, ring)| ring)
+    })
+}
+
 pub struct Icons(Vec<TextureHandle>);
 
 impl Icons {
@@ -178,9 +209,10 @@ impl Icons {
                     let image = image::load_from_memory(icon_file(kind.id))
                         .unwrap_or_else(|err| panic!("icon of {}: {err}", kind.id))
                         .into_rgba8();
+                    let image = outlined(&image);
                     let size = [image.width() as usize, image.height() as usize];
                     let image = egui::ColorImage::from_rgba_unmultiplied(size, image.as_raw());
-                    ctx.load_texture(kind.id, image, egui::TextureOptions::LINEAR)
+                    ctx.load_texture(kind.id, image, egui::TextureOptions::NEAREST)
                 })
                 .collect(),
         )

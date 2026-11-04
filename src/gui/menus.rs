@@ -404,6 +404,13 @@ impl Ui {
             ui.label(egui::RichText::new("·").small().weak());
             link(ui, "Source code", repository.to_string());
         });
+        ui.label(
+            egui::RichText::new(
+                "NOT AN OFFICIAL MINECRAFT PRODUCT. NOT APPROVED BY OR ASSOCIATED WITH MOJANG OR MICROSOFT.",
+            )
+            .small()
+            .weak(),
+        );
     }
 
     pub(super) fn performance_menu(&mut self, ui: &mut egui::Ui) {

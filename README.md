@@ -139,3 +139,11 @@ Hosting cubox? Keep the license notice in its settings window. If you changed an
 too: set `repository` in `Cargo.toml` to your source, the notice links to it.
 
 cubox is free software under the [GNU Affero General Public License v3.0 or later](LICENSE), like SteelMC.
+
+The structure icons in [`assets/icons`](assets/icons/NOTICE) are Minecraft textures owned by Mojang and Microsoft, used
+under the [Minecraft Usage Guidelines](https://www.minecraft.net/en-us/usage-guidelines) and not covered by the AGPL.
+As an additional permission under section 7 of the AGPL, you may combine cubox with those textures and convey the
+result.
+
+**NOT AN OFFICIAL MINECRAFT PRODUCT. NOT APPROVED BY OR ASSOCIATED WITH MOJANG OR MICROSOFT.** cubox is made and
+maintained by earomc. Questions and problems go to the [issue tracker](https://github.com/earomc/cubox/issues).

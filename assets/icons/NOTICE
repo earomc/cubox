@@ -1,0 +1,40 @@
+The PNG files in this folder are textures from Minecraft (version 26.3),
+copyright Mojang AB and Microsoft Corporation. They are not covered by
+cubox's license (AGPL-3.0-or-later) and are used under the Minecraft Usage
+Guidelines: https://www.minecraft.net/en-us/usage-guidelines
+
+NOT AN OFFICIAL MINECRAFT PRODUCT. NOT APPROVED BY OR ASSOCIATED WITH MOJANG
+OR MICROSOFT.
+
+Each icon and the game texture it is a copy of:
+
+abandoned_camp.png     item/campfire.png
+ancient_city.png       block/reinforced_deepslate_side.png
+bastion.png            block/polished_blackstone_bricks.png
+buried_treasure.png    item/heart_of_the_sea.png
+copper_vein.png        item/raw_copper.png
+desert_pyramid.png     block/chiseled_sandstone.png
+spawn.png              item/compass_00.png
+end_gateway.png        item/ender_pearl.png
+end_gateway_scattered.png item/ender_pearl.png
+geode.png              item/amethyst_shard.png
+iron_vein.png          item/raw_iron.png
+village.png            item/bell.png
+pillager_outpost.png   item/crossbow_standby.png
+stronghold.png         item/ender_eye.png
+mineshaft.png          item/chest_minecart.png
+jungle_temple.png      block/mossy_cobblestone.png
+swamp_hut.png          item/cauldron.png
+igloo.png              block/snow.png
+ocean_monument.png     item/prismarine_shard.png
+woodland_mansion.png   item/totem_of_undying.png
+ocean_ruin.png         item/trident.png
+shipwreck.png          item/oak_boat.png
+ruined_portal.png      block/crying_obsidian.png
+ruined_portal_nether.png block/obsidian.png
+trail_ruins.png        item/brush.png
+trial_chambers.png     item/trial_key.png
+fortress.png           block/nether_bricks.png
+nether_fossil.png      item/bone.png
+end_city.png           block/purpur_block.png
+end_city_ship.png      item/elytra.png
