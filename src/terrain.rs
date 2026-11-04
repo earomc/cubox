@@ -109,7 +109,13 @@ impl Terrain {
             let (chunk_x, chunk_z) = (chunk[0].0 >> 4, chunk[0].1 >> 4);
             let mut sampler = self.source.chunk_sampler();
             let mut height_cache = Default::default();
-            let mut aquifer = LazyAquifer::new(chunk_x * 16, chunk_z * 16, &noises.splitter, &*noises.noises, &noises.preliminary_surface);
+            let mut aquifer = LazyAquifer::new(
+                chunk_x * 16,
+                chunk_z * 16,
+                &noises.splitter,
+                &*noises.noises,
+                &noises.preliminary_surface,
+            );
             let (mut surface_y_cache, mut height_cache_grid_ready) = (None, false);
             let mut ctx = GenerationContext::<'_, '_, OverworldNoises>::new(
                 self.seed,
