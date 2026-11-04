@@ -14,6 +14,10 @@ The release workflow publishes the section of a version as its release notes.
   priority, so that a game in the front runs as if cubox wasn't there. Off by default. A long search could leave other
   programs waiting for half a minute when memory was short.
 
+### Fixed
+
+- A search that matches nearly every seed could keep the window from drawing for good.
+
 ### Changed
 
 - Searching for strongholds is much faster: seeds whose rings can't put one close enough are turned down at once.

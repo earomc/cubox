@@ -18,6 +18,8 @@ use crate::{
     structures::{MARKER_KINDS, is_searchable, kind_index},
 };
 
+/// Matches taken from a search per frame, at most.
+const MATCHES_PER_FRAME: usize = 1000;
 /// Matches kept in the list, the best ones.
 const MAX_RESULTS: usize = 200;
 /// How long after the last change a running search starts over, so that changing a value by
@@ -47,7 +49,11 @@ impl Running {
         // before taking the matches: all of them have been sent once it is done
         let done = search.is_done();
         let mut sort = false;
-        while let Ok(found) = search.results.try_recv() {
+        let mut taken = 0;
+        // a share per frame: a search that matches nearly every seed finds them faster than they can
+        // be taken, the rest waits and holds the search up
+        for found in search.results.try_iter().take(MATCHES_PER_FRAME) {
+            taken += 1;
             if print {
                 println!("seed search: {} {:?} {:?}", found.seed, found.score, found.hits.first());
             }
@@ -69,7 +75,8 @@ impl Running {
             }
             self.results.truncate(MAX_RESULTS);
         }
-        !done || self.changed_at.is_some()
+        // a full share may have left some behind, even of a search that is done
+        !done || taken == MATCHES_PER_FRAME || self.changed_at.is_some()
     }
 
     /// Whether a running search is due to start over after a change.
@@ -912,5 +919,27 @@ mod tests {
         running.changed(None);
         running.started(Err("a search that can't start".to_owned()));
         assert_eq!(running.results, vec![found(1, 5), found(2, 5)]);
+    }
+
+    /// A search that matches every seed finds them faster than a frame takes them, and a frame
+    /// still ends.
+    #[test]
+    fn a_frame_ends_while_every_seed_matches() {
+        let conditions = spec::parse_seeds("biome the_end within 500 of spawn").unwrap();
+        let mut running = Running::default();
+        running.started(Search::seeds(&conditions, Seeds::Random(1), 4, 16));
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            for _ in 0..20 {
+                std::thread::sleep(Duration::from_millis(20));
+                let start = Instant::now();
+                assert!(running.poll(4, false));
+                tx.send(start.elapsed()).unwrap();
+            }
+        });
+        for _ in 0..20 {
+            let took = rx.recv_timeout(Duration::from_secs(5)).expect("a frame didn't end");
+            assert!(took.as_millis() < 500, "a frame took {took:?}");
+        }
     }
 }
