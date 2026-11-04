@@ -64,13 +64,13 @@ getrandom = { version = "0.4", features = ["wasm_js"] }
 uuid = { version = "1", features = ["js"] }
 
 # SteelMC with one commit on top of upstream, until it is merged: a way to only locate jigsaw
-# structures (branch cubox-locate-only-26.3 of earomc/SteelMC). Then this whole section can go.
+# structures (branch locate-only of earomc/SteelMC). Then this whole section can go.
 [patch."https://github.com/Steel-Foundation/SteelMC"]
-steel-worldgen = { git = "https://github.com/earomc/SteelMC", rev = "fb1a3a494e13ef839b5bf302e5ae6f3d351eeab7" }
-steel-utils = { git = "https://github.com/earomc/SteelMC", rev = "fb1a3a494e13ef839b5bf302e5ae6f3d351eeab7" }
-steel-registry = { git = "https://github.com/earomc/SteelMC", rev = "fb1a3a494e13ef839b5bf302e5ae6f3d351eeab7" }
-steel-math = { git = "https://github.com/earomc/SteelMC", rev = "fb1a3a494e13ef839b5bf302e5ae6f3d351eeab7" }
-steel-macros = { git = "https://github.com/earomc/SteelMC", rev = "fb1a3a494e13ef839b5bf302e5ae6f3d351eeab7" }
+steel-worldgen = { git = "https://github.com/earomc/SteelMC", rev = "15f3d83ff441fa4646789faff48a391752c9f16b" }
+steel-utils = { git = "https://github.com/earomc/SteelMC", rev = "15f3d83ff441fa4646789faff48a391752c9f16b" }
+steel-registry = { git = "https://github.com/earomc/SteelMC", rev = "15f3d83ff441fa4646789faff48a391752c9f16b" }
+steel-math = { git = "https://github.com/earomc/SteelMC", rev = "15f3d83ff441fa4646789faff48a391752c9f16b" }
+steel-macros = { git = "https://github.com/earomc/SteelMC", rev = "15f3d83ff441fa4646789faff48a391752c9f16b" }
 
 # vanilla_templates() of steel-registry is one vec![] of every structure template, which unoptimized
 # needs more stack than a thread has
