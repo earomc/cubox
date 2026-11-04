@@ -49,6 +49,8 @@ That finds every village within 10000 blocks of 0,0 that has a desert within 300
 | `biome mushroom_fields` | one connected patch, at its middle, with its size in square blocks |
 | `biome mushroom_fields area>=1000000` | the same, of at least that size |
 | `noise erosion -1..-0.5` | one connected region where the value is in the range, `area>=` works like for biomes |
+| `slime` | one slime chunk, at its middle |
+| `cluster slime count>=4 square 2` | one square of 2 by 2 chunks with at least 4 slime chunks, at its middle, followed by its slime chunks |
 
 Results go to stdout as they are found: the `x,z` of the result followed by those of what was found around it, and its size or the
 number in the group. It goes through the area once and then ends, or stops at `--limit`. `--within` is 10000 and `--of`
@@ -70,6 +72,9 @@ separate results, and islands often have small pieces around them: use `area>=` 
 | `biome mushroom_fields area>=1000000 within 5000 of spawn` | one connected patch has that many square blocks in the area |
 | `noise continentalness -2..-1.05 within 1000 of spawn` | the overworld's value is in the range somewhere in the area |
 | `noise continentalness -2..-1.05 coverage>=30% within 1000 of spawn` | for that share of the area |
+| `slime within 100 of spawn` | a slime chunk has its middle in the area |
+| `slime count>=6 within 100 of 0,0` | at least that many do |
+| `cluster slime count>=4 square 2 within 300 of 0,0` | a square of 2 by 2 chunks with its middle in the area has at least 4 slime chunks. A square is 1 to 16 chunks per side, `count>=7 square 3` is 7 of the 9 |
 | `not <condition>` | the condition doesn't pass: `not biome ocean within 300 of spawn` |
 | `any`, conditions on their own lines, `end` | one of them passes |
 
@@ -80,6 +85,11 @@ anything with a marker, named like its icon in `assets/icons`: structures, and a
 `end_gateway` (the 20 the dragon opens), and `geode` and `end_gateway_scattered`, which are maybe there: their random
 numbers are exact, but terrain the game looks at can still stop them. Biomes have their names in the game. `#` starts a
 comment.
+
+Slime chunks are the overworld chunks where slimes spawn below y 40 at any light level, about one in ten, the same as
+"Slime chunks" on the map. They are exact and take nanoseconds each. Like structures they only depend on the lower 48
+bits of a seed, so a search for slime chunks around `x,z` turns down all seeds with those bits at once, while one around
+spawn has to find spawn first, which needs the biomes.
 
 Biomes are looked at from above, at y 256 in the overworld, so caves can't be searched for: `deep_dark`, `dripstone_caves`,
 `lush_caves`, `sulfur_caves` and `ice_caves` are refused, and so is `the_void`, which doesn't generate. Noise values are

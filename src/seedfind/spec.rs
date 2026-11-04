@@ -6,6 +6,8 @@
 //! biome mushroom_fields area>=4000000 within 5000 of spawn
 //! not biome ocean within 300 of spawn
 //! noise continentalness -1.2..-1.05 coverage>=5% within 1000 of spawn
+//! slime count>=3 within 100 of 0,0
+//! cluster slime count>=4 square 2 within 1000 of 0,0
 //! any
 //!   biome desert within 500 of spawn
 //!   biome badlands within 500 of spawn
@@ -46,6 +48,16 @@ pub enum BiomeTest {
     Area(i64),
 }
 
+/// Squares of `size` chunks per side with at least `count` slime chunks in them.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct SlimeSquare {
+    pub size: i32,
+    pub count: u32,
+}
+
+/// The largest square of chunks a slime cluster can be about.
+pub const MAX_SLIME_SQUARE: i32 = 16;
+
 /// What a location search finds, each result being one of these.
 #[derive(Clone, PartialEq, Debug)]
 pub enum Target {
@@ -70,6 +82,10 @@ pub enum Target {
         max: f32,
         min_area: Option<i64>,
     },
+    /// each slime chunk
+    Slime,
+    /// each square with that many slime chunks
+    SlimeCluster(SlimeSquare),
 }
 
 impl Target {
@@ -78,7 +94,7 @@ impl Target {
         match self {
             Target::Poi { kind } | Target::Cluster { kind, .. } => MARKER_KINDS[*kind].dimension,
             Target::Biome { biome, .. } => biome_dimension(biome),
-            Target::Noise { .. } => Dimension::Overworld,
+            Target::Noise { .. } | Target::Slime | Target::SlimeCluster(_) => Dimension::Overworld,
         }
     }
 }
@@ -127,8 +143,32 @@ pub enum Condition {
         radius: i32,
         anchor: Anchor,
     },
+    /// `count` slime chunks with their middle in the area
+    Slime {
+        count: u32,
+        radius: i32,
+        anchor: Anchor,
+    },
+    /// a square of chunks with that many slime chunks, whose middle is in the area
+    SlimeCluster {
+        square: SlimeSquare,
+        within: i32,
+        anchor: Anchor,
+    },
     Not(Box<Condition>),
     Any(Vec<Condition>),
+}
+
+impl Condition {
+    /// Whether this is about slime chunks, or has a condition inside that is.
+    pub fn mentions_slime(&self) -> bool {
+        match self {
+            Condition::Slime { .. } | Condition::SlimeCluster { .. } => true,
+            Condition::Not(condition) => condition.mentions_slime(),
+            Condition::Any(conditions) => conditions.iter().any(Condition::mentions_slime),
+            _ => false,
+        }
+    }
 }
 
 /// The dimension a condition's place is in, for those about one.
@@ -136,7 +176,9 @@ fn dimension_of(condition: &Condition) -> Option<Dimension> {
     match condition {
         Condition::Poi { kind, .. } | Condition::Cluster { kind, .. } => Some(MARKER_KINDS[*kind].dimension),
         Condition::Biome { biome, .. } => Some(biome_dimension(biome)),
-        Condition::Noise { .. } => Some(Dimension::Overworld),
+        Condition::Noise { .. } | Condition::Slime { .. } | Condition::SlimeCluster { .. } => {
+            Some(Dimension::Overworld)
+        }
         Condition::Not(_) | Condition::Any(_) => None,
     }
 }
@@ -146,7 +188,9 @@ fn anchor_of(condition: &Condition) -> Option<Anchor> {
         Condition::Poi { anchor, .. }
         | Condition::Cluster { anchor, .. }
         | Condition::Biome { anchor, .. }
-        | Condition::Noise { anchor, .. } => Some(*anchor),
+        | Condition::Noise { anchor, .. }
+        | Condition::Slime { anchor, .. }
+        | Condition::SlimeCluster { anchor, .. } => Some(*anchor),
         Condition::Not(_) | Condition::Any(_) => None,
     }
 }
@@ -284,6 +328,23 @@ fn min_area(word: &str) -> Result<i64, String> {
         .ok_or_else(|| format!("expected `area>=<square blocks>`, got `{word}`"))
 }
 
+/// `count>=4` and `square 2` of a slime cluster: at least 1, and no more than the square has chunks.
+fn slime_square(count: &str, size: &str) -> Result<SlimeSquare, String> {
+    let size: i32 = size
+        .parse()
+        .ok()
+        .filter(|size| (1..=MAX_SLIME_SQUARE).contains(size))
+        .ok_or_else(|| format!("`square {size}`: a square is 1 to {MAX_SLIME_SQUARE} chunks per side"))?;
+    let count = self::count(count)?;
+    if count > (size * size) as u32 {
+        return Err(format!(
+            "a square of {size} by {size} chunks has only {} of them",
+            size * size
+        ));
+    }
+    Ok(SlimeSquare { size, count })
+}
+
 fn biome_named(biome: &str) -> Result<String, String> {
     if !BIOMES.contains(&biome) {
         return Err(format!("no biome called {biome}"));
@@ -315,6 +376,8 @@ impl Target {
             ["poi", kind] => Ok(Target::Poi {
                 kind: kind_named(kind)?,
             }),
+            ["slime"] => Ok(Target::Slime),
+            ["cluster", "slime", count, "square", size] => Ok(Target::SlimeCluster(slime_square(count, size)?)),
             ["cluster", kind, count, "radius", radius] => Ok(Target::Cluster {
                 kind: kind_named(kind)?,
                 count: self::count(count)?,
@@ -359,6 +422,22 @@ impl Condition {
                     kind: kind_named(kind)?,
                     count,
                     radius,
+                    anchor,
+                })
+            }
+            ["slime", rest @ ..] => {
+                let (count, rest) = match rest {
+                    [word, rest @ ..] if word.starts_with("count>=") => (self::count(word)?, rest),
+                    rest => (1, rest),
+                };
+                let (radius, anchor) = area(rest)?;
+                Ok(Condition::Slime { count, radius, anchor })
+            }
+            ["cluster", "slime", count, "square", size, rest @ ..] => {
+                let (within, anchor) = area(rest)?;
+                Ok(Condition::SlimeCluster {
+                    square: slime_square(count, size)?,
+                    within,
                     anchor,
                 })
             }
@@ -544,6 +623,20 @@ impl fmt::Display for Condition {
                 }
                 write!(f, " {}", Within(*radius, *anchor))
             }
+            Condition::Slime { count, radius, anchor } => {
+                write!(f, "slime ")?;
+                if *count != 1 {
+                    write!(f, "count>={count} ")?;
+                }
+                write!(f, "{}", Within(*radius, *anchor))
+            }
+            Condition::SlimeCluster { square, within, anchor } => write!(
+                f,
+                "cluster slime count>={} square {} {}",
+                square.count,
+                square.size,
+                Within(*within, *anchor)
+            ),
             Condition::Not(condition) => write!(f, "not {condition}"),
             Condition::Any(conditions) => {
                 writeln!(f, "any")?;
@@ -575,6 +668,10 @@ impl fmt::Display for Target {
             } => {
                 write!(f, "noise {} {min}..{max}", parameter.name())?;
                 min_area.map_or(Ok(()), |area| write!(f, " area>={area}"))
+            }
+            Target::Slime => write!(f, "slime"),
+            Target::SlimeCluster(square) => {
+                write!(f, "cluster slime count>={} square {}", square.count, square.size)
             }
         }
     }
@@ -608,6 +705,7 @@ pub const SEED_PRESETS: &[(&str, &str)] = &[
         "Mushroom island",
         "biome mushroom_fields area>=1000000 within 5000 of spawn\n",
     ),
+    ("Slime farm", "cluster slime count>=4 square 2 within 300 of 0,0\n"),
 ];
 
 /// Ready made searches for locations: name and text.
@@ -615,6 +713,7 @@ pub const LOCATION_PRESETS: &[(&str, &str)] = &[
     ("Witch farm", "cluster swamp_hut count>=2 radius 128\n"),
     ("Mushroom island", "biome mushroom_fields\n"),
     ("Desert village", "poi village\nbiome desert within 100\n"),
+    ("Slime farm", "cluster slime count>=4 square 2\n"),
 ];
 
 #[cfg(test)]
@@ -630,6 +729,9 @@ biome mushroom_fields area>=4000000 within 5000 of spawn
 biome jungle coverage>=20% within 1000 of 7,7
 noise continentalness -1.2..-1.05 coverage>=5% within 1000 of spawn
 noise erosion 0..0.5 within 10 of 1,2
+slime within 50 of spawn
+slime count>=3 within 100 of 0,0
+cluster slime count>=4 square 2 within 1000 of -16,32
 not poi stronghold within 2000 of spawn
 any
   biome desert within 500 of spawn
@@ -644,6 +746,8 @@ end
             "biome desert\n",
             "biome desert area>=5000\nnoise erosion 0..1 coverage>=5% within 9\n",
             "noise erosion -1..0.5 area>=100\n",
+            "slime\nbiome swamp within 50\n",
+            "cluster slime count>=7 square 3\nnot slime count>=2 within 30\ncluster slime count>=2 square 2 within 64\n",
         ] {
             let search = parse_locations(locations).unwrap();
             assert_eq!(print_locations(&search), locations);
@@ -722,6 +826,12 @@ end
             ("hello", "don't know"),
             ("any\nbiome desert within 5 of spawn", "without `end`"),
             ("end", "without `any`"),
+            ("slime count>=0 within 5 of 0,0", "count>="),
+            ("slime within 5", "needs `of"),
+            ("cluster slime count>=5 square 2 within 5 of 0,0", "only 4"),
+            ("cluster slime count>=1 square 0 within 5 of 0,0", "1 to 16"),
+            ("cluster slime count>=1 square 17 within 5 of 0,0", "1 to 16"),
+            ("cluster slime count>=4 radius 2 within 5 of 0,0", "no poi called slime"),
         ] {
             let error = parse_seeds(text).unwrap_err();
             assert!(error.contains(wanted), "{text}: {error}");

@@ -13,7 +13,8 @@ use steel_worldgen::biomes::BiomeSourceKind;
 use crate::{
     dimension::Dimension,
     noise::{NoiseCache, NoiseField},
-    seedfind::spec::{Anchor, BiomeTest, Condition},
+    seedfind::spec::{Anchor, BiomeTest, Condition, SlimeSquare},
+    slime::{best_square, slime_in_disc},
     structures::{Finder, Found, MARKER_KINDS, allowed_by_biomes, candidates, depends_on_lower_bits, has_candidates},
 };
 
@@ -469,6 +470,50 @@ fn check_biome(
     }
 }
 
+/// A slime chunk or the middle of a square of them.
+pub fn slime_hit(at: [i32; 2]) -> Hit {
+    Hit {
+        kind: None,
+        dimension: Dimension::Overworld,
+        x: at[0],
+        z: at[1],
+    }
+}
+
+/// At least `count` slime chunks within `radius` of `center`, the nearest of them as hits. Only needs
+/// the lower 48 bits of the seed.
+fn check_slime(seed: i64, count: u32, radius: i32, center: [i32; 2], stopped: &dyn Fn() -> bool) -> Option<Passed> {
+    let found = slime_in_disc(seed, center, radius, stopped)?;
+    if found.len() < count as usize {
+        return None;
+    }
+    let nearest = found[0];
+    let (dx, dz) = ((nearest[0] - center[0]) as f64, (nearest[1] - center[1]) as f64);
+    Some(Passed {
+        score: Some(-(dx * dx + dz * dz).sqrt()),
+        hits: found[..count as usize].iter().copied().map(slime_hit).collect(),
+    })
+}
+
+/// A square of chunks with enough slime chunks within `within` of `center`, the one with the most.
+/// Its middle and its slime chunks are the hits. Only needs the lower 48 bits of the seed.
+fn check_slime_cluster(
+    seed: i64,
+    square: SlimeSquare,
+    within: i32,
+    center: [i32; 2],
+    stopped: &dyn Fn() -> bool,
+) -> Option<Passed> {
+    let best = best_square(seed, square.size, center, within, stopped)?;
+    (best.count >= square.count).then(|| Passed {
+        score: Some(best.count as f64),
+        hits: std::iter::once(best.middle())
+            .chain(best.slime_chunks(seed))
+            .map(slime_hit)
+            .collect(),
+    })
+}
+
 impl SeedWorld {
     fn check(&self, condition: &Condition, here: [i32; 2], cells: &mut Cells) -> Option<Passed> {
         match condition {
@@ -591,6 +636,14 @@ impl SeedWorld {
                         .collect(),
                 })
             }
+            Condition::Slime { count, radius, anchor } => {
+                let center = self.center(*anchor, Dimension::Overworld, here);
+                check_slime(self.seed, *count, *radius, center, &|| self.stopped())
+            }
+            Condition::SlimeCluster { square, within, anchor } => {
+                let center = self.center(*anchor, Dimension::Overworld, here);
+                check_slime_cluster(self.seed, *square, *within, center, &|| self.stopped())
+            }
             Condition::Not(condition) => match self.check(condition, here, cells) {
                 Some(_) => None,
                 None => Some(Passed::default()),
@@ -644,6 +697,8 @@ fn cost(condition: &Condition) -> u32 {
                 100
             }
         }
+        // a slime chunk is a few nanoseconds, a biome sample about a microsecond
+        Condition::Slime { anchor, .. } | Condition::SlimeCluster { anchor, .. } => 1 + anchored(anchor),
         Condition::Biome { anchor, .. } | Condition::Noise { anchor, .. } => 2 + anchored(anchor),
         Condition::Not(condition) => cost(condition),
         Condition::Any(conditions) => conditions.iter().map(cost).sum(),
@@ -660,6 +715,9 @@ impl Plan {
             .filter(|(_, (_, condition))| match condition {
                 Condition::Poi { kind, anchor, .. } | Condition::Cluster { kind, anchor, .. } => {
                     matches!(anchor, Anchor::At(..)) && has_candidates(*kind) && depends_on_lower_bits(*kind)
+                }
+                Condition::Slime { anchor, .. } | Condition::SlimeCluster { anchor, .. } => {
+                    matches!(anchor, Anchor::At(..))
                 }
                 _ => false,
             })
@@ -701,6 +759,16 @@ impl Plan {
                 let reach = radius + crate::structures::marker_margin(*kind);
                 could_cluster(cells, reach, *count)
             }
+            Condition::Slime {
+                count,
+                radius,
+                anchor: Anchor::At(x, z),
+            } => check_slime(seed, *count, *radius, [*x, *z], &|| false).is_some(),
+            Condition::SlimeCluster {
+                square,
+                within,
+                anchor: Anchor::At(x, z),
+            } => check_slime_cluster(seed, *square, *within, [*x, *z], &|| false).is_some(),
             _ => true,
         })
     }
@@ -894,6 +962,57 @@ mod tests {
             }
             assert!(matches > 3, "{matches}");
         });
+    }
+
+    #[test]
+    fn slime_conditions_pass_like_counting_by_hand() {
+        let mut cells = Vec::new();
+        let mut passed = [0, 0];
+        for seed in 0..300i64 {
+            let seed = seed.wrapping_mul(0x0123_4567_89AB_CDEF);
+            let world = SeedWorld::new(seed, 16);
+            // by hand: slime chunks with their middle within 24 blocks of 0,0, the 4 around it
+            let near = (-5..5)
+                .flat_map(|z| (-5..5).map(move |x| (x, z)))
+                .filter(|&(x, z)| {
+                    let [mx, mz] = crate::slime::chunk_middle(x, z);
+                    mx * mx + mz * mz <= 24 * 24 && crate::slime::is_slime_chunk(seed, x, z)
+                })
+                .count();
+            for (i, text) in ["slime count>=2 within 24 of 0,0", "not slime within 24 of 0,0"]
+                .iter()
+                .enumerate()
+            {
+                let plan = Plan::new(&parse(text).unwrap());
+                let passes = plan.lower_bits_pass(seed, &mut cells) && plan.check(&world, [0, 0], &mut cells).is_some();
+                let wanted = if i == 0 { near >= 2 } else { near == 0 };
+                assert_eq!(passes, wanted, "{text} seed {seed}");
+                passed[i] += passes as i32;
+            }
+            // the upper 16 bits change nothing
+            let plan = Plan::new(&parse("cluster slime count>=3 square 2 within 200 of 0,0").unwrap());
+            let other = seed ^ (0x1234 << 48);
+            assert_eq!(
+                plan.check(&world, [0, 0], &mut cells).map(|m| m.hits),
+                plan.check(&SeedWorld::new(other, 16), [0, 0], &mut cells)
+                    .map(|m| m.hits),
+                "seed {seed}"
+            );
+        }
+        assert!(passed.iter().all(|&n| n > 0), "{passed:?}");
+    }
+
+    #[test]
+    fn a_slime_cluster_reports_its_square() {
+        let plan = Plan::new(&parse("cluster slime count>=4 square 2 within 4000 of 0,0").unwrap());
+        let found = plan.check(&SeedWorld::new(4, 16), [0, 0], &mut Vec::new()).unwrap();
+        assert_eq!(found.score, Some(4.0));
+        // the middle of the square, then its 4 chunks around it
+        assert_eq!(found.hits.len(), 5);
+        let middle = &found.hits[0];
+        for chunk in &found.hits[1..] {
+            assert_eq!(((chunk.x - middle.x).abs(), (chunk.z - middle.z).abs()), (8, 8));
+        }
     }
 
     /// Strongholds turned down from their rings alone are those a full look doesn't find either.

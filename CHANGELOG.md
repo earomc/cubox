@@ -12,6 +12,9 @@ The release workflow publishes the section of a version as its release notes.
 
 - Slime chunks on the map: "Slime chunks" in the panel, or `slime on` in scripts, in the overworld. They show up the
   moment they are on the screen, until a pixel is bigger than a chunk.
+- Slime chunks in searches: `slime count>=6 within 100 of 0,0`, and `cluster slime count>=4 square 2 within 300 of 0,0`
+  for a square of 2 by 2 chunks that are all slime chunks. Finding locations, `slime` and `cluster slime count>=4 square 2`
+  list each of them. Both have a preset, "Slime farm", and opening a result shows the slime chunks on the map.
 
 ### Changed
 

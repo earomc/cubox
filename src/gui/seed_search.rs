@@ -11,8 +11,8 @@ use crate::{
         engine::{Match, biome_dimension},
         run::{Area, Search, Seeds},
         spec::{
-            self, Anchor, BiomeTest, Condition, EXACT_STEP, LOCATION_PRESETS, LocationSearch, MAX_BLOCKS, SEED_PRESETS,
-            Target,
+            self, Anchor, BiomeTest, Condition, EXACT_STEP, LOCATION_PRESETS, LocationSearch, MAX_BLOCKS,
+            MAX_SLIME_SQUARE, SEED_PRESETS, SlimeSquare, Target,
         },
     },
     structures::{MARKER_KINDS, is_searchable, kind_index},
@@ -401,6 +401,18 @@ fn min_area_ui(ui: &mut egui::Ui, min_area: &mut Option<i64>) -> bool {
     changed
 }
 
+/// How many slime chunks in a square of how many chunks per side. True if it changed.
+fn square_ui(ui: &mut egui::Ui, square: &mut SlimeSquare) -> bool {
+    ui.label("count>=");
+    let mut changed = number_ui(ui, &mut square.count, 1..=(square.size * square.size) as u32, 0.1);
+    ui.label("square");
+    changed |= number_ui(ui, &mut square.size, 1..=MAX_SLIME_SQUARE, 0.1);
+    ui.label("chunks")
+        .on_hover_text("A square of this many chunks per side");
+    square.count = square.count.min((square.size * square.size) as u32);
+    changed
+}
+
 /// What a search for locations finds, word for word its text with the values to change.
 fn target_ui(ui: &mut egui::Ui, target: &mut Target) -> bool {
     let mut changed = false;
@@ -409,6 +421,8 @@ fn target_ui(ui: &mut egui::Ui, target: &mut Target) -> bool {
         Target::Cluster { .. } => "cluster",
         Target::Biome { .. } => "biome",
         Target::Noise { .. } => "noise",
+        Target::Slime => "slime",
+        Target::SlimeCluster(_) => "slime cluster",
     };
     egui::ComboBox::from_id_salt("target")
         .selected_text(format!("find {}", name(target)))
@@ -433,6 +447,8 @@ fn target_ui(ui: &mut egui::Ui, target: &mut Target) -> bool {
                     max: -1.05,
                     min_area: None,
                 },
+                Target::Slime,
+                Target::SlimeCluster(SlimeSquare { size: 2, count: 4 }),
             ] {
                 let same = std::mem::discriminant(target) == std::mem::discriminant(&option);
                 if ui.selectable_label(same, name(&option)).clicked() && !same {
@@ -464,6 +480,8 @@ fn target_ui(ui: &mut egui::Ui, target: &mut Target) -> bool {
             changed |= noise_ui(ui, SALT, parameter, min, max);
             changed |= min_area_ui(ui, min_area);
         }
+        Target::Slime => {}
+        Target::SlimeCluster(square) => changed |= square_ui(ui, square),
     }
     changed
 }
@@ -542,6 +560,22 @@ fn conditions_ui(ui: &mut egui::Ui, conditions: &mut Vec<Condition>, anchor: Anc
                     coverage: 0.0,
                     radius: 500,
                     anchor,
+                },
+            ),
+            (
+                "+ slime",
+                Condition::Slime {
+                    count: 1,
+                    radius: 100,
+                    anchor,
+                },
+            ),
+            (
+                "+ slime cluster",
+                Condition::SlimeCluster {
+                    square: SlimeSquare { size: 2, count: 4 },
+                    within: 300,
+                    anchor: far,
                 },
             ),
         ] {
@@ -715,6 +749,17 @@ fn condition_ui(ui: &mut egui::Ui, salt: usize, condition: &mut Condition) -> bo
             ui.label("%");
             changed |= within_ui(ui, salt, radius, anchor, true);
         }
+        Condition::Slime { count, radius, anchor } => {
+            ui.label("slime");
+            ui.label("count>=");
+            changed |= number_ui(ui, count, 1..=10_000, 0.1);
+            changed |= within_ui(ui, salt, radius, anchor, true);
+        }
+        Condition::SlimeCluster { square, within, anchor } => {
+            ui.label("cluster slime");
+            changed |= square_ui(ui, square);
+            changed |= within_ui(ui, salt, within, anchor, true);
+        }
         Condition::Not(inner) => changed |= condition_ui(ui, salt, inner),
         Condition::Any(conditions) => {
             ui.label(format!("any of {} conditions, see the text", conditions.len()));
@@ -885,6 +930,17 @@ impl Ui {
         }
         for kind in found.hits.iter().filter_map(|hit| hit.kind) {
             self.shown_kinds[kind] = true;
+        }
+        let search = &self.seed_search;
+        let slime = match search.tab {
+            Tab::Seeds => search.seed_conditions.iter().any(Condition::mentions_slime),
+            Tab::Locations => {
+                matches!(search.location_search.target, Target::Slime | Target::SlimeCluster(_))
+                    || search.location_search.conditions.iter().any(Condition::mentions_slime)
+            }
+        };
+        if slime {
+            self.slime.shown = true;
         }
         if let Some(hit) = found.hits.first() {
             self.map.camera.center = [hit.x as f64 / 4.0, hit.z as f64 / 4.0];

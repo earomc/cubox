@@ -13,9 +13,10 @@ use std::{
 use crate::{
     noise::NoiseCache,
     seedfind::{
-        engine::{Cells, Hit, Match, Patch, PatchScan, Plan, SeedWorld, best_circle_with, row_runs},
+        engine::{Cells, Hit, Match, Patch, PatchScan, Plan, SeedWorld, best_circle_with, row_runs, slime_hit},
         spec::{self, Condition, LocationSearch, Target},
     },
+    slime::{chunk_middle, is_slime_chunk, rows_in_disc, squares_in_row},
     structures::{Found, Spread, marker_margin, spread},
 };
 
@@ -405,6 +406,8 @@ enum Parts {
     Rings { kind: usize },
     /// the rows of a grid of the area, which then are connected in order
     Rows { rows: u64, connect: Mutex<Connect> },
+    /// rows of chunks, or of squares of them by their first chunk: z and the x that are in the area
+    Chunks(Vec<(i32, std::ops::RangeInclusive<i32>)>),
 }
 
 /// Rows that are done, waiting for those before them.
@@ -418,6 +421,10 @@ impl Parts {
     fn of(target: &Target, area: Area, step: i32) -> Self {
         let kind = match target {
             Target::Poi { kind } | Target::Cluster { kind, .. } => *kind,
+            Target::Slime => return Self::Chunks(rows_in_disc(area.center, area.radius, 8).collect()),
+            Target::SlimeCluster(square) => {
+                return Self::Chunks(rows_in_disc(area.center, area.radius, 8 * square.size).collect());
+            }
             Target::Biome { .. } | Target::Noise { .. } => {
                 return Self::Rows {
                     rows: 2 * (area.radius / step) as u64 + 1,
@@ -455,6 +462,7 @@ impl Parts {
             Self::Cells { columns, rows, .. } => columns * rows,
             Self::Rings { .. } => 1,
             Self::Rows { rows, .. } => *rows,
+            Self::Chunks(rows) => rows.len() as u64,
         }
     }
 }
@@ -505,6 +513,7 @@ impl LocationShared {
                         self.found_patch(patch, &mut cells);
                     }
                 }
+                Parts::Chunks(rows) => self.chunk_row(rows[index as usize].clone(), &mut cells),
             }
             self.control.counters.finished.fetch_add(1, Ordering::Relaxed);
         }
@@ -537,7 +546,30 @@ impl LocationShared {
                     !stop.load(Ordering::Relaxed) && (*min..=*max).contains(&value)
                 })
             }
-            Target::Poi { .. } | Target::Cluster { .. } => Vec::new(),
+            Target::Poi { .. } | Target::Cluster { .. } | Target::Slime | Target::SlimeCluster(_) => Vec::new(),
+        }
+    }
+
+    /// The slime chunks of a row of chunks, or the squares of them with enough, whose first chunk is in it.
+    fn chunk_row(&self, (z, xs): (i32, std::ops::RangeInclusive<i32>), cells: &mut Cells) {
+        let seed = self.area.seed;
+        match self.target {
+            Target::Slime => {
+                for x in xs.filter(|&x| is_slime_chunk(seed, x, z)) {
+                    let at = chunk_middle(x, z);
+                    self.report(at, vec![slime_hit(at)], None, cells);
+                }
+            }
+            Target::SlimeCluster(wanted) => squares_in_row(seed, wanted.size, z, xs, &mut |square| {
+                if square.count >= wanted.count {
+                    let hits = std::iter::once(square.middle())
+                        .chain(square.slime_chunks(seed))
+                        .map(slime_hit)
+                        .collect();
+                    self.report(square.middle(), hits, Some(square.count as f64), cells);
+                }
+            }),
+            _ => {}
         }
     }
 
@@ -840,6 +872,32 @@ mod tests {
         assert!(status.starts_with("Done"), "{status}");
         assert!(!found.is_empty());
         assert!(found.iter().all(|f| f.score.is_some()));
+    }
+
+    #[test]
+    fn each_slime_chunk_and_square_is_one_result() {
+        let seed = 12345;
+        let (found, status) = run_to_end("slime", seed, 2000, STEP);
+        assert!(status.starts_with("Done"), "{status}");
+        let mut wanted: Vec<(i32, i32)> = rows_in_disc([0, 0], 2000, 8)
+            .flat_map(|(z, xs)| xs.map(move |x| (x, z)))
+            .filter(|&(x, z)| is_slime_chunk(seed, x, z))
+            .map(|(x, z)| (x * 16 + 8, z * 16 + 8))
+            .collect();
+        wanted.sort_unstable();
+        assert!(wanted.len() > 1000);
+        assert_eq!(firsts(&found), wanted);
+
+        let (squares, _) = run_to_end("cluster slime count>=3 square 2", seed, 3000, STEP);
+        assert!(!squares.is_empty());
+        for square in &squares {
+            // the middle of the square, then its slime chunks
+            let slime = &square.hits[1..];
+            assert!(slime.len() >= 3 && square.score == Some(slime.len() as f64));
+            for chunk in slime {
+                assert!((chunk.x - square.hits[0].x).abs() == 8 && (chunk.z - square.hits[0].z).abs() == 8);
+            }
+        }
     }
 
     #[test]
