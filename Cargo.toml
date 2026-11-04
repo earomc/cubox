@@ -66,11 +66,11 @@ uuid = { version = "1", features = ["js"] }
 # SteelMC with one commit on top of upstream, until it is merged: a way to only locate jigsaw
 # structures (branch locate-only of earomc/SteelMC). Then this whole section can go.
 [patch."https://github.com/Steel-Foundation/SteelMC"]
-steel-worldgen = { git = "https://github.com/earomc/SteelMC", rev = "15f3d83ff441fa4646789faff48a391752c9f16b" }
-steel-utils = { git = "https://github.com/earomc/SteelMC", rev = "15f3d83ff441fa4646789faff48a391752c9f16b" }
-steel-registry = { git = "https://github.com/earomc/SteelMC", rev = "15f3d83ff441fa4646789faff48a391752c9f16b" }
-steel-math = { git = "https://github.com/earomc/SteelMC", rev = "15f3d83ff441fa4646789faff48a391752c9f16b" }
-steel-macros = { git = "https://github.com/earomc/SteelMC", rev = "15f3d83ff441fa4646789faff48a391752c9f16b" }
+steel-worldgen = { git = "https://github.com/earomc/SteelMC", rev = "01e78085d2f59d6890e97a1b2674727084b81fe5" }
+steel-utils = { git = "https://github.com/earomc/SteelMC", rev = "01e78085d2f59d6890e97a1b2674727084b81fe5" }
+steel-registry = { git = "https://github.com/earomc/SteelMC", rev = "01e78085d2f59d6890e97a1b2674727084b81fe5" }
+steel-math = { git = "https://github.com/earomc/SteelMC", rev = "01e78085d2f59d6890e97a1b2674727084b81fe5" }
+steel-macros = { git = "https://github.com/earomc/SteelMC", rev = "01e78085d2f59d6890e97a1b2674727084b81fe5" }
 
 # vanilla_templates() of steel-registry is one vec![] of every structure template, which unoptimized
 # needs more stack than a thread has

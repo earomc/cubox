@@ -1,6 +1,6 @@
 //! Real terrain heights from the game's noise, and a hillshade made from them.
 
-use std::sync::Once;
+use std::sync::{Arc, Once};
 
 use rustc_hash::FxHashMap;
 use steel_registry::{
@@ -15,7 +15,7 @@ use steel_worldgen::{
     biomes::BiomeSourceKind,
     density::{DimensionNoises, NoiseSettings},
     density_functions::overworld::OverworldNoises,
-    noise::{LazyAquifer, preliminary_surface_level},
+    noise::{LazyAquifer, PreliminarySurfaceStore, preliminary_surface_level},
     noise_parameters::get_noise_parameters,
     structure::GenerationContext,
 };
@@ -34,6 +34,8 @@ pub(crate) fn init_registry() {
 pub(crate) struct Noises<N> {
     pub(crate) noises: Box<N>,
     pub(crate) splitter: RandomSplitter,
+    /// surface levels shared by all chunks, only valid for these noises: it is keyed by position alone
+    pub(crate) preliminary_surface: Arc<PreliminarySurfaceStore>,
 }
 
 impl<N: DimensionNoises> Noises<N> {
@@ -46,7 +48,11 @@ impl<N: DimensionNoises> Noises<N> {
             Xoroshiro::from_seed(seed).next_positional()
         };
         let noises = Box::new(N::create(seed, &splitter, &get_noise_parameters()));
-        Self { noises, splitter }
+        Self {
+            noises,
+            splitter,
+            preliminary_surface: Arc::default(),
+        }
     }
 }
 
@@ -103,7 +109,7 @@ impl Terrain {
             let (chunk_x, chunk_z) = (chunk[0].0 >> 4, chunk[0].1 >> 4);
             let mut sampler = self.source.chunk_sampler();
             let mut height_cache = Default::default();
-            let mut aquifer = LazyAquifer::new(chunk_x * 16, chunk_z * 16, &noises.splitter, &*noises.noises);
+            let mut aquifer = LazyAquifer::new(chunk_x * 16, chunk_z * 16, &noises.splitter, &*noises.noises, &noises.preliminary_surface);
             let (mut surface_y_cache, mut height_cache_grid_ready) = (None, false);
             let mut ctx = GenerationContext::<'_, '_, OverworldNoises>::new(
                 self.seed,
@@ -112,6 +118,7 @@ impl Terrain {
                 SEA_LEVEL,
                 &noises.noises,
                 &noises.splitter,
+                &noises.preliminary_surface,
                 &template_pools,
                 &templates,
                 &mut sampler,

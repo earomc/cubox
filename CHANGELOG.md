@@ -13,6 +13,8 @@ The release workflow publishes the section of a version as its release notes.
 - Structure markers show Minecraft textures instead of text labels: a compass for spawn, an ender eye for strongholds,
   a bell for villages and so on. They stay sharp at any size and have a dark and a light outline, so they stand out on
   any biome. The textures belong to Mojang and aren't under cubox's license, see `assets/icons/NOTICE`.
+- Exact relief loads about a third faster when zoomed out, from SteelMC's faster chunk generation. Zoomed in it is
+  only slightly faster.
 
 ### Fixed
 

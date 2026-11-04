@@ -3515,7 +3515,7 @@ checksum = "a2eb9349b6444b326872e140eb1cf5e7c522154d69e7a0ffb0fb81c06b37543f"
 [[package]]
 name = "steel-macros"
 version = "0.16.1+mc26.3"
-source = "git+https://github.com/earomc/SteelMC?rev=15f3d83ff441fa4646789faff48a391752c9f16b#15f3d83ff441fa4646789faff48a391752c9f16b"
+source = "git+https://github.com/earomc/SteelMC?rev=01e78085d2f59d6890e97a1b2674727084b81fe5#01e78085d2f59d6890e97a1b2674727084b81fe5"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -3525,7 +3525,7 @@ dependencies = [
 [[package]]
 name = "steel-math"
 version = "0.16.1+mc26.3"
-source = "git+https://github.com/earomc/SteelMC?rev=15f3d83ff441fa4646789faff48a391752c9f16b#15f3d83ff441fa4646789faff48a391752c9f16b"
+source = "git+https://github.com/earomc/SteelMC?rev=01e78085d2f59d6890e97a1b2674727084b81fe5#01e78085d2f59d6890e97a1b2674727084b81fe5"
 dependencies = [
  "glam",
 ]
@@ -3533,7 +3533,7 @@ dependencies = [
 [[package]]
 name = "steel-registry"
 version = "0.16.1+mc26.3"
-source = "git+https://github.com/earomc/SteelMC?rev=15f3d83ff441fa4646789faff48a391752c9f16b#15f3d83ff441fa4646789faff48a391752c9f16b"
+source = "git+https://github.com/earomc/SteelMC?rev=01e78085d2f59d6890e97a1b2674727084b81fe5#01e78085d2f59d6890e97a1b2674727084b81fe5"
 dependencies = [
  "bitflags 2.13.2",
  "flate2",
@@ -3558,7 +3558,7 @@ dependencies = [
 [[package]]
 name = "steel-utils"
 version = "0.16.1+mc26.3"
-source = "git+https://github.com/earomc/SteelMC?rev=15f3d83ff441fa4646789faff48a391752c9f16b#15f3d83ff441fa4646789faff48a391752c9f16b"
+source = "git+https://github.com/earomc/SteelMC?rev=01e78085d2f59d6890e97a1b2674727084b81fe5#01e78085d2f59d6890e97a1b2674727084b81fe5"
 dependencies = [
  "bitflags 2.13.2",
  "chrono",
@@ -3594,7 +3594,7 @@ dependencies = [
 [[package]]
 name = "steel-worldgen"
 version = "0.16.1+mc26.3"
-source = "git+https://github.com/earomc/SteelMC?rev=15f3d83ff441fa4646789faff48a391752c9f16b#15f3d83ff441fa4646789faff48a391752c9f16b"
+source = "git+https://github.com/earomc/SteelMC?rev=01e78085d2f59d6890e97a1b2674727084b81fe5#01e78085d2f59d6890e97a1b2674727084b81fe5"
 dependencies = [
  "glam",
  "proc-macro2",

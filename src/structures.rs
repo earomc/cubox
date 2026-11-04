@@ -844,7 +844,7 @@ impl Finder {
         let (chunk_x, chunk_z) = (chunk.0.x, chunk.0.y);
         let mut sampler = self.source.chunk_sampler();
         let mut height_cache = Default::default();
-        let mut aquifer = LazyAquifer::new(chunk_x * 16, chunk_z * 16, &noises.splitter, &*noises.noises);
+        let mut aquifer = LazyAquifer::new(chunk_x * 16, chunk_z * 16, &noises.splitter, &*noises.noises, &noises.preliminary_surface);
         let (mut surface_y_cache, mut height_cache_grid_ready) = (None, false);
         let ctx = GenerationContext::<'_, '_, N>::new(
             self.seed,
@@ -853,6 +853,7 @@ impl Finder {
             N::Settings::SEA_LEVEL,
             &noises.noises,
             &noises.splitter,
+            &noises.preliminary_surface,
             generator.template_pools(),
             generator.templates(),
             &mut sampler,
