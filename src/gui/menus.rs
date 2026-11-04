@@ -5,7 +5,7 @@ use crate::{
     dimension::Dimension,
     gui::{
         Ui,
-        overlays::{GridSpacing, MARKER_GAPS, line_visibility, slime_shown_at},
+        overlays::{GridSpacing, GridSteps, MARKER_GAPS, line_visibility, slime_shown_at},
         resources,
     },
     noise::NoiseParameter,
@@ -566,8 +566,25 @@ impl Ui {
                 match self.grid.spacing {
                     GridSpacing::Auto => {
                         ui.horizontal(|ui| {
+                            ui.label("Steps");
+                            egui::ComboBox::from_id_salt("grid steps")
+                                .selected_text(self.grid.steps.name())
+                                .show_ui(ui, |ui| {
+                                    for steps in GridSteps::ALL {
+                                        ui.selectable_value(&mut self.grid.steps, steps, steps.name())
+                                            .on_hover_text(steps.hint());
+                                    }
+                                })
+                                .response
+                                .on_hover_text(self.grid.steps.hint());
+                        });
+                        ui.horizontal(|ui| {
                             ui.label("Lines at least");
-                            ui.add(egui::Slider::new(&mut self.grid.min_distance, 20.0..=300.0).suffix(" px apart"));
+                            ui.add(
+                                egui::Slider::new(&mut self.grid.min_distance, 8.0..=300.0)
+                                    .logarithmic(true)
+                                    .suffix(" px apart"),
+                            );
                         });
                     }
                     GridSpacing::Fixed => {

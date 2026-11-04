@@ -23,6 +23,7 @@
 //! print_markers          # prints how many markers are shown
 //! highlight desert       # keep a biome bright and darken the others, `none` to stop
 //! grid_spacing 512       # fixed grid lines, this many blocks apart
+//! grid_steps 2           # auto grid steps: 125, 2, 10 or chunks
 //! threads 4              # how many threads may work at once
 //! low_priority on        # searching and generating give way to other programs (off: normal)
 //! zoom_buttons on        # the buttons over the map (off to hide them)
@@ -65,6 +66,7 @@ pub enum Command {
     MarkerOverlap(bool),
     Highlight(String),
     GridSpacing(i64),
+    GridSteps(crate::gui::overlays::GridSteps),
     MaxMarkers(usize),
     PrioritizeRare(bool),
     Threads(usize),
@@ -136,6 +138,13 @@ impl Command {
             "prioritize_rare" => Command::PrioritizeRare(args.first() != Some(&"off")),
             "highlight" => Command::Highlight(args.first().context("highlight: a biome or none")?.to_string()),
             "grid_spacing" => Command::GridSpacing(num(0)? as i64),
+            "grid_steps" => Command::GridSteps(match args.first().copied() {
+                Some("125") => crate::gui::overlays::GridSteps::OneTwoFive,
+                Some("2") => crate::gui::overlays::GridSteps::PowersOfTwo,
+                Some("10") => crate::gui::overlays::GridSteps::PowersOfTen,
+                Some("chunks") => crate::gui::overlays::GridSteps::ChunksAndRegions,
+                _ => bail!("grid_steps: 125, 2, 10 or chunks"),
+            }),
             "marker_overlap" => Command::MarkerOverlap(args.first() != Some(&"off")),
             "threads" => Command::Threads(num(0)? as usize),
             "low_priority" => Command::LowPriority(args.first() != Some(&"off")),

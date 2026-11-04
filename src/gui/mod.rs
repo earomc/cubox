@@ -55,7 +55,7 @@ use crate::{
         map_renderer::{MapRenderer, Quad},
         map_view::{MapSettings, MapView},
         menus::{Extras, ReliefQuality},
-        overlays::{Grid, Icons, MarkerView, Placed, SlimeChunks},
+        overlays::{Grid, GridSpacing, Icons, MarkerView, Placed, SlimeChunks},
         tiles::TileCache,
         world::WorldParams,
     },
@@ -549,6 +549,10 @@ impl State {
                 Command::PrioritizeRare(on) => ui.prioritize_rare = on,
                 Command::Highlight(biome) => ui.script_highlight(&biome),
                 Command::GridSpacing(blocks) => ui.grid.set_fixed_spacing(blocks),
+                Command::GridSteps(steps) => {
+                    ui.grid.spacing = GridSpacing::Auto;
+                    ui.grid.steps = steps;
+                }
                 Command::Threads(threads) => ui.threads = threads,
                 Command::LowPriority(low) => crate::background::set_low_priority(low),
                 Command::SeaFloor(on) => ui.sea_floor = on,

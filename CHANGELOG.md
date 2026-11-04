@@ -23,10 +23,15 @@ The release workflow publishes the section of a version as its release notes.
   any biome. The textures belong to Mojang and aren't under cubox's license, see `assets/icons/NOTICE`.
 - Exact relief loads about a third faster when zoomed out, from SteelMC's faster chunk generation. Zoomed in it is
   only slightly faster.
+- The auto grid chooses from steps you pick: 1-2-5, powers of 2 (the new default, on chunk borders from 16 blocks),
+  powers of 10, or chunks & regions. Fainter lines of the next smaller step fade in as you zoom in, so the grid no longer
+  jumps from one spacing to the next. Lines can be as close as 8 px instead of 20.
 
 ### Fixed
 
 - Debug builds of the gui, like `cargo run -- gui`, crashed on the first frame. Release builds weren't affected.
+- Zoomed far out, the auto grid could be spaced wider than the world, up to 50 million blocks: only the line through
+  0 was left, and the scale bar showed a distance no two lines were apart. Now it is 20 million at most.
 
 ## [0.8.0] - 2026-11-04
 

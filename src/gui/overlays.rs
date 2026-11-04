@@ -17,7 +17,13 @@ use crate::{
 };
 
 /// Grid lines fade out from this far apart in points, and aren't drawn at all from the second.
-const LINE_FADE_POINTS: [f64; 2] = [12.0, 4.0];
+const LINE_FADE_POINTS: [f64; 2] = [8.0, 3.0];
+/// No grid step is larger than the distance from the middle of the world to its border: the lines at
+/// 0 and on both sides of it are then in the world, and the scale bar is a distance between two lines.
+const MAX_GRID_STEP: i64 = WORLD_BORDER_QUARTS as i64 * 4;
+/// Minor lines fade in from where they are this share of the gap between major lines apart, and are
+/// fully there when they reach it, which is when they become the major lines.
+const MINOR_FADE_FROM: f64 = 0.25;
 /// Coordinates of grid lines keep this far apart in points, the lines between go without.
 const LABEL_POINTS: f64 = 70.0;
 
@@ -235,6 +241,84 @@ impl Icons {
     }
 }
 
+/// The distances auto spacing chooses from, in blocks. Zooming picks the smallest that keeps the lines
+/// far enough apart.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum GridSteps {
+    OneTwoFive,
+    PowersOfTwo,
+    PowersOfTen,
+    ChunksAndRegions,
+}
+
+impl GridSteps {
+    pub const ALL: [Self; 4] = [
+        Self::OneTwoFive,
+        Self::PowersOfTwo,
+        Self::PowersOfTen,
+        Self::ChunksAndRegions,
+    ];
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::OneTwoFive => "1, 2, 5",
+            Self::PowersOfTwo => "Powers of 2",
+            Self::PowersOfTen => "Powers of 10",
+            Self::ChunksAndRegions => "Chunks & regions",
+        }
+    }
+
+    pub fn hint(self) -> &'static str {
+        match self {
+            Self::OneTwoFive => "1, 2, 5, 10, 20, 50 ... blocks: round coordinates",
+            Self::PowersOfTwo => "1, 2, 4, 8, 16 ... blocks: always twice as far, on chunk borders from 16",
+            Self::PowersOfTen => "1, 10, 100, 1000 ... blocks",
+            Self::ChunksAndRegions => "1, 4, 16 (a chunk), 64, 512 (a region), then 8 times as far each",
+        }
+    }
+
+    /// Its steps in blocks, smallest first, up to `MAX_GRID_STEP`.
+    fn steps(self) -> Vec<i64> {
+        let next = |step: i64| match self {
+            Self::OneTwoFive => {
+                let mut digit = step;
+                while digit % 10 == 0 {
+                    digit /= 10;
+                }
+                if digit == 2 { step / 2 * 5 } else { step * 2 }
+            }
+            Self::PowersOfTwo => step * 2,
+            Self::PowersOfTen => step * 10,
+            Self::ChunksAndRegions => match step {
+                1 => 4,
+                4 => 16,
+                16 => 64,
+                64 => 512,
+                _ => step * 8,
+            },
+        };
+        std::iter::successors(Some(1), |&step| Some(next(step)).filter(|&step| step <= MAX_GRID_STEP)).collect()
+    }
+
+    /// The smallest step whose lines are at least `min_points` apart, or the largest.
+    fn spacing_at(self, blocks_per_point: f64, min_points: f64) -> i64 {
+        let steps = self.steps();
+        steps
+            .iter()
+            .copied()
+            .find(|&step| step as f64 / blocks_per_point >= min_points)
+            .unwrap_or(steps[steps.len() - 1])
+    }
+
+    /// The largest smaller step that divides `major`, for minor lines that fall on the major ones.
+    fn minor_of(self, major: i64) -> Option<i64> {
+        self.steps()
+            .into_iter()
+            .rev()
+            .find(|&step| step < major && major % step == 0)
+    }
+}
+
 #[derive(Clone, Copy, PartialEq)]
 pub enum GridSpacing {
     /// round numbers fitting the zoom
@@ -321,6 +405,8 @@ pub fn slime_shown_at(chunk_pixels: f64) -> bool {
 pub struct Grid {
     pub enabled: bool,
     pub spacing: GridSpacing,
+    /// what auto spacing chooses from
+    pub steps: GridSteps,
     pub fixed_spacing: i64,
     /// how far apart in points auto lines are at least
     pub min_distance: f64,
@@ -335,6 +421,7 @@ impl Default for Grid {
         Self {
             enabled: false,
             spacing: GridSpacing::Auto,
+            steps: GridSteps::PowersOfTwo,
             fixed_spacing: 512,
             min_distance: 80.0,
             labels: true,
@@ -344,27 +431,24 @@ impl Default for Grid {
     }
 }
 
-/// The smallest of 1, 2, 5, 10, 20, 50, ... blocks that keeps lines `min_points` apart.
-fn round_spacing(blocks_per_point: f64, min_points: f64) -> i64 {
-    let mut magnitude = 1i64;
-    loop {
-        for factor in [1, 2, 5] {
-            let spacing = factor * magnitude;
-            if spacing as f64 / blocks_per_point >= min_points {
-                return spacing;
-            }
-        }
-        magnitude *= 10;
-    }
-}
-
 impl Grid {
     /// Blocks between lines at this zoom.
     fn spacing_at(&self, blocks_per_point: f64) -> i64 {
         match self.spacing {
-            GridSpacing::Auto => round_spacing(blocks_per_point, self.min_distance),
+            GridSpacing::Auto => self.steps.spacing_at(blocks_per_point, self.min_distance),
             GridSpacing::Fixed => self.fixed_spacing.max(1),
         }
+    }
+
+    /// The minor lines between major lines `spacing` apart and how visible they are, in auto spacing.
+    fn minor_at(&self, spacing: i64, blocks_per_point: f64) -> Option<(i64, f32)> {
+        if self.spacing != GridSpacing::Auto {
+            return None;
+        }
+        let minor = self.steps.minor_of(spacing)?;
+        let points = minor as f64 / blocks_per_point;
+        let fade = ((points / self.min_distance - MINOR_FADE_FROM) / (1.0 - MINOR_FADE_FROM)).clamp(0.0, 1.0);
+        Some((minor, fade as f32 * line_visibility(points)))
     }
 
     #[cfg(not(target_arch = "wasm32"))]
@@ -633,10 +717,10 @@ impl Ui {
         let axis = Stroke::new(2.0, Color32::from_white_alpha(line_alpha.saturating_add(60)));
         let thin = Stroke::new(1.0, line);
         let font = FontId::monospace(11.0);
-        // not past the world border
-        let range = |lo: f64, hi: f64| {
+        // the lines every `every` blocks between `lo` and `hi`, not past the world border
+        let range = |every: i64, lo: f64, hi: f64| {
             let (lo, hi) = (lo.max(-border), hi.min(border));
-            ((lo / spacing as f64).ceil() as i64)..=((hi / spacing as f64).floor() as i64)
+            ((lo / every as f64).ceil() as i64)..=((hi / every as f64).floor() as i64)
         };
         let [lo_y, hi_y] = [
             self.map.block_to_screen(rect, [0.0, min[1].max(-border)]).y,
@@ -652,9 +736,26 @@ impl Ui {
             painter.rect_filled(background.expand(1.0), 2.0, Color32::from_black_alpha(140));
             painter.galley(background.min, shape, Color32::WHITE);
         };
+        // minor lines under the major ones, without the ones that are major
+        if let Some((minor, minor_visibility)) = self.grid.minor_at(spacing, blocks_per_point)
+            && minor_visibility > 0.0
+        {
+            let stroke = Stroke::new(
+                1.0,
+                Color32::from_white_alpha((self.grid.opacity * minor_visibility * 255.0) as u8),
+            );
+            for i in range(minor, min[0], max[0]).filter(|i| (i * minor) % spacing != 0) {
+                let x = self.map.block_to_screen(rect, [(i * minor) as f64, 0.0]).x;
+                painter.line_segment([pos2(x, lo_y), pos2(x, hi_y)], stroke);
+            }
+            for i in range(minor, min[1], max[1]).filter(|i| (i * minor) % spacing != 0) {
+                let y = self.map.block_to_screen(rect, [0.0, (i * minor) as f64]).y;
+                painter.line_segment([pos2(lo_x, y), pos2(hi_x, y)], stroke);
+            }
+        }
         // past where lines are drawn there is only the scale bar, however many they would be
         if visibility > 0.0 {
-            for i in range(min[0], max[0]) {
+            for i in range(spacing, min[0], max[0]) {
                 let block = i * spacing;
                 let x = self.map.block_to_screen(rect, [block as f64, 0.0]).x;
                 let stroke = if block == 0 { axis } else { thin };
@@ -663,7 +764,7 @@ impl Ui {
                     label(pos2(x + 2.0, lo_y + 2.0), Align2::LEFT_TOP, format_blocks(block));
                 }
             }
-            for i in range(min[1], max[1]) {
+            for i in range(spacing, min[1], max[1]) {
                 let block = i * spacing;
                 let y = self.map.block_to_screen(rect, [0.0, block as f64]).y;
                 let stroke = if block == 0 { axis } else { thin };
@@ -808,15 +909,76 @@ mod tests {
     }
 
     #[test]
-    fn auto_spacing_is_round_and_keeps_lines_apart() {
-        assert_eq!(round_spacing(1.0, 80.0), 100);
-        assert_eq!(round_spacing(2.0, 80.0), 200);
-        assert_eq!(round_spacing(4.0, 80.0), 500);
-        assert_eq!(round_spacing(0.01, 80.0), 1);
-        for zoom in -6..20 {
-            let blocks_per_point = (zoom as f64).exp2();
-            assert!(round_spacing(blocks_per_point, 80.0) as f64 / blocks_per_point >= 80.0);
+    fn auto_steps_keep_lines_apart_and_stay_in_the_world() {
+        assert_eq!(GridSteps::OneTwoFive.spacing_at(1.0, 80.0), 100);
+        assert_eq!(GridSteps::OneTwoFive.spacing_at(4.0, 80.0), 500);
+        assert_eq!(GridSteps::PowersOfTwo.spacing_at(1.0, 80.0), 128);
+        assert_eq!(GridSteps::PowersOfTen.spacing_at(1.0, 80.0), 100);
+        assert_eq!(GridSteps::ChunksAndRegions.spacing_at(1.0, 80.0), 512);
+        assert_eq!(GridSteps::OneTwoFive.spacing_at(0.01, 80.0), 1);
+        let border = WORLD_BORDER_QUARTS as i64 * 4;
+        for steps in GridSteps::ALL {
+            let all = steps.steps();
+            assert!(all.windows(2).all(|pair| pair[0] < pair[1]), "{steps:?}");
+            let largest = all[all.len() - 1];
+            for zoom in -6..20 {
+                let blocks_per_point = f64::from(zoom).exp2();
+                for gap in [8.0, 80.0, 300.0] {
+                    let spacing = steps.spacing_at(blocks_per_point, gap);
+                    assert!(spacing <= MAX_GRID_STEP, "{steps:?}");
+                    assert!(
+                        spacing as f64 / blocks_per_point >= gap || spacing == largest,
+                        "{steps:?}"
+                    );
+                }
+            }
+            // fully zoomed out the lines at 0 and both sides of it are in the world, not only the one at 0
+            let spacing = steps.spacing_at(4.0 * 15f64.exp2(), 300.0);
+            assert!((border / 4..=border).contains(&spacing), "{steps:?} {spacing}");
         }
+    }
+
+    #[test]
+    fn minor_lines_fall_on_the_major_ones() {
+        for steps in GridSteps::ALL {
+            assert_eq!(steps.minor_of(1), None);
+            for major in steps.steps().into_iter().skip(1) {
+                let minor = steps.minor_of(major).unwrap();
+                assert!(minor < major && major % minor == 0, "{steps:?} {major} {minor}");
+            }
+        }
+        assert_eq!(GridSteps::OneTwoFive.minor_of(5), Some(1));
+        assert_eq!(GridSteps::OneTwoFive.minor_of(50), Some(10));
+        assert_eq!(GridSteps::ChunksAndRegions.minor_of(512), Some(64));
+        // powers of 2 and the ladder are on chunk borders from a chunk up
+        for steps in [GridSteps::PowersOfTwo, GridSteps::ChunksAndRegions] {
+            assert!(
+                steps
+                    .steps()
+                    .iter()
+                    .filter(|&&step| step >= 16)
+                    .all(|step| step % 16 == 0)
+            );
+        }
+    }
+
+    #[test]
+    fn minor_lines_fade_in_until_they_become_major() {
+        let grid = Grid::default();
+        // 64 blocks per point: majors at 8192 (128 points), minors at 4096 (64 points, 0.8 of the gap)
+        let (minor, almost) = grid.minor_at(8192, 64.0).unwrap();
+        assert_eq!(minor, 4096);
+        assert!((0.5..1.0).contains(&almost), "{almost}");
+        // just before the minors take over they are as visible as the majors
+        let (_, full) = grid.minor_at(8192, 4096.0 / 80.0).unwrap();
+        assert_eq!(full, 1.0);
+        let (_, none) = grid.minor_at(8192, 4096.0 / 15.0).unwrap();
+        assert_eq!(none, 0.0);
+        let fixed = Grid {
+            spacing: GridSpacing::Fixed,
+            ..Default::default()
+        };
+        assert_eq!(fixed.minor_at(8192, 64.0), None);
     }
 
     #[test]
@@ -830,7 +992,7 @@ mod tests {
             assert_eq!(grid.spacing_at(blocks_per_point), 512);
         }
         assert_eq!(line_visibility(100.0), 1.0);
-        assert!((0.0..1.0).contains(&line_visibility(8.0)));
+        assert!((0.0..1.0).contains(&line_visibility(5.0)));
         assert_eq!(line_visibility(2.0), 0.0);
     }
 
