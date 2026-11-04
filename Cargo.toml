@@ -72,6 +72,11 @@ steel-registry = { git = "https://github.com/earomc/SteelMC", rev = "fb1a3a494e1
 steel-math = { git = "https://github.com/earomc/SteelMC", rev = "fb1a3a494e13ef839b5bf302e5ae6f3d351eeab7" }
 steel-macros = { git = "https://github.com/earomc/SteelMC", rev = "fb1a3a494e13ef839b5bf302e5ae6f3d351eeab7" }
 
+# vanilla_templates() of steel-registry is one vec![] of every structure template, which unoptimized
+# needs more stack than a thread has
+[profile.dev.package.steel-registry]
+opt-level = 1
+
 [profile.release]
 strip = true
 
