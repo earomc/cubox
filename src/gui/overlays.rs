@@ -2,7 +2,7 @@
 
 use std::collections::HashMap;
 
-use egui::{Align2, Color32, FontId, Mesh, Pos2, Rect, Shape, Stroke, TextureHandle, pos2, vec2};
+use egui::{Align2, Color32, FontId, Pos2, Rect, Stroke, TextureHandle, pos2, vec2};
 
 use crate::{
     dimension::Dimension,
@@ -11,7 +11,7 @@ use crate::{
         Ui,
         finder::{Job, MarkerSearch, Occupied},
     },
-    slime::{is_slime_chunk, slime_runs},
+    slime::is_slime_chunk,
     structures::{Found, MARKER_KINDS, ore_of, rarity},
     tile_renderer::WORLD_BORDER_QUARTS,
 };
@@ -21,19 +21,16 @@ const LINE_FADE_POINTS: [f64; 2] = [12.0, 4.0];
 /// Coordinates of grid lines keep this far apart in points, the lines between go without.
 const LABEL_POINTS: f64 = 70.0;
 
-/// Slime chunks fade in from where a chunk is this many points wide, and are fully there from the
-/// second. Smaller they are only a 10% haze.
-const SLIME_FADE_POINTS: [f64; 2] = [2.0, 4.0];
-/// From this many points per chunk the slime chunks get a dark edge, so they stand out on green biomes.
-/// Few enough chunks are on the screen then to draw it chunk by chunk every frame.
-const SLIME_EDGE_POINTS: f64 = 10.0;
 const SLIME_GREEN: [u8; 3] = [110, 230, 60];
 /// Slime chunks are drawn from textures of this many chunks per side, one pixel per chunk, made the
 /// first time they come on the screen. Then a frame only draws a few hundred of them, however many
 /// chunks there are.
 const SLIME_BLOCK: i32 = 64;
-/// How many of those textures are kept, 16 KiB each. More than a big screen needs at once.
-const SLIME_BLOCKS_KEPT: usize = 1024;
+/// How many of those textures are kept, 16 KiB each. A 4K screen at a pixel per chunk needs about 2000.
+const SLIME_BLOCKS_KEPT: usize = 4096;
+/// Textures made in one frame at most, about 1.5 ms. Zoomed far out a screen needs hundreds at once,
+/// they then come in over a few frames from the middle out instead of holding up one.
+const SLIME_BLOCKS_PER_FRAME: usize = 96;
 
 /// The space between markers, in points.
 pub const MARKER_GAPS: std::ops::RangeInclusive<f32> = 0.0..=100.0;
@@ -252,6 +249,8 @@ pub struct SlimeChunks {
     /// textures of `SLIME_BLOCK` chunks per side by seed and block, with when they were last drawn
     blocks: HashMap<(i64, i32, i32), (TextureHandle, u64)>,
     frame: u64,
+    /// textures made this frame
+    made: usize,
 }
 
 impl Default for SlimeChunks {
@@ -261,15 +260,23 @@ impl Default for SlimeChunks {
             opacity: 0.6,
             blocks: HashMap::new(),
             frame: 0,
+            made: 0,
         }
     }
 }
 
 impl SlimeChunks {
-    /// The texture of a block of chunks, made if it isn't there yet.
-    fn block(&mut self, ctx: &egui::Context, seed: i64, bx: i32, bz: i32) -> egui::TextureId {
+    /// The texture of a block of chunks, made if it isn't there yet and this frame may make more.
+    fn block(&mut self, ctx: &egui::Context, seed: i64, bx: i32, bz: i32) -> Option<egui::TextureId> {
         let frame = self.frame;
-        let (texture, used) = self.blocks.entry((seed, bx, bz)).or_insert_with(|| {
+        let key = (seed, bx, bz);
+        if !self.blocks.contains_key(&key) {
+            if self.made >= SLIME_BLOCKS_PER_FRAME {
+                return None;
+            }
+            self.made += 1;
+        }
+        let (texture, used) = self.blocks.entry(key).or_insert_with(|| {
             let [r, g, b] = SLIME_GREEN;
             let mut rgba = vec![0u8; (SLIME_BLOCK * SLIME_BLOCK * 4) as usize];
             for (i, pixel) in rgba.as_chunks_mut::<4>().0.iter_mut().enumerate() {
@@ -286,7 +293,7 @@ impl SlimeChunks {
             )
         });
         *used = frame;
-        texture.id()
+        Some(texture.id())
     }
 
     /// Drops the textures drawn longest ago if there are too many, never one of this frame.
@@ -306,10 +313,9 @@ impl SlimeChunks {
     }
 }
 
-/// How visible slime chunks this many points wide are drawn, from 1 to 0 where they would be too small.
-pub fn slime_visibility(chunk_points: f64) -> f32 {
-    let [none, full] = SLIME_FADE_POINTS;
-    ((chunk_points - none) / (full - none)).clamp(0.0, 1.0) as f32
+/// Whether slime chunks this many pixels wide are drawn: as long as a pixel isn't bigger than a chunk.
+pub fn slime_shown_at(chunk_pixels: f64) -> bool {
+    chunk_pixels >= 1.0
 }
 
 pub struct Grid {
@@ -561,16 +567,15 @@ impl Ui {
         }
     }
 
-    /// The slime chunks on the screen: blocks of them from textures, and when they are big an edge
-    /// around each run of them in a row.
+    /// The slime chunks on the screen, from textures of blocks of them.
     fn paint_slime(&mut self, ui: &egui::Ui, rect: Rect) {
-        let chunk_points = 16.0 / self.map.blocks_per_point();
-        let visibility = slime_visibility(chunk_points);
-        if visibility <= 0.0 {
+        let chunk_pixels = 16.0 / self.map.blocks_per_point() * ui.pixels_per_point() as f64;
+        if !slime_shown_at(chunk_pixels) {
             return;
         }
-        let alpha = (self.slime.opacity * visibility * 255.0) as u8;
+        let alpha = (self.slime.opacity * 255.0) as u8;
         self.slime.frame += 1;
+        self.slime.made = 0;
 
         // not past the world border, which is the edge of a chunk
         let border = WORLD_BORDER_QUARTS as f64 * 4.0;
@@ -591,39 +596,26 @@ impl Ui {
         let uv = Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0));
         let blocks =
             |r: &std::ops::RangeInclusive<i32>| r.start().div_euclid(SLIME_BLOCK)..=r.end().div_euclid(SLIME_BLOCK);
-        for bz in blocks(&zs) {
-            for bx in blocks(&xs) {
-                let texture = self.slime.block(ui.ctx(), self.seed, bx, bz);
-                let screen = Rect::from_min_max(
-                    chunk_screen(bx * SLIME_BLOCK, bz * SLIME_BLOCK),
-                    chunk_screen((bx + 1) * SLIME_BLOCK, (bz + 1) * SLIME_BLOCK),
-                );
-                painter.image(texture, screen, uv, tint);
-            }
+        let mut visible: Vec<(i32, i32)> = blocks(&zs).flat_map(|bz| blocks(&xs).map(move |bx| (bx, bz))).collect();
+        // the middle first, the textures that aren't there yet are made over the next frames
+        let middle = [(xs.start() + xs.end()) / 2, (zs.start() + zs.end()) / 2].map(|c| c.div_euclid(SLIME_BLOCK));
+        visible.sort_by_key(|&(bx, bz)| (bx - middle[0]).abs().max((bz - middle[1]).abs()));
+        let mut missing = false;
+        for (bx, bz) in visible {
+            let Some(texture) = self.slime.block(ui.ctx(), self.seed, bx, bz) else {
+                missing = true;
+                continue;
+            };
+            let screen = Rect::from_min_max(
+                chunk_screen(bx * SLIME_BLOCK, bz * SLIME_BLOCK),
+                chunk_screen((bx + 1) * SLIME_BLOCK, (bz + 1) * SLIME_BLOCK),
+            );
+            painter.image(texture, screen, uv, tint);
+        }
+        if missing {
+            ui.ctx().request_repaint();
         }
         self.slime.evict();
-
-        if chunk_points >= SLIME_EDGE_POINTS {
-            let edge = Color32::from_black_alpha(alpha / 2 + 64);
-            let mut mesh = Mesh::default();
-            let mut runs = Vec::new();
-            for z in zs {
-                runs.clear();
-                slime_runs(self.seed, z, xs.clone(), &mut runs);
-                for &(x, count) in &runs {
-                    let run = Rect::from_min_max(chunk_screen(x, z), chunk_screen(x + count, z + 1));
-                    for side in [
-                        Rect::from_min_max(run.left_top(), pos2(run.right(), run.top() + 1.0)),
-                        Rect::from_min_max(pos2(run.left(), run.bottom() - 1.0), run.right_bottom()),
-                        Rect::from_min_max(run.left_top(), pos2(run.left() + 1.0, run.bottom())),
-                        Rect::from_min_max(pos2(run.right() - 1.0, run.top()), run.right_bottom()),
-                    ] {
-                        mesh.add_colored_rect(side, edge);
-                    }
-                }
-            }
-            painter.add(Shape::mesh(mesh));
-        }
     }
 
     fn paint_grid(&self, ui: &egui::Ui, rect: Rect) {

@@ -5,7 +5,7 @@ use crate::{
     dimension::Dimension,
     gui::{
         Ui,
-        overlays::{GridSpacing, MARKER_GAPS, line_visibility, slime_visibility},
+        overlays::{GridSpacing, MARKER_GAPS, line_visibility, slime_shown_at},
         resources,
     },
     noise::NoiseParameter,
@@ -544,7 +544,9 @@ impl Ui {
             });
             if !overworld {
                 ui.weak("Only in the overworld");
-            } else if self.slime.shown && slime_visibility(16.0 / self.map.blocks_per_point()) <= 0.0 {
+            } else if self.slime.shown
+                && !slime_shown_at(16.0 / self.map.blocks_per_point() * ui.pixels_per_point() as f64)
+            {
                 ui.weak("Zoom in to see slime chunks");
             }
         });

@@ -11,7 +11,7 @@ The release workflow publishes the section of a version as its release notes.
 ### Added
 
 - Slime chunks on the map: "Slime chunks" in the panel, or `slime on` in scripts, in the overworld. They show up the
-  moment they are on the screen, at any zoom where a chunk is at least 2 points wide.
+  moment they are on the screen, until a pixel is bigger than a chunk.
 
 ### Changed
 
