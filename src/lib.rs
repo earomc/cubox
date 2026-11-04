@@ -11,6 +11,7 @@ pub mod noise;
 pub mod seed;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod seedfind;
+pub mod slime;
 pub mod structures;
 pub mod terrain;
 pub mod tile_renderer;

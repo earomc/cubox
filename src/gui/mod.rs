@@ -55,7 +55,7 @@ use crate::{
         map_renderer::{MapRenderer, Quad},
         map_view::{MapSettings, MapView},
         menus::{Extras, ReliefQuality},
-        overlays::{Grid, Icons, MarkerView, Placed},
+        overlays::{Grid, Icons, MarkerView, Placed, SlimeChunks},
         tiles::TileCache,
         world::WorldParams,
     },
@@ -327,6 +327,7 @@ struct Ui {
     /// the surface at the block of the map's menu, cached as its tooltips ask every frame
     location_surface: Option<([i32; 2], i32)>,
     grid: Grid,
+    slime: SlimeChunks,
 }
 
 impl State {
@@ -482,6 +483,7 @@ impl State {
             hovered_height: None,
             location_surface: None,
             grid: Grid::default(),
+            slime: SlimeChunks::default(),
         };
 
         Ok(Self {
@@ -552,6 +554,7 @@ impl State {
                 Command::SeaFloor(on) => ui.sea_floor = on,
                 Command::ZoomButtons(on) => ui.zoom_buttons_shown = on,
                 Command::Grid(on) => ui.grid.enabled = on,
+                Command::Slime(on) => ui.slime.shown = on,
                 Command::GridOverMarkers(on) => ui.grid.over_markers = on,
                 Command::Noise(Some((parameter, opacity))) => {
                     ui.noise[parameter as usize] = Overlay { shown: true, opacity };
@@ -961,6 +964,7 @@ impl Ui {
                     self.seed_search_menu(ui);
                     self.terrain_menu(ui, level);
                     self.noise_menu(ui);
+                    self.slime_menu(ui);
                     self.grid_menu(ui);
                     self.performance_menu(ui);
                     changed |= self.extras_menu(ui);

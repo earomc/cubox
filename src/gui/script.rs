@@ -11,6 +11,7 @@
 //! relief on              # terrain on the map (off to hide it)
 //! noise erosion 0.5      # show a climate noise too, with this opacity (off hides all)
 //! grid on                # the distance grid (off to hide it)
+//! slime on               # slime chunks, in the overworld (off to hide them)
 //! grid_over_markers on   # draw it after the structure markers
 //! quality high          # of exact heights: auto, low, medium, high or full
 //! exact on               # exact heights when zoomed in (off for the estimate only)
@@ -72,6 +73,7 @@ pub enum Command {
     ZoomButtons(bool),
     Seed(i64),
     Grid(bool),
+    Slime(bool),
     GridOverMarkers(bool),
     SearchSeeds(String),
     OpenFirstMatch,
@@ -142,6 +144,7 @@ impl Command {
             "seed" => Command::Seed(crate::seed::parse_seed(&args.join(" ")).context("seed: a number or text")?),
             "grid_over_markers" => Command::GridOverMarkers(args.first() != Some(&"off")),
             "grid" => Command::Grid(args.first() != Some(&"off")),
+            "slime" => Command::Slime(args.first() != Some(&"off")),
             "noise" => Command::Noise(match args.first().copied() {
                 Some("off") => None,
                 name => Some((

@@ -5,7 +5,7 @@ use crate::{
     dimension::Dimension,
     gui::{
         Ui,
-        overlays::{GridSpacing, MARKER_GAPS, line_visibility},
+        overlays::{GridSpacing, MARKER_GAPS, line_visibility, slime_visibility},
         resources,
     },
     noise::NoiseParameter,
@@ -527,6 +527,27 @@ impl Ui {
             None if biome == "none" => highlighted.clear(),
             None => log::error!("no biome {biome}"),
         }
+    }
+
+    pub(super) fn slime_menu(&mut self, ui: &mut egui::Ui) {
+        egui::CollapsingHeader::new("Slime chunks").show(ui, |ui| {
+            let overworld = self.dimension == Dimension::Overworld;
+            ui.add_enabled_ui(overworld, |ui| {
+                ui.checkbox(&mut self.slime.shown, "Show slime chunks")
+                    .on_hover_text("Chunks where slimes spawn below y 40 at any light level, about one in ten");
+                ui.add_enabled_ui(self.slime.shown, |ui| {
+                    ui.horizontal(|ui| {
+                        ui.label("Opacity");
+                        ui.add(egui::Slider::new(&mut self.slime.opacity, 0.1..=1.0));
+                    });
+                });
+            });
+            if !overworld {
+                ui.weak("Only in the overworld");
+            } else if self.slime.shown && slime_visibility(16.0 / self.map.blocks_per_point()) <= 0.0 {
+                ui.weak("Zoom in to see slime chunks");
+            }
+        });
     }
 
     pub(super) fn grid_menu(&mut self, ui: &mut egui::Ui) {
