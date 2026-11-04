@@ -594,7 +594,9 @@ impl State {
             raw_input.focused = true;
         }
         let ui = &mut self.ui;
-        let full_output = self.egui_ctx.run_ui(raw_input, |root| ui.show(root));
+        let mut full_output = self.egui_ctx.run_ui(raw_input, |root| ui.show(root));
+        // drained below, egui checks in debug builds that no change was dropped
+        let mut textures = std::mem::take(&mut full_output.textures_delta);
         // a phone only shows its keyboard for a real text field, see web/index.html
         #[cfg(target_arch = "wasm32")]
         crate::web::set_keyboard(full_output.platform_output.ime.is_some());
@@ -613,9 +615,9 @@ impl State {
         }
 
         // egui only sends what changed, so this can't wait for a frame that may get skipped
-        for (id, deltas) in &full_output.textures_delta.set {
-            for delta in deltas {
-                self.egui_renderer.update_texture(&self.device, &self.queue, *id, delta);
+        for (id, deltas) in textures.set.drain() {
+            for delta in &deltas {
+                self.egui_renderer.update_texture(&self.device, &self.queue, id, delta);
             }
         }
         let output = match self.surface.get_current_texture() {
@@ -631,8 +633,8 @@ impl State {
             wgpu::CurrentSurfaceTexture::Lost => anyhow::bail!("Lost device"),
         };
         let Some(output) = output else {
-            for id in &full_output.textures_delta.free {
-                self.egui_renderer.free_texture(id);
+            for id in textures.free.drain() {
+                self.egui_renderer.free_texture(&id);
             }
             return Ok(());
         };
@@ -704,8 +706,8 @@ impl State {
         self.window.pre_present_notify();
         self.queue.present(output);
 
-        for id in &full_output.textures_delta.free {
-            self.egui_renderer.free_texture(id);
+        for id in textures.free.drain() {
+            self.egui_renderer.free_texture(&id);
         }
         Ok(())
     }
