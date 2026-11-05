@@ -21,10 +21,6 @@ const LINE_FADE_POINTS: [f64; 2] = [8.0, 3.0];
 /// No grid step is larger than the distance from the middle of the world to its border: the lines at
 /// 0 and on both sides of it are then in the world, and the scale bar is a distance between two lines.
 const MAX_GRID_STEP: i64 = WORLD_BORDER_QUARTS as i64 * 4;
-/// Minor lines fade in from where they are this share of the gap between major lines apart, and are at
-/// their full `minor_opacity` when they reach it. Then they become the major lines and jump to full
-/// opacity, so the two kinds stay easy to tell apart.
-const MINOR_FADE_FROM: f64 = 0.25;
 /// Coordinates of grid lines keep this far apart in points, the lines between go without.
 const LABEL_POINTS: f64 = 70.0;
 
@@ -310,14 +306,6 @@ impl GridSteps {
             .find(|&step| step as f64 / blocks_per_point >= min_points)
             .unwrap_or(steps[steps.len() - 1])
     }
-
-    /// The largest smaller step that divides `major`, for minor lines that fall on the major ones.
-    fn minor_of(self, major: i64) -> Option<i64> {
-        self.steps()
-            .into_iter()
-            .rev()
-            .find(|&step| step < major && major % step == 0)
-    }
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -413,8 +401,6 @@ pub struct Grid {
     pub min_distance: f64,
     pub labels: bool,
     pub opacity: f32,
-    /// how strong minor lines get at most, as a share of `opacity`
-    pub minor_opacity: f32,
     /// drawn after the structure markers instead of before them
     pub over_markers: bool,
 }
@@ -429,7 +415,6 @@ impl Default for Grid {
             min_distance: 80.0,
             labels: true,
             opacity: 0.5,
-            minor_opacity: 0.3,
             over_markers: false,
         }
     }
@@ -442,17 +427,6 @@ impl Grid {
             GridSpacing::Auto => self.steps.spacing_at(blocks_per_point, self.min_distance),
             GridSpacing::Fixed => self.fixed_spacing.max(1),
         }
-    }
-
-    /// The minor lines between major lines `spacing` apart and how visible they are, in auto spacing.
-    fn minor_at(&self, spacing: i64, blocks_per_point: f64) -> Option<(i64, f32)> {
-        if self.spacing != GridSpacing::Auto {
-            return None;
-        }
-        let minor = self.steps.minor_of(spacing)?;
-        let points = minor as f64 / blocks_per_point;
-        let fade = ((points / self.min_distance - MINOR_FADE_FROM) / (1.0 - MINOR_FADE_FROM)).clamp(0.0, 1.0);
-        Some((minor, fade as f32 * self.minor_opacity * line_visibility(points)))
     }
 
     #[cfg(not(target_arch = "wasm32"))]
@@ -721,10 +695,10 @@ impl Ui {
         let axis = Stroke::new(2.0, Color32::from_white_alpha(line_alpha.saturating_add(60)));
         let thin = Stroke::new(1.0, line);
         let font = FontId::monospace(11.0);
-        // the lines every `every` blocks between `lo` and `hi`, not past the world border
-        let range = |every: i64, lo: f64, hi: f64| {
+        // not past the world border
+        let range = |lo: f64, hi: f64| {
             let (lo, hi) = (lo.max(-border), hi.min(border));
-            ((lo / every as f64).ceil() as i64)..=((hi / every as f64).floor() as i64)
+            ((lo / spacing as f64).ceil() as i64)..=((hi / spacing as f64).floor() as i64)
         };
         let [lo_y, hi_y] = [
             self.map.block_to_screen(rect, [0.0, min[1].max(-border)]).y,
@@ -740,26 +714,9 @@ impl Ui {
             painter.rect_filled(background.expand(1.0), 2.0, Color32::from_black_alpha(140));
             painter.galley(background.min, shape, Color32::WHITE);
         };
-        // minor lines under the major ones, without the ones that are major
-        if let Some((minor, minor_visibility)) = self.grid.minor_at(spacing, blocks_per_point)
-            && minor_visibility > 0.0
-        {
-            let stroke = Stroke::new(
-                1.0,
-                Color32::from_white_alpha((self.grid.opacity * minor_visibility * 255.0) as u8),
-            );
-            for i in range(minor, min[0], max[0]).filter(|i| (i * minor) % spacing != 0) {
-                let x = self.map.block_to_screen(rect, [(i * minor) as f64, 0.0]).x;
-                painter.line_segment([pos2(x, lo_y), pos2(x, hi_y)], stroke);
-            }
-            for i in range(minor, min[1], max[1]).filter(|i| (i * minor) % spacing != 0) {
-                let y = self.map.block_to_screen(rect, [0.0, (i * minor) as f64]).y;
-                painter.line_segment([pos2(lo_x, y), pos2(hi_x, y)], stroke);
-            }
-        }
         // past where lines are drawn there is only the scale bar, however many they would be
         if visibility > 0.0 {
-            for i in range(spacing, min[0], max[0]) {
+            for i in range(min[0], max[0]) {
                 let block = i * spacing;
                 let x = self.map.block_to_screen(rect, [block as f64, 0.0]).x;
                 let stroke = if block == 0 { axis } else { thin };
@@ -768,7 +725,7 @@ impl Ui {
                     label(pos2(x + 2.0, lo_y + 2.0), Align2::LEFT_TOP, format_blocks(block));
                 }
             }
-            for i in range(spacing, min[1], max[1]) {
+            for i in range(min[1], max[1]) {
                 let block = i * spacing;
                 let y = self.map.block_to_screen(rect, [0.0, block as f64]).y;
                 let stroke = if block == 0 { axis } else { thin };
@@ -943,17 +900,7 @@ mod tests {
     }
 
     #[test]
-    fn minor_lines_fall_on_the_major_ones() {
-        for steps in GridSteps::ALL {
-            assert_eq!(steps.minor_of(1), None);
-            for major in steps.steps().into_iter().skip(1) {
-                let minor = steps.minor_of(major).unwrap();
-                assert!(minor < major && major % minor == 0, "{steps:?} {major} {minor}");
-            }
-        }
-        assert_eq!(GridSteps::OneTwoFive.minor_of(5), Some(1));
-        assert_eq!(GridSteps::OneTwoFive.minor_of(50), Some(10));
-        assert_eq!(GridSteps::ChunksAndRegions.minor_of(512), Some(64));
+    fn chunk_steps_fall_on_chunk_borders() {
         // powers of 2 and the ladder are on chunk borders from a chunk up
         for steps in [GridSteps::PowersOfTwo, GridSteps::ChunksAndRegions] {
             assert!(
@@ -964,34 +911,6 @@ mod tests {
                     .all(|step| step % 16 == 0)
             );
         }
-    }
-
-    #[test]
-    fn minor_lines_fade_in_until_they_become_major() {
-        let grid = Grid::default();
-        // 64 blocks per point: majors at 8192 (128 points), minors at 4096 (64 points, 0.8 of the gap)
-        let (minor, almost) = grid.minor_at(8192, 64.0).unwrap();
-        assert_eq!(minor, 4096);
-        assert!(
-            (0.5 * grid.minor_opacity..grid.minor_opacity).contains(&almost),
-            "{almost}"
-        );
-        // just before the minors take over they are at their full opacity, still fainter than the majors
-        let (_, full) = grid.minor_at(8192, 4096.0 / 80.0).unwrap();
-        assert_eq!(full, grid.minor_opacity);
-        assert!(full < 1.0);
-        let hidden = Grid {
-            minor_opacity: 0.0,
-            ..Default::default()
-        };
-        assert_eq!(hidden.minor_at(8192, 64.0).unwrap().1, 0.0);
-        let (_, none) = grid.minor_at(8192, 4096.0 / 15.0).unwrap();
-        assert_eq!(none, 0.0);
-        let fixed = Grid {
-            spacing: GridSpacing::Fixed,
-            ..Default::default()
-        };
-        assert_eq!(fixed.minor_at(8192, 64.0), None);
     }
 
     #[test]

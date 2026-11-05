@@ -24,9 +24,7 @@ The release workflow publishes the section of a version as its release notes.
 - Exact relief loads about a third faster when zoomed out, from SteelMC's faster chunk generation. Zoomed in it is
   only slightly faster.
 - The auto grid chooses from steps you pick: 1-2-5, powers of 2 (the new default, on chunk borders from 16 blocks),
-  powers of 10, or chunks & regions. Fainter lines of the next smaller step fade in as you zoom in, so the grid no longer
-  jumps from one spacing to the next. They get at most 30 % as strong as the major lines, set under "Minor lines".
-  Lines can be as close as 8 px instead of 20.
+  powers of 10, or chunks & regions. Lines can be as close as 8 px instead of 20.
 
 ### Fixed
 

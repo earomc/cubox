@@ -586,24 +586,6 @@ impl Ui {
                                     .suffix(" px apart"),
                             );
                         });
-                        ui.horizontal(|ui| {
-                            ui.label("Minor lines");
-                            ui.add(
-                                egui::Slider::new(&mut self.grid.minor_opacity, 0.0..=1.0)
-                                    .custom_formatter(|share, _| format!("{:.0} %", share * 100.0))
-                                    .custom_parser(|text| {
-                                        text.trim()
-                                            .trim_end_matches('%')
-                                            .trim()
-                                            .parse::<f64>()
-                                            .ok()
-                                            .map(|p| p / 100.0)
-                                    }),
-                            )
-                            .on_hover_text(
-                                "How strong the lines between the major ones get, compared to them. 0 hides them",
-                            );
-                        });
                     }
                     GridSpacing::Fixed => {
                         ui.horizontal(|ui| {
