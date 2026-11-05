@@ -21,8 +21,9 @@ const LINE_FADE_POINTS: [f64; 2] = [8.0, 3.0];
 /// No grid step is larger than the distance from the middle of the world to its border: the lines at
 /// 0 and on both sides of it are then in the world, and the scale bar is a distance between two lines.
 const MAX_GRID_STEP: i64 = WORLD_BORDER_QUARTS as i64 * 4;
-/// Minor lines fade in from where they are this share of the gap between major lines apart, and are
-/// fully there when they reach it, which is when they become the major lines.
+/// Minor lines fade in from where they are this share of the gap between major lines apart, and are at
+/// their full `minor_opacity` when they reach it. Then they become the major lines and jump to full
+/// opacity, so the two kinds stay easy to tell apart.
 const MINOR_FADE_FROM: f64 = 0.25;
 /// Coordinates of grid lines keep this far apart in points, the lines between go without.
 const LABEL_POINTS: f64 = 70.0;
@@ -412,6 +413,8 @@ pub struct Grid {
     pub min_distance: f64,
     pub labels: bool,
     pub opacity: f32,
+    /// how strong minor lines get at most, as a share of `opacity`
+    pub minor_opacity: f32,
     /// drawn after the structure markers instead of before them
     pub over_markers: bool,
 }
@@ -426,6 +429,7 @@ impl Default for Grid {
             min_distance: 80.0,
             labels: true,
             opacity: 0.5,
+            minor_opacity: 0.3,
             over_markers: false,
         }
     }
@@ -448,7 +452,7 @@ impl Grid {
         let minor = self.steps.minor_of(spacing)?;
         let points = minor as f64 / blocks_per_point;
         let fade = ((points / self.min_distance - MINOR_FADE_FROM) / (1.0 - MINOR_FADE_FROM)).clamp(0.0, 1.0);
-        Some((minor, fade as f32 * line_visibility(points)))
+        Some((minor, fade as f32 * self.minor_opacity * line_visibility(points)))
     }
 
     #[cfg(not(target_arch = "wasm32"))]
@@ -968,10 +972,19 @@ mod tests {
         // 64 blocks per point: majors at 8192 (128 points), minors at 4096 (64 points, 0.8 of the gap)
         let (minor, almost) = grid.minor_at(8192, 64.0).unwrap();
         assert_eq!(minor, 4096);
-        assert!((0.5..1.0).contains(&almost), "{almost}");
-        // just before the minors take over they are as visible as the majors
+        assert!(
+            (0.5 * grid.minor_opacity..grid.minor_opacity).contains(&almost),
+            "{almost}"
+        );
+        // just before the minors take over they are at their full opacity, still fainter than the majors
         let (_, full) = grid.minor_at(8192, 4096.0 / 80.0).unwrap();
-        assert_eq!(full, 1.0);
+        assert_eq!(full, grid.minor_opacity);
+        assert!(full < 1.0);
+        let hidden = Grid {
+            minor_opacity: 0.0,
+            ..Default::default()
+        };
+        assert_eq!(hidden.minor_at(8192, 64.0).unwrap().1, 0.0);
         let (_, none) = grid.minor_at(8192, 4096.0 / 15.0).unwrap();
         assert_eq!(none, 0.0);
         let fixed = Grid {
