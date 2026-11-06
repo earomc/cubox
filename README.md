@@ -26,8 +26,6 @@ cubes/boxes ... so it works in multiple ways I guess ...
 - **Find seeds** with custom conditions. You want two villages, a huge mushroom island, a cherry grove and a stronghold close by? You got it.
 - **Find locations** in the seed you play: Quad witch huts, 9 slime chunks in a 3x3 area, or a pillager outpost next to an ocean. You can literally write your own (search) rules lol. See [seed search](docs/seed-search.md).
 - **Overlays:** Highlight certain biomes, view noise maps, slime chunks and exact height maps with ravines, surface caves etc.
-- **Made for playing:** right click to copy a teleport command or see where a nether portal leads, a distance grid,
-  and highlighting for the biomes you are looking for.
 - **In your browser**. Even works on your phone or tablet with support for touch gestures!
 
 ## Screenshots
