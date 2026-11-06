@@ -46,7 +46,7 @@ cubes/boxes ... so it works in multiple ways I guess ...
 ### Web version
 The web version runs at **[earomc.github.io/cubox](https://earomc.github.io/cubox)**, in any current browser
 (WebGPU where available, WebGL2 otherwise). You can add `?seed=replace_with_your_seed` to the address to open a specific seed. Useful for sharing a seed map in a Minecraft server community.
-The web version doesn't currently support the seed search features, due to limitations with SteelMC's web support.
+The web version doesn't currently support the seed search features. 
 The newest commit on main, which may have problems, runs at [earomc.github.io/cubox/nightly](https://earomc.github.io/cubox/nightly/).
 
 ### Desktop / CLI
@@ -63,10 +63,10 @@ Get the latest build for your platform from the [releases page](https://github.c
 
 Unpack it and run `cubox` or `cubox.exe`.
 
-- **Windows:** SmartScreen may warn about an unknown publisher, choose *More info → Run anyway*. It's not a virus, the binary is just not signed by Microsoft. 
+- **Windows:** SmartScreen may warn about an unknown publisher, choose *More info → Run anyway*. It's not a virus, the binary is just not signed by Microsoft.
 - **macOS:** Similar story here: The binary isn't signed. Right-click it and choose *Open* once, or run
   `xattr -d com.apple.quarantine cubox`.
-- **Linux:** needs a Vulkan or OpenGL driver and an X11 or Wayland session - Available on most distros.
+- **Linux:** needs a Vulkan or OpenGL driver and an X11 or Wayland session - both available on most distros.
 
 ## Controls
 
