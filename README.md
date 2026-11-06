@@ -1,6 +1,6 @@
 # cubox
 
-**A super fast Minecraft seed viewer, from 4×4 block quarts out to the whole world.**
+**A super fast Minecraft seed viewer, from a few blocks out to the whole world.**
 
 [![CI](https://github.com/earomc/cubox/actions/workflows/ci.yml/badge.svg)](https://github.com/earomc/cubox/actions/workflows/ci.yml)
 [![Latest release](https://img.shields.io/github/v/release/earomc/cubox?sort=semver)](https://github.com/earomc/cubox/releases/latest)
@@ -11,7 +11,7 @@
 <p align="center">
   <img src="docs/media/zoom.webp" alt="Overworld with its height map, nether and end, each zooming out from single quarts to the whole 60 million block world" width="900">
   <br>
-  <sub>Overworld, nether and end, from single biome cells out to the whole world.</sub>
+  <sub>Overworld, nether and end, from a few blocks out to the whole 60 million block world.</sub>
 </p>
 
 cubox draws the biomes, terrain and structures of any Minecraft seed using [SteelMC's](https://github.com/Steel-Foundation/SteelMC/)
@@ -25,49 +25,35 @@ cubes/boxes ... so it works in multiple ways I guess ...
 
 | Height map | Structures |
 |---|---|
-| ![The overworld with the height map](docs/media/heightmap.webp) | ![Structure markers of all kinds on the overworld](docs/media/structures.webp) |
-| **The whole world** | **Distance grid** |
-| ![The whole 60 million block world covered in markers of every kind under a distance grid](docs/media/world.webp) | ![The height map with a grid of block coordinates](docs/media/grid.webp) |
+| ![The overworld with the height map](docs/media/heightmap.webp) | ![Structure markers with Minecraft textures on the overworld](docs/media/structures.webp) |
+| **Find useful seeds and locations** | **Slime chunks** |
+| ![The search panel with a quad witch hut found right next to spawn, its four huts and the spawn point on the map](docs/media/search.webp) | ![Slime chunks over the biomes](docs/media/slime.webp) |
+| **The whole world, 28,000 markers at once** | **Temperature noise** |
+| ![The whole 60 million block world covered in 28,000 overlapping markers of every kind under a distance grid](docs/media/world.webp) | ![The temperature noise over the biomes, cold in blue and warm in red, with a distance grid](docs/media/noise.webp) |
 | **Nether** | **End** |
-| ![The nether with fortresses and bastions](docs/media/nether.webp) | ![The end with end cities](docs/media/end.webp) |
+| ![The nether with fortresses and bastions](docs/media/nether.webp) | ![The end with end cities around the main island](docs/media/end.webp) |
 
-**The map**
-
-- **Smooth pan and zoom** from quarts, the 4×4 block cells biomes are generated in, out to the entire 60 million
-  block world.
-- **Accurate colors at every zoom level.** Zoomed out, every pixel shows the average color of the area it covers,
-  blended in a perceptual color space. Each zoom level is calibrated against the real world, so the map has exactly
-  as much contrast as the true view: crisp up close, an honest haze where a pixel covers thousands of biomes.
-- **Overworld, nether and end**, with the height to sample biomes at (sample below the surface to find caves).
-- **Height map** of the terrain in the overworld, sea floor included, with one visible square per height. It uses the
-  game's quick estimate of the surface, usually 5 to 15 blocks off, and can switch to exact heights when zoomed in.
-- **Highlight biomes:** check the ones you are looking for and the others are darkened.
-- **Distance grid** with block coordinates and a scale bar, with spacing that adapts to the zoom or stays fixed.
-
-**Finding things**
-
-- **The spawn point and all structures in the game**, each with its own icon and switch. Positions come from the game's real generation
-  code, including biome and terrain checks.
-- **At every zoom:** close up all of them, far out a steady number of real ones that fills the screen. Markers may
-  overlap, set how many to show, or keep a space between them. Rare kinds come first if you like.
-- **End gateways, geodes and large ore veins.** Gateways after the dragon are exact. Ore vein markers are at real ore the game's rules place in solid stone. Geodes and scattered gateways are checked against the terrain's noise and marked as maybe there, because caves carved later aren't known.
-- **Noise** overlays show temperature, humidity, continentalness, erosion, weirdness or depth, the values biomes are chosen with.
-- **Search** finds seeds with what you ask for, a village by spawn or a huge mushroom island, and lists everything of it in one seed: every mushroom island, every pair of witch huts, every village by a desert. Exact by default, on the desktop and with [`cubox seeds` and `cubox locations`](docs/seed-search.md).
-- **Seeds like in Minecraft:** numbers, negative ones too, or any text, turned into the same seed the game uses.
-- **Go to coordinates**, and the biome and height under the cursor.
-- **Right click the map** to copy a location or a teleport command, or to go where a nether portal there leads.
-
-**Everywhere, and fast**
-
-- **Fast:** everything is generated in the background on all cores, centre first, with quick previews while you zoom.
-  How many threads and how much memory it may use is up to you.
-- **Runs in the browser** too, through web workers, with pinch to zoom and an on screen keyboard on touch screens.
-- **Image export** from the command line.
+- **Fast, all the way out.** Pan and zoom smoothly from a few blocks to the entire world, with every core working
+  on the middle of the screen first.
+- **Every structure in the game**, from villages and strongholds to trial chambers and ancient cities, plus the spawn
+  point, end gateways, geodes and ore veins. Positions come from the game's own generation code, biome checks included.
+- **Find seeds** with what you want by spawn: two villages, a mushroom island, a cherry grove, a stronghold close by.
+- **Find locations** in the seed you play: every group of witch huts, every mushroom island with its size, every spot
+  for a slime farm. Click a result to go there. See [seed search](docs/seed-search.md). Both searches are in the
+  desktop app and on the command line, not in the browser.
+- **Overworld, nether and end**, with a height map of the terrain, cave biomes below the surface, slime chunks and
+  the climate noises biomes are made from.
+- **Made for playing:** right click to copy a teleport command or see where a nether portal leads, a distance grid,
+  and highlighting for the biomes you are looking for.
+- **In your browser** with nothing to install, or as a desktop app with the searches. Can stay out of a running
+  game's way at low priority.
 
 ## Download
 
 The web version runs at **[earomc.github.io/cubox](https://earomc.github.io/cubox)**, in any current browser
 (WebGPU where available, WebGL2 otherwise). Add `?seed=hello&dimension=nether` to the address to open a world.
+It has everything but finding seeds and locations: searches run on many threads at once, which browsers don't
+offer the way the desktop does. Use the desktop app or `cubox seeds` and `cubox locations` for them.
 The newest commit on main, which may be broken, runs at [earomc.github.io/cubox/nightly](https://earomc.github.io/cubox/nightly/).
 
 Get the latest build for your platform from the [releases page](https://github.com/earomc/cubox/releases/latest):
@@ -106,11 +92,12 @@ cubox img -4172144997902289642            # negative seeds too
 cubox img 12345 --level 6 --tiles 8       # render map.png: 8x8 tiles of 128 px, 1 px = 256 blocks
 cubox img 12345 -d end --level 2 -y 64    # the end, 1 px = 16 blocks
 cubox img 12345 -y -32                    # below the surface, with cave biomes
+# seeds with two villages by spawn
+cubox seeds "poi village count>=2 within 300 of spawn"
+# every 2x2 square of slime chunks within 3000 blocks of 0,0
+cubox locations 12345 --within 3000 "cluster slime count>=4 square 2"
 cubox --help                              # everything else
 ```
-
-`--level` is the "Level" the viewer shows: each pixel covers 2<sup>level</sup> quarts (4×4 blocks) per side. `--samples` sets the
-samples per pixel and axis, and `--exact` shows the raw sampled averages without the calibrated shading.
 
 `cubox gui --script file` drives the viewer from a script and saves screenshots, see
 [`src/gui/script.rs`](src/gui/script.rs). The images above were made that way.
