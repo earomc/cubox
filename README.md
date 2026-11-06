@@ -1,6 +1,6 @@
 # cubox
 
-**A super fast Minecraft seed viewer, from a few blocks out to the whole world.**
+**A 🔥🚀⚡BLAZINGLY FAST🔥🚀⚡ Minecraft seed viewer**
 
 [![CI](https://github.com/earomc/cubox/actions/workflows/ci.yml/badge.svg)](https://github.com/earomc/cubox/actions/workflows/ci.yml)
 [![Latest release](https://img.shields.io/github/v/release/earomc/cubox?sort=semver)](https://github.com/earomc/cubox/releases/latest)
@@ -24,8 +24,8 @@ cubes/boxes ... so it works in multiple ways I guess ...
 - **Fast, all the way out.** Pan and zoom smoothly from a few blocks to the entire world.
 - **Structure locations**, from villages and strongholds to trial chambers and ancient cities, plus the spawn point, end gateways, geodes and large ore veins.
 - **Find seeds** with custom conditions. You want two villages, a huge mushroom island, a cherry grove and a stronghold close by? You got it.
-- **Find locations** in the seed you play: find quad witch huts, 9 slime chunks in a 3x3 area, or a pillager outpost next to an ocean. You can literally write your own (search) rules lol. See [seed search](docs/seed-search.md). 
-- **Overlays** Highlight certain biomes, view noise maps, slime chunks and exact heightmaps with ravines, surface caves etc.
+- **Find locations** in the seed you play: Quad witch huts, 9 slime chunks in a 3x3 area, or a pillager outpost next to an ocean. You can literally write your own (search) rules lol. See [seed search](docs/seed-search.md).
+- **Overlays:** Highlight certain biomes, view noise maps, slime chunks and exact height maps with ravines, surface caves etc.
 - **Made for playing:** right click to copy a teleport command or see where a nether portal leads, a distance grid,
   and highlighting for the biomes you are looking for.
 - **In your browser**. Even works on your phone or tablet with support for touch gestures!
@@ -36,7 +36,7 @@ cubes/boxes ... so it works in multiple ways I guess ...
 | ![The overworld with the height map](docs/media/heightmap.webp) | ![Structure markers with Minecraft textures on the overworld](docs/media/structures.webp) |
 | **Find useful seeds and locations** | **Slime chunks** |
 | ![The search panel with a quad witch hut found right next to spawn, its four huts and the spawn point on the map](docs/media/search.webp) | ![Slime chunks over the biomes](docs/media/slime.webp) |
-| **The whole Minecraft world in all its glory** | **Noise overlays (Temperature in this example)** |
+| **The whole Minecraft world in all its glory** | **Noise overlays (temperature in this example)** |
 | ![The whole 60 million block world covered in 28,000 overlapping markers of every kind under a distance grid](docs/media/world.webp) | ![The temperature noise over the biomes, cold in blue and warm in red, with a distance grid](docs/media/noise.webp) |
 | **Nether** | **End** |
 | ![The nether with fortresses and bastions](docs/media/nether.webp) | ![The end with end cities around the main island](docs/media/end.webp) |
@@ -63,10 +63,10 @@ Get the latest build for your platform from the [releases page](https://github.c
 
 Unpack it and run `cubox` or `cubox.exe`.
 
-- **Windows:** SmartScreen may warn about an unknown publisher, choose *More info → Run anyway*. It's not a virus, the binary is just not signed by Microsoft. Each release comes with a checksum. You can use it to assure yourself that the binary is built from exactly this repo's source code.
+- **Windows:** SmartScreen may warn about an unknown publisher, choose *More info → Run anyway*. It's not a virus, the binary is just not signed by Microsoft. 
 - **macOS:** Similar story here: The binary isn't signed. Right-click it and choose *Open* once, or run
   `xattr -d com.apple.quarantine cubox`.
-- **Linux:** needs a Vulkan or OpenGL driver and an X11 or Wayland session. Available on most distros.
+- **Linux:** needs a Vulkan or OpenGL driver and an X11 or Wayland session - Available on most distros.
 
 ## Controls
 
@@ -80,7 +80,7 @@ Unpack it and run `cubox` or `cubox.exe`.
 
 ## Command line
 
-cubox provides a command line interface (CLI) for opening the gui with certain parameters or generating map images. You can also use it to find seeds and locations.
+cubox provides a command line interface (CLI) for opening the GUI with certain parameters or generating map images. You can also use it to find seeds and locations.
 
 ```sh
 cubox gui 12345 --dimension nether        # open the viewer with a seed and dimension
@@ -106,9 +106,9 @@ cubox --help                              # everything else
 
 ## Roadmap
 
-- **Features** like lava lakes and single ores as markers when zoomed in. SteelMC only places them while building real
+- **World generation [features](https://minecraft.wiki/w/Feature)** like lava lakes and single ores as markers when zoomed in. SteelMC only places them while building real
   chunks, in a part of it that doesn't build for browsers, and most positions can't be known without that.
-- **Large biomes** world type and custom worldgen with datapacks, once SteelMC's world generator supports it.
+- **Large biomes** world type and custom worldgen with datapacks, once SteelMC's world generator supports that.
 - macOS app bundle and code signing, and a Windows build without a console window.
 
 ## Credits
@@ -119,7 +119,7 @@ cubox --help                              # everything else
 
 ## Use of AI
 
-cubox's code was largely written by Claude Code. Functionality and some of the code was manually reviewed and iterated over by using my own brain. This README was manually reviewed and edited by myself (earomc) too.
+cubox's code was largely written by Claude Code. Functionality and some of the code were manually reviewed and iterated over by using my own brain. This README was manually reviewed and edited by me (earomc) too.
 
 ## License
 
