@@ -55,7 +55,7 @@ use crate::{
         map_renderer::{MapRenderer, Quad},
         map_view::{MapSettings, MapView},
         menus::{Extras, ReliefQuality},
-        overlays::{Grid, GridSpacing, Icons, MarkerView, Placed, SlimeChunks},
+        overlays::{Grid, Icons, MarkerView, Placed, SlimeChunks},
         tiles::TileCache,
         world::WorldParams,
     },
@@ -550,7 +550,7 @@ impl State {
                 Command::Highlight(biome) => ui.script_highlight(&biome),
                 Command::GridSpacing(blocks) => ui.grid.set_fixed_spacing(blocks),
                 Command::GridSteps(steps) => {
-                    ui.grid.spacing = GridSpacing::Auto;
+                    ui.grid.spacing = overlays::GridSpacing::Auto;
                     ui.grid.steps = steps;
                 }
                 Command::Threads(threads) => ui.threads = threads,
