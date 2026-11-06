@@ -6,16 +6,14 @@
 [![Latest release](https://img.shields.io/github/v/release/earomc/cubox?sort=semver)](https://github.com/earomc/cubox/releases/latest)
 [![License: AGPL-3.0-or-later](https://img.shields.io/badge/license-AGPL--3.0--or--later-blue)](LICENSE)
 
-<p align="center"><b><a href="https://earomc.github.io/cubox">Try it in your browser</a></b> · <a href="https://github.com/earomc/cubox/releases/latest">Download for desktop</a></p>
+<p align="center"><b><a href="https://github.com/earomc/cubox/releases/latest">Download for desktop</a> · <a href="https://earomc.github.io/cubox">Try in your browser</a></b></p>
 
 <p align="center">
   <img src="docs/media/zoom.webp" alt="Overworld with its height map, nether and end, each zooming out from single quarts to the whole 60 million block world" width="900">
-  <br>
-  <sub>Overworld, nether and end, from a few blocks out to the whole 60 million block world.</sub>
 </p>
 
-cubox draws the biomes, terrain and structures of any Minecraft seed using [SteelMC's](https://github.com/Steel-Foundation/SteelMC/)
-world generator. SteelMC is a really cool project that you should check out! They basically did all the work ahahah.
+cubox draws biomes, terrain and structures of any Minecraft seed using [SteelMC's](https://github.com/Steel-Foundation/SteelMC/)
+world generator. SteelMC is a really cool project that you should check out! They rebuilt the Minecraft world generator from scratch in Rust. They basically did all the heavy backend work.
 Huge thanks to them :)))
 
 The name **cubox** is inspired by 'cubiomes' and the word oxidize (because of Rust, ha). And Minecraft is a game of
@@ -23,40 +21,37 @@ cubes/boxes ... so it works in multiple ways I guess ...
 
 ## Features
 
+- **Fast, all the way out.** Pan and zoom smoothly from a few blocks to the entire world.
+- **Structure locations**, from villages and strongholds to trial chambers and ancient cities, plus the spawn point, end gateways, geodes and large ore veins.
+- **Find seeds** with custom conditions. You want two villages, a huge mushroom island, a cherry grove and a stronghold close by? You got it.
+- **Find locations** in the seed you play: find quad witch huts, 9 slime chunks in a 3x3 area, or a pillager outpost next to an ocean. You can literally write your own (search) rules lol. See [seed search](docs/seed-search.md). 
+- **Overlays** Highlight certain biomes, view noise maps, slime chunks and exact heightmaps with ravines, surface caves etc.
+- **Made for playing:** right click to copy a teleport command or see where a nether portal leads, a distance grid,
+  and highlighting for the biomes you are looking for.
+- **In your browser**. Even works on your phone or tablet with support for touch gestures!
+
+## Screenshots
 | Height map | Structures |
 |---|---|
 | ![The overworld with the height map](docs/media/heightmap.webp) | ![Structure markers with Minecraft textures on the overworld](docs/media/structures.webp) |
 | **Find useful seeds and locations** | **Slime chunks** |
 | ![The search panel with a quad witch hut found right next to spawn, its four huts and the spawn point on the map](docs/media/search.webp) | ![Slime chunks over the biomes](docs/media/slime.webp) |
-| **The whole world, 28,000 markers at once** | **Temperature noise** |
+| **The whole Minecraft world in all its glory** | **Noise overlays (Temperature in this example)** |
 | ![The whole 60 million block world covered in 28,000 overlapping markers of every kind under a distance grid](docs/media/world.webp) | ![The temperature noise over the biomes, cold in blue and warm in red, with a distance grid](docs/media/noise.webp) |
 | **Nether** | **End** |
 | ![The nether with fortresses and bastions](docs/media/nether.webp) | ![The end with end cities around the main island](docs/media/end.webp) |
 
-- **Fast, all the way out.** Pan and zoom smoothly from a few blocks to the entire world, with every core working
-  on the middle of the screen first.
-- **Every structure in the game**, from villages and strongholds to trial chambers and ancient cities, plus the spawn
-  point, end gateways, geodes and ore veins. Positions come from the game's own generation code, biome checks included.
-- **Find seeds** with what you want by spawn: two villages, a mushroom island, a cherry grove, a stronghold close by.
-- **Find locations** in the seed you play: every group of witch huts, every mushroom island with its size, every spot
-  for a slime farm. Click a result to go there. See [seed search](docs/seed-search.md). Both searches are in the
-  desktop app and on the command line, not in the browser.
-- **Overworld, nether and end**, with a height map of the terrain, cave biomes below the surface, slime chunks and
-  the climate noises biomes are made from.
-- **Made for playing:** right click to copy a teleport command or see where a nether portal leads, a distance grid,
-  and highlighting for the biomes you are looking for.
-- **In your browser** with nothing to install, or as a desktop app with the searches. Can stay out of a running
-  game's way at low priority.
+## Getting started
 
-## Download
-
+### Web version
 The web version runs at **[earomc.github.io/cubox](https://earomc.github.io/cubox)**, in any current browser
-(WebGPU where available, WebGL2 otherwise). Add `?seed=hello&dimension=nether` to the address to open a world.
-It has everything but finding seeds and locations: searches run on many threads at once, which browsers don't
-offer the way the desktop does. Use the desktop app or `cubox seeds` and `cubox locations` for them.
-The newest commit on main, which may be broken, runs at [earomc.github.io/cubox/nightly](https://earomc.github.io/cubox/nightly/).
+(WebGPU where available, WebGL2 otherwise). You can add `?seed=replace_with_your_seed` to the address to open a specific seed. Useful for sharing a seed map in a Minecraft server community.
+The web version doesn't currently support the seed search features, due to limitations with SteelMC's web support.
+The newest commit on main, which may have problems, runs at [earomc.github.io/cubox/nightly](https://earomc.github.io/cubox/nightly/).
 
-Get the latest build for your platform from the [releases page](https://github.com/earomc/cubox/releases/latest):
+### Desktop / CLI
+
+Get the latest build for your platform from the [releases page](https://github.com/earomc/cubox/releases/latest) or download below:
 
 | Platform | Download |
 |---|---|
@@ -66,24 +61,26 @@ Get the latest build for your platform from the [releases page](https://github.c
 | Linux (x86_64) | [cubox-x86_64-unknown-linux-gnu.tar.gz](https://github.com/earomc/cubox/releases/latest/download/cubox-x86_64-unknown-linux-gnu.tar.gz) |
 | Linux (ARM64) | [cubox-aarch64-unknown-linux-gnu.tar.gz](https://github.com/earomc/cubox/releases/latest/download/cubox-aarch64-unknown-linux-gnu.tar.gz) |
 
-Unpack it and run `cubox`. Each release also lists SHA-256 checksums.
+Unpack it and run `cubox` or `cubox.exe`.
 
-- **Windows:** SmartScreen may warn about an unknown publisher, choose *More info → Run anyway*.
-- **macOS:** the binary isn't signed yet. Right-click it and choose *Open* once, or run
+- **Windows:** SmartScreen may warn about an unknown publisher, choose *More info → Run anyway*. It's not a virus, the binary is just not signed by Microsoft. Each release comes with a checksum. You can use it to assure yourself that the binary is built from exactly this repo's source code.
+- **macOS:** Similar story here: The binary isn't signed. Right-click it and choose *Open* once, or run
   `xattr -d com.apple.quarantine cubox`.
-- **Linux:** needs a Vulkan or OpenGL driver and an X11 or Wayland session.
+- **Linux:** needs a Vulkan or OpenGL driver and an X11 or Wayland session. Available on most distros.
 
 ## Controls
 
 | Key | Action |
 |---|---|
 | Arrow keys, or drag | Pan |
-| + and −, or scroll, or pinch | Zoom the map |
-| Right click, or long press | Menu of the map: copy a location or teleport command, go through a nether portal |
+| + and −, or scroll, or pinch (mobile web) | Zoom the map |
+| Right click, or long press (mobile web) | Menu of the map: copy a location or teleport command, go through a nether portal |
 | Ctrl + and Ctrl −, Ctrl 0 | Scale the interface, reset its scale |
-| Esc | Quit (desktop) |
+| Esc | Quit (only on desktop) |
 
 ## Command line
+
+cubox provides a command line interface (CLI) for opening the gui with certain parameters or generating map images. You can also use it to find seeds and locations.
 
 ```sh
 cubox gui 12345 --dimension nether        # open the viewer with a seed and dimension
@@ -111,7 +108,7 @@ cubox --help                              # everything else
 
 - **Features** like lava lakes and single ores as markers when zoomed in. SteelMC only places them while building real
   chunks, in a part of it that doesn't build for browsers, and most positions can't be known without that.
-- **Large biomes** worlds, once SteelMC's world generator supports them.
+- **Large biomes** world type and custom worldgen with datapacks, once SteelMC's world generator supports it.
 - macOS app bundle and code signing, and a Windows build without a console window.
 
 ## Credits
@@ -120,12 +117,16 @@ cubox --help                              # everything else
 - Inspired by [cubiomes](https://github.com/Cubitect/cubiomes), [cubiomes viewer](https://github.com/Cubitect/cubiomes-viewer),
   [amidst](https://github.com/toolbox4minecraft/amidst) and [chunkbase](https://www.chunkbase.com/apps/seed-map).
 
+## Use of AI
+
+cubox's code was largely written by Claude Code. Functionality and some of the code was manually reviewed and iterated over by using my own brain. This README was manually reviewed and edited by myself (earomc) too.
+
 ## License
 
 Hosting cubox? Keep the license notice in its settings window. If you changed anything, offer your changes to its users
 too: set `repository` in `Cargo.toml` to your source, the notice links to it.
 
-cubox is free software under the [GNU Affero General Public License v3.0 or later](LICENSE), like SteelMC.
+cubox is free software under the [GNU Affero General Public License v3.0 or later](LICENSE), inheriting SteelMC's license.
 
 The structure icons in [`assets/icons`](assets/icons/NOTICE) are Minecraft textures owned by Mojang and Microsoft, used
 under the [Minecraft Usage Guidelines](https://www.minecraft.net/en-us/usage-guidelines) and not covered by the AGPL.
