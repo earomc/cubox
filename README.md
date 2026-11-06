@@ -44,7 +44,7 @@ cubes/boxes ... so it works in multiple ways I guess ...
 ### Web version
 The web version runs at **[earomc.github.io/cubox](https://earomc.github.io/cubox)**, in any current browser
 (WebGPU where available, WebGL2 otherwise). You can add `?seed=replace_with_your_seed` to the address to open a specific seed. Useful for sharing a seed map in a Minecraft server community.
-The web version doesn't currently support the seed search features. 
+The web version doesn't currently support the seed search features.
 The newest commit on main, which may have problems, runs at [earomc.github.io/cubox/nightly](https://earomc.github.io/cubox/nightly/).
 
 ### Desktop / CLI
