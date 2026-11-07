@@ -8,6 +8,12 @@ The release workflow publishes the section of a version as its release notes.
 
 ## [Unreleased]
 
+### Added
+
+- A ruler measures distances on the map: press R, use the ruler button or right-click the map, then click points.
+  Points can be dragged or clicked away. It shows each part and the total, and the same distance in the Nether or
+  the Overworld.
+
 ## [0.9.0] - 2026-11-06
 
 ### Added

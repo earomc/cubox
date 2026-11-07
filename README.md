@@ -72,9 +72,10 @@ Unpack it and run `cubox` or `cubox.exe`.
 |---|---|
 | Arrow keys, or drag | Pan |
 | + and −, or scroll, or pinch (mobile web) | Zoom the map |
-| Right click, or long press (mobile web) | Menu of the map: copy a location or teleport command, go through a nether portal |
+| Right click, or long press (mobile web) | Menu of the map: copy a location or teleport command, go through a nether portal, measure distance |
+| R, or the ruler button | Measure distance: click points, drag one to move it, click one to remove it |
 | Ctrl + and Ctrl −, Ctrl 0 | Scale the interface, reset its scale |
-| Esc | Quit (only on desktop) |
+| Esc | Stop measuring, or quit (only on desktop) |
 
 ## Command line
 

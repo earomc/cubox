@@ -352,7 +352,7 @@ impl Ui {
     }
 
     /// The plus and minus keys zoom the map, like the zoom buttons, unless they are being typed. With
-    /// Ctrl they are egui's, which scale the interface.
+    /// Ctrl they are egui's, which scale the interface. R toggles the ruler and Esc ends it.
     pub(super) fn zoom_shortcuts(&mut self, ctx: &egui::Context) {
         if ctx.egui_wants_keyboard_input() {
             return;
@@ -363,6 +363,16 @@ impl Ui {
         }
         if pressed(egui::Key::Minus) {
             self.map.zoom_by(1.0);
+        }
+        if pressed(egui::Key::R) {
+            if self.ruler.active {
+                self.ruler.stop();
+            } else {
+                self.ruler.start(None);
+            }
+        }
+        if self.ruler.active && pressed(egui::Key::Escape) {
+            self.ruler.stop();
         }
         // these move the cursor in the text field or change the slider that has the focus
         if ctx.memory(|memory| memory.focused().is_some()) {
@@ -676,6 +686,22 @@ impl Ui {
                 {
                     self.set_world(self.seed, dimension);
                     self.map.camera.center = exit.map(|block| block as f64 / 4.0);
+                    ui.close();
+                }
+            }
+            let block = block.map(i64::from);
+            if !self.ruler.active {
+                if ui.button("Measure distance").on_hover_text("From here (R)").clicked() {
+                    self.ruler.start(Some(block));
+                    ui.close();
+                }
+            } else {
+                if ui.button("Measure to here").clicked() {
+                    self.ruler.points.push(block);
+                    ui.close();
+                }
+                if ui.button("Stop measuring").on_hover_text("Esc").clicked() {
+                    self.ruler.stop();
                     ui.close();
                 }
             }

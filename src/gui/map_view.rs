@@ -141,6 +141,11 @@ impl MapView {
         (min.map(|q| q * 4.0), max.map(|q| q * 4.0))
     }
 
+    /// The block position at a point on the screen.
+    pub fn screen_to_block(&self, rect: Rect, p: Pos2) -> [f64; 2] {
+        self.camera.screen_to_world(rect, p).map(|q| q * 4.0)
+    }
+
     /// Where a block position is on the screen.
     pub fn block_to_screen(&self, rect: Rect, block: [f64; 2]) -> Pos2 {
         self.camera.world_to_screen(rect, block.map(|b| b / 4.0))

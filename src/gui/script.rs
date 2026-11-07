@@ -31,6 +31,7 @@
 //! search_locations 5000 0 0 biome desert   # what to find within 5000 of 0,0 in this seed, `;` separates lines
 //! search_step 16         # how far apart searches look at biomes and noises
 //! edit_search biome desert within 500 of spawn   # changes the search that is shown, like the panel does
+//! ruler 0 0 3000 4000    # measure along these block positions, x z pairs (off to stop)
 //! print_search_status    # prints how the search is going
 //! open_first_match       # goes to the best seed found, with its markers
 //! goto 1000 -500         # center the view on these block coordinates
@@ -76,6 +77,7 @@ pub enum Command {
     Seed(i64),
     Grid(bool),
     Slime(bool),
+    Ruler(Vec<[i64; 2]>),
     GridOverMarkers(bool),
     SearchSeeds(String),
     OpenFirstMatch,
@@ -154,6 +156,17 @@ impl Command {
             "grid_over_markers" => Command::GridOverMarkers(args.first() != Some(&"off")),
             "grid" => Command::Grid(args.first() != Some(&"off")),
             "slime" => Command::Slime(args.first() != Some(&"off")),
+            "ruler" => Command::Ruler(if args.first() == Some(&"off") {
+                Vec::new()
+            } else {
+                anyhow::ensure!(
+                    !args.is_empty() && args.len().is_multiple_of(2),
+                    "ruler: x z pairs or off"
+                );
+                (0..args.len() / 2)
+                    .map(|i| Ok([num(2 * i)? as i64, num(2 * i + 1)? as i64]))
+                    .collect::<anyhow::Result<_>>()?
+            }),
             "noise" => Command::Noise(match args.first().copied() {
                 Some("off") => None,
                 name => Some((

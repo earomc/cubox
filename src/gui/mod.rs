@@ -24,6 +24,7 @@ mod map_view;
 pub(crate) mod menus;
 mod overlays;
 mod resources;
+mod ruler;
 #[cfg(not(target_arch = "wasm32"))]
 mod script;
 #[cfg(not(target_arch = "wasm32"))]
@@ -56,6 +57,7 @@ use crate::{
         map_view::{MapSettings, MapView},
         menus::{Extras, ReliefQuality},
         overlays::{Grid, Icons, MarkerView, Placed, SlimeChunks},
+        ruler::Ruler,
         tiles::TileCache,
         world::WorldParams,
     },
@@ -328,6 +330,8 @@ struct Ui {
     location_surface: Option<([i32; 2], i32)>,
     grid: Grid,
     slime: SlimeChunks,
+    /// measures distances on the map
+    ruler: Ruler,
 }
 
 impl State {
@@ -484,6 +488,7 @@ impl State {
             location_surface: None,
             grid: Grid::default(),
             slime: SlimeChunks::default(),
+            ruler: Ruler::default(),
         };
 
         Ok(Self {
@@ -559,6 +564,11 @@ impl State {
                 Command::ZoomButtons(on) => ui.zoom_buttons_shown = on,
                 Command::Grid(on) => ui.grid.enabled = on,
                 Command::Slime(on) => ui.slime.shown = on,
+                Command::Ruler(points) if points.is_empty() => ui.ruler.stop(),
+                Command::Ruler(points) => {
+                    ui.ruler.start(None);
+                    ui.ruler.points = points;
+                }
                 Command::GridOverMarkers(on) => ui.grid.over_markers = on,
                 Command::Noise(Some((parameter, opacity))) => {
                     ui.noise[parameter as usize] = Overlay { shown: true, opacity };
@@ -752,8 +762,10 @@ impl State {
     }
 
     fn handle_key(&self, event_loop: &ActiveEventLoop, code: KeyCode, is_pressed: bool) {
-        // a web page isn't closed with a key
-        if let (KeyCode::Escape, true, false) = (code, is_pressed, cfg!(target_arch = "wasm32")) {
+        // a web page isn't closed with a key, and while measuring Esc only ends that
+        if let (KeyCode::Escape, true, false, false) =
+            (code, is_pressed, cfg!(target_arch = "wasm32"), self.ui.ruler.active)
+        {
             event_loop.exit()
         }
     }
@@ -785,6 +797,10 @@ impl Ui {
             self.sample_height = dimension.default_height();
         }
         self.seed = seed;
+        if dimension != self.dimension {
+            // the points are in the other dimension's blocks
+            self.ruler.points.clear();
+        }
         self.dimension = dimension;
         self.biome_source = Arc::new(dimension.biome_source(seed));
         self.reset_tiles();
@@ -838,7 +854,7 @@ impl Ui {
         }
         egui::CentralPanel::no_frame().show(root, |ui| {
             let map = self.map.show(ui, &mut self.tiles, settings, &mut self.quads);
-            self.show_overlays(ui);
+            self.show_overlays(ui, &map);
             self.map_menu(&map);
         });
         if !self.panel {

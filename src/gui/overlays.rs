@@ -1,4 +1,5 @@
 //! What is painted over the map: slime chunks, structure markers, the distance grid and the zoom buttons.
+//! The ruler is in `ruler.rs`.
 
 use std::collections::HashMap;
 
@@ -458,7 +459,7 @@ fn markers_that_fit(min: [f64; 2], max: [f64; 2], distance: f64) -> f64 {
 }
 
 /// `1 500` for 1500: coordinates get long and these are read at a glance.
-fn format_blocks(blocks: i64) -> String {
+pub(super) fn format_blocks(blocks: i64) -> String {
     let digits = blocks.abs().to_string();
     let mut out = String::new();
     if blocks < 0 {
@@ -475,7 +476,7 @@ fn format_blocks(blocks: i64) -> String {
 
 impl Ui {
     /// Paints everything over the map, and asks for what is needed of it. `ui` covers the map.
-    pub(super) fn show_overlays(&mut self, ui: &mut egui::Ui) {
+    pub(super) fn show_overlays(&mut self, ui: &mut egui::Ui, map: &egui::Response) {
         let rect = ui.max_rect();
         if self.slime.shown && self.dimension == Dimension::Overworld {
             self.paint_slime(ui, rect);
@@ -491,6 +492,8 @@ impl Ui {
         if self.zoom_buttons_shown {
             self.zoom_buttons(ui, rect);
         }
+        self.ruler
+            .show(ui, rect, &self.map, map, self.dimension, self.zoom_buttons_shown);
     }
 
     fn update_structures(&mut self, ctx: &egui::Context, rect: Rect) {
